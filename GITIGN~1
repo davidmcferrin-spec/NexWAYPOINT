@@ -1,0 +1,10 @@
+.env
+vendor/
+.phpunit.result.cache
+storage/logs/*.log
+storage/cache/*
+storage/uploads/hotel_photos/*
+storage/*.sqlite
+!storage/logs/.gitkeep
+!storage/cache/.gitkeep
+!storage/uploads/hotel_photos/.gitkeep

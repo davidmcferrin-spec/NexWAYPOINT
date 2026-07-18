@@ -1,0 +1,31 @@
+{
+    "name": "nexwaypont/nexwaypont",
+    "description": "Hotel-stay tracker + team travel dashboard for corporate travelers.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1",
+        "ext-pdo": "*",
+        "ext-imap": "*",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "NexWaypont\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "NexWaypont\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --testdox",
+        "poll": "php cron/poll_mail.php"
+    }
+}

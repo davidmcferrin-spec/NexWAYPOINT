@@ -1,0 +1,52 @@
+# Copy to .env and fill in real values. Never commit .env.
+
+# --- App ---------------------------------------------------------------
+APP_TIMEZONE=America/Chicago
+LOG_FILE=/absolute/path/to/NexWAYPONT/storage/logs/app.log
+LOG_LEVEL=info
+SESSION_SECRET=change_me_to_a_long_random_string
+
+# --- Database ------------------------------------------------------------
+# DB_DRIVER=mysql for production (DreamHost), DB_DRIVER=sqlite for local dev.
+DB_DRIVER=mysql
+DB_HOST=mysql.yourdomain.com
+DB_PORT=3306
+DB_NAME=nexwaypont
+DB_USER=nexwaypont_app
+DB_PASSWORD=change_me
+DB_CHARSET=utf8mb4
+# Only used when DB_DRIVER=sqlite:
+DB_SQLITE_PATH=/absolute/path/to/NexWAYPONT/storage/nexwaypont.sqlite
+
+# --- Mail ingestion: DreamHost IMAP (v1 source) --------------------------
+MAIL_SOURCE=dreamhost_imap
+IMAP_HOST=imap.dreamhost.com
+IMAP_PORT=993
+IMAP_ENCRYPTION=ssl
+IMAP_USERNAME=travel@yourdomain.com
+IMAP_PASSWORD=change_me
+IMAP_INBOX_FOLDER=INBOX
+IMAP_PROCESSED_FOLDER=INBOX.Processed
+IMAP_FAILED_FOLDER=INBOX.ParseFailed
+MAIL_DELETE_ON_SUCCESS=true
+MAIL_MIN_PARSE_CONFIDENCE=0.75
+
+# --- Mail ingestion: future sources (not implemented yet, see README) ----
+# GMAIL_CLIENT_ID=
+# GMAIL_CLIENT_SECRET=
+# GMAIL_REFRESH_TOKEN=
+# M365_CLIENT_ID=
+# M365_CLIENT_SECRET=
+# M365_TENANT_ID=
+
+# --- FlightAware AeroAPI --------------------------------------------------
+FLIGHTAWARE_API_KEY=change_me
+FLIGHTAWARE_BASE_URL=https://aeroapi.flightaware.com/aeroapi
+FLIGHTAWARE_RATE_LIMIT_PER_MINUTE=10
+FLIGHTAWARE_CACHE_MINUTES=10
+FLIGHTAWARE_MONTHLY_BUDGET_USD=25
+FLIGHTAWARE_RATELIMIT_STATE_FILE=/absolute/path/to/NexWAYPONT/storage/cache/flightaware_ratelimit.json
+
+# --- Hotel photo uploads --------------------------------------------------
+HOTEL_PHOTO_UPLOAD_DIR=/absolute/path/to/NexWAYPONT/storage/uploads/hotel_photos
+HOTEL_PHOTO_MAX_BYTES=5242880
