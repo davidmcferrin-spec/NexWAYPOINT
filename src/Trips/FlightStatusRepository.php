@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Trips;
+namespace NexWaypoint\Trips;
 
-use NexWaypont\Core\Database;
+use NexWaypoint\Core\Database;
 
 /**
  * Upsert access to flight_status (one row per segment) and aeroapi_usage_log.

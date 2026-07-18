@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
 /**
  * Classifies an inbound email as flight / hotel / train / car / unknown

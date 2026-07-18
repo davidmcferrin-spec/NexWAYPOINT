@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Trips;
+namespace NexWaypoint\Trips;
 
-use NexWaypont\Core\Database;
+use NexWaypoint\Core\Database;
 
 final class NotificationRepository
 {

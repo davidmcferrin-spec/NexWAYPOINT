@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
 /**
- * Contract for any inbox NexWAYPONT polls for forwarded confirmations.
+ * Contract for any inbox NexWAYPOINT polls for forwarded confirmations.
  * v1 ships DreamHostImapSource. GmailApiSource and M365GraphSource
  * implement this interface but throw NotImplementedException -- see
  * README roadmap for what's needed to bring them online.

@@ -1,4 +1,4 @@
-# NexWAYPONT
+# NexWAYPOINT
 
 A self-hosted hotel-stay tracker and team travel dashboard for corporate
 travelers. Built in plain PHP + MySQL/SQLite by design (no framework, no
@@ -80,30 +80,42 @@ flagged here instead of silently guessed.
 
 ## Setup
 
-1. Copy `.env.example` to `.env` and fill in every value. Never commit `.env`.
-2. Create the database and load the schema:
-   ```bash
-   # MySQL
-   mysql -u root -p -e "CREATE DATABASE nexwaypont CHARACTER SET utf8mb4"
-   mysql -u root -p nexwaypont < database/schema.sql
+On a Debian/Ubuntu or DreamHost VPS, create an empty MySQL database and
+database user in the hosting panel, then run:
 
-   # or SQLite (local/offline dev)
-   sqlite3 storage/nexwaypont.sqlite < database/schema.sqlite.sql
-   ```
-3. Create your first user manually (no signup UI in v1):
-   ```php
-   <?php
-   require 'config/bootstrap.php';
-   $repo = new \NexWaypont\Users\UserRepository($GLOBALS['app']['db'], $GLOBALS['app']['logger']);
-   $repo->create('dmcferrin', 'david.mcferrin@gmail.com', 'a-strong-password', 'David Mcferrin', 'manager', null);
-   ```
-4. Point Nginx/Apache's document root at `public/`. Everything outside
-   `public/` (config, src, storage) should NOT be web-accessible.
-5. Set up cron:
-   ```
-   */10 * * * * php /path/to/NexWAYPONT/cron/poll_mail.php >> /path/to/NexWAYPONT/storage/logs/cron.log 2>&1
-   */10 * * * * php /path/to/NexWAYPONT/cron/enrich_flights.php >> /path/to/NexWAYPONT/storage/logs/cron.log 2>&1
-   ```
+```bash
+git clone <repository-url> NexWAYPOINT
+cd NexWAYPOINT
+bash setup.sh
+```
+
+The interactive installer can install PHP 8.1+, required extensions,
+MariaDB client, and Composer when `apt-get` and root/`sudo` are available.
+On managed DreamHost plans without package privileges, it verifies the PHP
+environment supplied by DreamHost instead. It then:
+
+- creates `.env` without overwriting an existing one;
+- generates the session secret and fills absolute storage paths;
+- prompts for MySQL/SQLite, optional IMAP, and optional FlightAware settings;
+- creates writable storage directories and installs the database schema;
+- securely creates the first local user; and
+- optionally installs the configured mail/flight cron jobs.
+
+It is safe to rerun. Use `bash setup.sh --help` for options. To add another
+local user later:
+
+```bash
+php scripts/create_user.php
+```
+
+Finally, point Nginx/Apache's document root at `public/` and require HTTPS.
+Everything outside `public/` (config, src, storage) must not be web-accessible.
+If cron must be configured through the DreamHost panel, use:
+
+```cron
+*/10 * * * * php /path/to/NexWAYPOINT/cron/poll_mail.php >> /path/to/NexWAYPOINT/storage/logs/cron.log 2>&1
+*/10 * * * * php /path/to/NexWAYPOINT/cron/enrich_flights.php >> /path/to/NexWAYPOINT/storage/logs/cron.log 2>&1
+```
 
 ### DreamHost IMAP one-time setup
 
@@ -113,7 +125,7 @@ flagged here instead of silently guessed.
    `IMAP_ENCRYPTION=ssl`, `IMAP_USERNAME`/`IMAP_PASSWORD` in `.env`.
 3. Have each teammate set up mail forwarding (or a filter that forwards)
    confirmation emails from their own inbox to that address. `MailPoller`
-   attributes each email to a NexWAYPONT user by matching the `From:`
+   attributes each email to a NexWAYPOINT user by matching the `From:`
    address against `users.email` -- so the forwarded copy's From header
    needs to be the teammate's own address (true for a normal "Forward").
 4. `IMAP_PROCESSED_FOLDER`/`IMAP_FAILED_FOLDER` are created automatically
@@ -138,7 +150,7 @@ See `.env.example` for the full list with inline comments. Highlights:
 ## How to add a new parser module
 
 1. Create `src/Mail/Parsers/YourAirlineParser.php` extending
-   `NexWaypont\Mail\ParserBase` and implementing `parse(EmailMessage $message): ?array`.
+   `NexWaypoint\Mail\ParserBase` and implementing `parse(EmailMessage $message): ?array`.
    Use `$this->extractPattern()` / `extractFirstMatch()` / `parseFlexibleDate()`
    from the base class -- they track confidence automatically.
 2. Add the sender's domain to `EmailConfirmationDetector::SENDER_DOMAINS`

@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Users;
+namespace NexWaypoint\Users;
 
-use NexWaypont\Core\Database;
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Database;
+use NexWaypoint\Core\Logger;
 
 final class UserRepository
 {

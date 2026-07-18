@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Core;
+namespace NexWaypoint\Core;
 
 /**
  * Minimal per-session CSRF token helper. Every state-changing form must
@@ -11,7 +11,7 @@ namespace NexWaypont\Core;
  */
 final class Csrf
 {
-    private const SESSION_KEY = 'nexwaypont_csrf_token';
+    private const SESSION_KEY = 'nexwaypoint_csrf_token';
 
     private static function ensureSessionStarted(): void
     {

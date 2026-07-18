@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Visibility;
+namespace NexWaypoint\Visibility;
 
-use NexWaypont\Users\UserRepository;
+use NexWaypoint\Users\UserRepository;
 
 /**
  * Resolves what fields of a trip (destination_city, travel_dates,
@@ -12,7 +12,7 @@ use NexWaypont\Users\UserRepository;
  * a requesting user may see for a given subject (data owner), based on org
  * hierarchy direction + explicit overrides.
  *
- * Direction, per NexWAYPONT's org model (Manager -> Team Member):
+ * Direction, per NexWAYPOINT's org model (Manager -> Team Member):
  *   SELF        subject == requester                    -> all fields
  *   TOP_DOWN    requester is subject's manager           -> city + dates only by default
  *   BOTTOM_UP   requester is subordinate of subject       -> all fields by default

@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Tests;
+namespace NexWaypoint\Tests;
 
-use NexWaypont\Core\Database;
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Database;
+use NexWaypoint\Core\Logger;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
  * database/schema.sqlite.sql for every test, so each test is fully
  * isolated with no shared state or fixture files.
  */
-abstract class NexWaypontTestCase extends TestCase
+abstract class NexWaypointTestCase extends TestCase
 {
     protected Database $db;
     protected Logger $logger;
@@ -30,13 +30,13 @@ abstract class NexWaypontTestCase extends TestCase
         ]);
         $pdo->exec('PRAGMA foreign_keys = ON');
 
-        $schema = file_get_contents(NEXWAYPONT_ROOT . '/database/schema.sqlite.sql');
+        $schema = file_get_contents(NEXWAYPOINT_ROOT . '/database/schema.sqlite.sql');
         if ($schema === false) {
             throw new \RuntimeException('Could not read schema.sqlite.sql for tests.');
         }
         $pdo->exec($schema);
 
-        $this->logger = new Logger(sys_get_temp_dir() . '/nexwaypont_test.log');
+        $this->logger = new Logger(sys_get_temp_dir() . '/nexwaypoint_test.log');
         $this->db = Database::fromPdo($pdo, 'sqlite', $this->logger);
     }
 

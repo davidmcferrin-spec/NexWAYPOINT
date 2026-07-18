@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Hotels;
+namespace NexWaypoint\Hotels;
 
 /**
  * Value object for a single hotel_stays row. Immutable by convention --

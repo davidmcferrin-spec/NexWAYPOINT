@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Core;
+namespace NexWaypoint\Core;
 
 /**
  * Structured JSON-lines file logger (PHP has no structlog; this is the
@@ -80,7 +80,7 @@ final class Logger
         // request/cron job -- suppress and fall back to error_log().
         $written = @file_put_contents($this->logFile, $line, FILE_APPEND | LOCK_EX);
         if ($written === false) {
-            error_log('[NexWAYPONT] failed to write log file, falling back: ' . $line);
+            error_log('[NexWAYPOINT] failed to write log file, falling back: ' . $line);
         }
     }
 }

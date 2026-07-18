@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Trips;
+namespace NexWaypoint\Trips;
 
-use NexWaypont\Core\Env;
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Env;
+use NexWaypoint\Core\Logger;
 
 /**
  * FlightAware AeroAPI client (cURL-based; the project has no HTTP client
@@ -36,7 +36,7 @@ final class FlightAwareClient
         $this->rateLimitPerMinute = Env::getInt('FLIGHTAWARE_RATE_LIMIT_PER_MINUTE', 10);
         $this->rateLimitStateFile = Env::get(
             'FLIGHTAWARE_RATELIMIT_STATE_FILE',
-            sys_get_temp_dir() . '/nexwaypont_flightaware_ratelimit.json'
+            sys_get_temp_dir() . '/nexwaypoint_flightaware_ratelimit.json'
         );
     }
 

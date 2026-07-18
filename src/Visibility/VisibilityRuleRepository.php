@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Visibility;
+namespace NexWaypoint\Visibility;
 
-use NexWaypont\Core\Database;
+use NexWaypoint\Core\Database;
 
 final class VisibilityRuleRepository
 {

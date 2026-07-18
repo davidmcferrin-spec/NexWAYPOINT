@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Trips;
+namespace NexWaypoint\Trips;
 
 final class Trip
 {

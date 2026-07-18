@@ -7,12 +7,12 @@ declare(strict_types=1);
  * for the app itself) and the test-support base class.
  */
 
-define('NEXWAYPONT_ROOT', dirname(__DIR__));
+define('NEXWAYPOINT_ROOT', dirname(__DIR__));
 
 spl_autoload_register(static function (string $class): void {
     $map = [
-        'NexWaypont\\' => NEXWAYPONT_ROOT . '/src/',
-        'NexWaypont\\Tests\\' => NEXWAYPONT_ROOT . '/tests/',
+        'NexWaypoint\\' => NEXWAYPOINT_ROOT . '/src/',
+        'NexWaypoint\\Tests\\' => NEXWAYPOINT_ROOT . '/tests/',
     ];
     foreach ($map as $prefix => $baseDir) {
         if (str_starts_with($class, $prefix)) {

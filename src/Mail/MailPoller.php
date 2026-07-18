@@ -2,15 +2,15 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
-use NexWaypont\Core\Env;
-use NexWaypont\Core\Logger;
-use NexWaypont\Hotels\HotelStay;
-use NexWaypont\Hotels\HotelStayRepository;
-use NexWaypont\Mail\Parsers\GenericHotelConfirmationParser;
-use NexWaypont\Trips\NotificationRepository;
-use NexWaypont\Users\UserRepository;
+use NexWaypoint\Core\Env;
+use NexWaypoint\Core\Logger;
+use NexWaypoint\Hotels\HotelStay;
+use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Mail\Parsers\GenericHotelConfirmationParser;
+use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Users\UserRepository;
 
 /**
  * Orchestrates one polling pass: fetch unseen mail -> detect type -> match
@@ -95,7 +95,7 @@ final class MailPoller
         $owner = $this->users->findByEmail($message->fromAddress);
 
         if ($owner === null) {
-            $this->fail($message, $detection['type'], 'No NexWAYPONT user matches From: address ' . $message->fromAddress);
+            $this->fail($message, $detection['type'], 'No NexWAYPOINT user matches From: address ' . $message->fromAddress);
             return false;
         }
 

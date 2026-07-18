@@ -4,26 +4,26 @@ declare(strict_types=1);
 
 /**
  * Run every 5-10 minutes via cron (or manually for testing):
- *   php-cli /path/to/NexWAYPONT/cron/poll_mail.php
+ *   php-cli /path/to/NexWAYPOINT/cron/poll_mail.php
  *
  * Also invocable directly for manual testing -- see README "How to run the
  * poller manually for testing".
  */
 
-use NexWaypont\Core\Env;
-use NexWaypont\Hotels\HotelStayRepository;
-use NexWaypont\Mail\DreamHostImapSource;
-use NexWaypont\Mail\EmailConfirmationDetector;
-use NexWaypont\Mail\GmailApiSource;
-use NexWaypont\Mail\M365GraphSource;
-use NexWaypont\Mail\MailPoller;
-use NexWaypont\Mail\MailSourceInterface;
-use NexWaypont\Mail\ParseLogRepository;
-use NexWaypont\Trips\NotificationRepository;
-use NexWaypont\Users\UserRepository;
+use NexWaypoint\Core\Env;
+use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Mail\DreamHostImapSource;
+use NexWaypoint\Mail\EmailConfirmationDetector;
+use NexWaypoint\Mail\GmailApiSource;
+use NexWaypoint\Mail\M365GraphSource;
+use NexWaypoint\Mail\MailPoller;
+use NexWaypoint\Mail\MailSourceInterface;
+use NexWaypoint\Mail\ParseLogRepository;
+use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__) . '/config/bootstrap.php';
-/** @var \NexWaypont\Core\Logger $logger */
+/** @var \NexWaypoint\Core\Logger $logger */
 $logger = $app['logger'];
 $db = $app['db'];
 

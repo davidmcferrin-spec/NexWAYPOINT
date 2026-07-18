@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Application bootstrap. Included by every entry point (public/index.php,
  * cron/*.php, scripts/*.php, tests/bootstrap.php).
  *
- * Zero-Composer-dependency by design: NexWAYPONT runs on shared hosting
+ * Zero-Composer-dependency by design: NexWAYPOINT runs on shared hosting
  * (DreamHost) where `composer install` may not be practical mid-trip, so a
  * manual PSR-4-ish autoloader is used instead of vendor/autoload.php.
  * Composer is still used for *dev* tooling (PHPUnit) -- see composer.json.
@@ -15,34 +15,34 @@ declare(strict_types=1);
 error_reporting(E_ALL);
 ini_set('display_errors', '0'); // never leak errors to output; log them instead
 
-define('NEXWAYPONT_ROOT', dirname(__DIR__));
+define('NEXWAYPOINT_ROOT', dirname(__DIR__));
 
-// --- Autoloader: NexWaypont\Foo\Bar -> src/Foo/Bar.php ---------------------
+// --- Autoloader: NexWaypoint\Foo\Bar -> src/Foo/Bar.php ---------------------
 spl_autoload_register(static function (string $class): void {
-    $prefix = 'NexWaypont\\';
+    $prefix = 'NexWaypoint\\';
     if (!str_starts_with($class, $prefix)) {
         return;
     }
     $relative = substr($class, strlen($prefix));
-    $path = NEXWAYPONT_ROOT . '/src/' . str_replace('\\', '/', $relative) . '.php';
+    $path = NEXWAYPOINT_ROOT . '/src/' . str_replace('\\', '/', $relative) . '.php';
     if (is_file($path)) {
         require $path;
     }
 });
 
-use NexWaypont\Core\Env;
-use NexWaypont\Core\Logger;
-use NexWaypont\Core\Database;
-use NexWaypont\Core\Auth;
-use NexWaypont\Users\UserRepository;
+use NexWaypoint\Core\Env;
+use NexWaypoint\Core\Logger;
+use NexWaypoint\Core\Database;
+use NexWaypoint\Core\Auth;
+use NexWaypoint\Users\UserRepository;
 
-$envPath = getenv('NEXWAYPONT_ENV_PATH') ?: NEXWAYPONT_ROOT . '/.env';
+$envPath = getenv('NEXWAYPOINT_ENV_PATH') ?: NEXWAYPOINT_ROOT . '/.env';
 Env::load($envPath);
 
 date_default_timezone_set(Env::get('APP_TIMEZONE', 'America/Chicago'));
 
 $logger = new Logger(
-    Env::get('LOG_FILE', NEXWAYPONT_ROOT . '/storage/logs/app.log'),
+    Env::get('LOG_FILE', NEXWAYPOINT_ROOT . '/storage/logs/app.log'),
     Env::get('LOG_LEVEL', 'info')
 );
 

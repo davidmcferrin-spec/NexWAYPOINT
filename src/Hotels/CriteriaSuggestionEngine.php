@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Hotels;
+namespace NexWaypoint\Hotels;
 
 /**
  * Answers "what criteria might I be missing?" for the hotel tracker.

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
 /**
  * Shared regex-extraction helpers for concrete parsers. Confidence scoring

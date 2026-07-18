@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
-use NexWaypont\Core\Env;
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Env;
+use NexWaypoint\Core\Logger;
 
 /**
  * IMAP mail source for a DreamHost-hosted dump mailbox (Dovecot IMAP).

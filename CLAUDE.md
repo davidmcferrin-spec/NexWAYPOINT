@@ -1,4 +1,4 @@
-# CLAUDE.md -- NexWAYPONT project notes
+# CLAUDE.md -- NexWAYPOINT project notes
 
 This file is for whichever Claude session picks this project up next.
 Keep it current: update the Status and Decisions sections whenever scope
@@ -21,7 +21,10 @@ FlightAware AeroAPI client with rate limiting + caching, trip status
 engine, alert evaluator + notifications, and the visibility/sharing
 engine covering all five directions with override precedence. Basic
 server-rendered PHP UI exists for login, hotel list/add/view, dashboard,
-and sharing settings.
+and sharing settings. VPS deployment is bootstrapped by an idempotent
+`setup.sh` that installs/verifies dependencies, creates `.env`, initializes
+MySQL or SQLite, creates the first local user, and configures eligible cron
+jobs. Additional users can be created with `scripts/create_user.php`.
 
 **Not started:** flight/train/car email parsers (only hotel), Azure AD
 SSO, map view, PWA/offline, push notifications, hotel-stay edit page,
@@ -66,6 +69,10 @@ All PHP files pass `php -l`.
 - **Rate limiting for FlightAware is a file-backed token bucket**, not
   in-memory, because each cron invocation is a fresh PHP process with no
   persistent state between runs.
+- **VPS setup is interactive and DB-driver-aware.** `setup.sh` supports both
+  apt-capable Debian/Ubuntu hosts and managed DreamHost environments without
+  root. It never overwrites an existing `.env`, skips an existing schema, and
+  only installs cron jobs for services whose credentials are configured.
 
 ## Things to watch out for
 

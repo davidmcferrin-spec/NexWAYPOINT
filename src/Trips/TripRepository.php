@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Trips;
+namespace NexWaypoint\Trips;
 
-use NexWaypont\Core\Database;
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Database;
+use NexWaypoint\Core\Logger;
 
 final class TripRepository
 {

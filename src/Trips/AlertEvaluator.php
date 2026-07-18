@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Trips;
+namespace NexWaypoint\Trips;
 
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Logger;
 
 /**
  * Compares the flight_status row before/after a FlightAware enrichment call

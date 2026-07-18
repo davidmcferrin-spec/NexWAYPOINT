@@ -1,5 +1,5 @@
 -- ============================================================================
--- NexWAYPONT database schema (MySQL 8.0+ / MariaDB 10.5+)
+-- NexWAYPOINT database schema (MySQL 8.0+ / MariaDB 10.5+)
 -- Charset utf8mb4, InnoDB for FK + transaction support.
 -- SQLite-compatible variant: database/schema.sqlite.sql (local dev / offline testing)
 -- ============================================================================

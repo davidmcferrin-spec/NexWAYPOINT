@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Core;
+namespace NexWaypoint\Core;
 
 /**
  * PDO wrapper supporting both MySQL (production/DreamHost) and SQLite

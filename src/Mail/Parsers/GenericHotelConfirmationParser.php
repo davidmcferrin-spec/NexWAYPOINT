@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail\Parsers;
+namespace NexWaypoint\Mail\Parsers;
 
-use NexWaypont\Mail\EmailMessage;
-use NexWaypont\Mail\ParserBase;
+use NexWaypoint\Mail\EmailMessage;
+use NexWaypoint\Mail\ParserBase;
 
 /**
  * Brand-agnostic hotel confirmation parser. Deliberately generic rather

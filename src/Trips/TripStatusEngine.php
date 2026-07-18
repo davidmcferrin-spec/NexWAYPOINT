@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Trips;
+namespace NexWaypoint\Trips;
 
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Logger;
 
 /**
  * Resolves a single user's current status string for the dashboard:

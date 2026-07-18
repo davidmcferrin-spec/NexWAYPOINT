@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Tests;
+namespace NexWaypoint\Tests;
 
-use NexWaypont\Users\UserRepository;
-use NexWaypont\Visibility\VisibilityEngine;
-use NexWaypont\Visibility\VisibilityRuleRepository;
+use NexWaypoint\Users\UserRepository;
+use NexWaypoint\Visibility\VisibilityEngine;
+use NexWaypoint\Visibility\VisibilityRuleRepository;
 
-final class VisibilityEngineTest extends NexWaypontTestCase
+final class VisibilityEngineTest extends NexWaypointTestCase
 {
     private function makeEngine(): VisibilityEngine
     {

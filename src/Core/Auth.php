@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Core;
+namespace NexWaypoint\Core;
 
-use NexWaypont\Users\User;
-use NexWaypont\Users\UserRepository;
+use NexWaypoint\Users\User;
+use NexWaypoint\Users\UserRepository;
 
 /**
  * Session-based local authentication (username + password_hash). Azure AD /
@@ -15,7 +15,7 @@ use NexWaypont\Users\UserRepository;
  */
 final class Auth
 {
-    private const SESSION_KEY = 'nexwaypont_user_id';
+    private const SESSION_KEY = 'nexwaypoint_user_id';
 
     public function __construct(private readonly UserRepository $users)
     {

@@ -1,5 +1,5 @@
 {
-    "name": "nexwaypont/nexwaypont",
+    "name": "nexwaypoint/nexwaypoint",
     "description": "Hotel-stay tracker + team travel dashboard for corporate travelers.",
     "type": "project",
     "license": "proprietary",
@@ -16,12 +16,12 @@
     },
     "autoload": {
         "psr-4": {
-            "NexWaypont\\": "src/"
+            "NexWaypoint\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "NexWaypont\\Tests\\": "tests/"
+            "NexWaypoint\\Tests\\": "tests/"
         }
     },
     "scripts": {

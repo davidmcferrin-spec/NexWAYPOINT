@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-use NexWaypont\Core\Csrf;
-use NexWaypont\Core\Env;
-use NexWaypont\Hotels\HotelStay;
-use NexWaypont\Hotels\HotelStayRepository;
+use NexWaypoint\Core\Csrf;
+use NexWaypoint\Core\Env;
+use NexWaypoint\Hotels\HotelStay;
+use NexWaypoint\Hotels\HotelStayRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
@@ -121,12 +121,12 @@ if (isset($_GET['check_name'])) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>NexWAYPONT &middot; Log a Hotel Stay</title>
+    <title>NexWAYPOINT &middot; Log a Hotel Stay</title>
     <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <nav class="navbar">
-    <div><a href="/dashboard/index.php">NexWAYPONT</a></div>
+    <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div>
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/hotels/list.php">Hotels</a>

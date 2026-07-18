@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Hotels;
+namespace NexWaypoint\Hotels;
 
-use NexWaypont\Core\Database;
-use NexWaypont\Core\Logger;
+use NexWaypoint\Core\Database;
+use NexWaypoint\Core\Logger;
 
 /**
  * CRUD access for hotel_stays (+ hotel_photos). All writes are validated

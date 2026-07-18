@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use NexWaypont\Hotels\HotelStayRepository;
-use NexWaypont\Hotels\CriteriaSuggestionEngine;
+use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Hotels\CriteriaSuggestionEngine;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
@@ -18,12 +18,12 @@ $noteThemes = $engine->analyzeNotesForRecurringThemes($stays);
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>NexWAYPONT &middot; Hotel Stays</title>
+    <title>NexWAYPOINT &middot; Hotel Stays</title>
     <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <nav class="navbar">
-    <div><a href="/dashboard/index.php">NexWAYPONT</a></div>
+    <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div>
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/hotels/list.php">Hotels</a>

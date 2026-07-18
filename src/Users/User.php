@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Users;
+namespace NexWaypoint\Users;
 
 final class User
 {

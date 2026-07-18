@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
-use NexWaypont\Core\Database;
+use NexWaypoint\Core\Database;
 
 /**
  * Audit trail for inbound mail (parse_log table). Deliberately never

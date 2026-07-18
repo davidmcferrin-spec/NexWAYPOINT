@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Visibility;
+namespace NexWaypoint\Visibility;
 
 final class VisibilityRule
 {

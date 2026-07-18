@@ -4,21 +4,21 @@ declare(strict_types=1);
 
 /**
  * Run every 10 minutes via cron:
- *   php-cli /path/to/NexWAYPONT/cron/enrich_flights.php
+ *   php-cli /path/to/NexWAYPOINT/cron/enrich_flights.php
  *
  * Sweeps all non-terminal flight segments departing within 48 hours,
  * refreshes them from FlightAware (respecting the per-segment cache
  * window), and fires alerts for anything that changed materially.
  */
 
-use NexWaypont\Trips\AlertEvaluator;
-use NexWaypont\Trips\FlightAwareClient;
-use NexWaypont\Trips\FlightStatusRepository;
-use NexWaypont\Trips\NotificationRepository;
-use NexWaypont\Trips\TripRepository;
+use NexWaypoint\Trips\AlertEvaluator;
+use NexWaypoint\Trips\FlightAwareClient;
+use NexWaypoint\Trips\FlightStatusRepository;
+use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Trips\TripRepository;
 
 $app = require dirname(__DIR__) . '/config/bootstrap.php';
-/** @var \NexWaypont\Core\Logger $logger */
+/** @var \NexWaypoint\Core\Logger $logger */
 $logger = $app['logger'];
 $db = $app['db'];
 

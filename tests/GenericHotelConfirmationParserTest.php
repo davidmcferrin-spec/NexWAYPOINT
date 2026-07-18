@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Tests;
+namespace NexWaypoint\Tests;
 
-use NexWaypont\Mail\EmailMessage;
-use NexWaypont\Mail\Parsers\GenericHotelConfirmationParser;
+use NexWaypoint\Mail\EmailMessage;
+use NexWaypoint\Mail\Parsers\GenericHotelConfirmationParser;
 use PHPUnit\Framework\TestCase;
 
 /**

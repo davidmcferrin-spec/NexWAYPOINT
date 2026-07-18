@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Core;
+namespace NexWaypoint\Core;
 
 /**
  * Minimal, dependency-free .env loader.
  *
- * Deliberately hand-rolled instead of vlucas/phpdotenv: NexWAYPONT targets
+ * Deliberately hand-rolled instead of vlucas/phpdotenv: NexWAYPOINT targets
  * shared hosting (DreamHost) and offline/on-the-road maintenance, so the
  * runtime has zero Composer dependencies. Supports KEY=VALUE lines,
  * '#' comments, blank lines, and single/double-quoted values.

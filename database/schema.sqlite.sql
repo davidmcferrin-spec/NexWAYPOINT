@@ -1,5 +1,5 @@
 -- ============================================================================
--- NexWAYPONT database schema (SQLite 3.35+)
+-- NexWAYPOINT database schema (SQLite 3.35+)
 -- Used for local/offline development and the automated test suite.
 -- Mirrors database/schema.sql (MySQL). SQLite has no native ENUM/CHECK-on-
 -- range-only sugar the same way, so enums are TEXT + CHECK constraints and

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Core;
+namespace NexWaypoint\Core;
 
 /**
  * Thrown by interface implementations that exist for contract/shape reasons

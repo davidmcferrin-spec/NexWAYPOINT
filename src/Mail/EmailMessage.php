@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
 /**
  * In-memory representation of one inbound email. NEVER persisted as-is --

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-/** @var array{logger: \NexWaypont\Core\Logger, db: \NexWaypont\Core\Database, users: \NexWaypont\Users\UserRepository, auth: \NexWaypont\Core\Auth} $app */
+/** @var array{logger: \NexWaypoint\Core\Logger, db: \NexWaypoint\Core\Database, users: \NexWaypoint\Users\UserRepository, auth: \NexWaypoint\Core\Auth} $app */
 $app = require dirname(__DIR__) . '/config/bootstrap.php';
 
 $error = null;
@@ -26,12 +26,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>NexWAYPONT &middot; Sign in</title>
+    <title>NexWAYPOINT &middot; Sign in</title>
     <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body class="auth-page">
 <main class="auth-box">
-    <h1>NexWAYPONT</h1>
+    <h1>NexWAYPOINT</h1>
     <?php if ($error !== null): ?>
         <p class="alert alert-error"><?= htmlspecialchars($error, ENT_QUOTES) ?></p>
     <?php endif; ?>

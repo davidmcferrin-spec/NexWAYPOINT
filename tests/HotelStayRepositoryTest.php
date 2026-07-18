@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Tests;
+namespace NexWaypoint\Tests;
 
-use NexWaypont\Hotels\HotelStay;
-use NexWaypont\Hotels\HotelStayRepository;
+use NexWaypoint\Hotels\HotelStay;
+use NexWaypoint\Hotels\HotelStayRepository;
 
-final class HotelStayRepositoryTest extends NexWaypontTestCase
+final class HotelStayRepositoryTest extends NexWaypointTestCase
 {
     private function makeStay(int $userId, array $overrides = []): HotelStay
     {

@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-use NexWaypont\Core\Csrf;
-use NexWaypont\Users\UserRepository;
-use NexWaypont\Visibility\VisibilityEngine;
-use NexWaypont\Visibility\VisibilityRuleRepository;
+use NexWaypoint\Core\Csrf;
+use NexWaypoint\Users\UserRepository;
+use NexWaypoint\Visibility\VisibilityEngine;
+use NexWaypoint\Visibility\VisibilityRuleRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
@@ -68,12 +68,12 @@ $panels = [
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>NexWAYPONT &middot; Sharing Settings</title>
+    <title>NexWAYPOINT &middot; Sharing Settings</title>
     <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <nav class="navbar">
-    <div><a href="/dashboard/index.php">NexWAYPONT</a></div>
+    <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div>
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/hotels/list.php">Hotels</a>

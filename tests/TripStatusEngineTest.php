@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Tests;
+namespace NexWaypoint\Tests;
 
-use NexWaypont\Trips\Trip;
-use NexWaypont\Trips\TripRepository;
-use NexWaypont\Trips\TripSegment;
-use NexWaypont\Trips\TripStatusEngine;
+use NexWaypoint\Trips\Trip;
+use NexWaypoint\Trips\TripRepository;
+use NexWaypoint\Trips\TripSegment;
+use NexWaypoint\Trips\TripStatusEngine;
 
-final class TripStatusEngineTest extends NexWaypontTestCase
+final class TripStatusEngineTest extends NexWaypointTestCase
 {
     private function makeTrip(TripRepository $repo, int $ownerId, string $start, string $end): Trip
     {

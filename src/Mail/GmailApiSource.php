@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace NexWaypont\Mail;
+namespace NexWaypoint\Mail;
 
-use NexWaypont\Core\NotImplementedException;
+use NexWaypoint\Core\NotImplementedException;
 
 /**
  * Future mail source: Gmail API (OAuth2 refresh token, gmail.modify scope).
