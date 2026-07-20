@@ -79,23 +79,70 @@ final class TripStatusEngineTest extends NexWaypointTestCase
         self::assertStringContainsString('In Flight', $result['label']);
     }
 
+    public function testPreFlightWithin45MinutesOfDepart(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $depart = new \DateTimeImmutable('2026-08-01 10:00:00');
+        $now = $depart->modify('-30 minutes');
+
+        $trip = $this->makeTrip($tripRepo, $userId, '2026-08-01', '2026-08-01');
+        $this->makeSegment($tripRepo, $trip->id, [
+            'origin' => 'HSV',
+            'destination' => 'DEN',
+            'departDt' => $depart->format('Y-m-d H:i:s'),
+            'arriveDt' => $depart->modify('+3 hours')->format('Y-m-d H:i:s'),
+        ]);
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $result = $engine->resolveForUser($userId, $now);
+
+        self::assertSame('pre_flight', $result['status']);
+        self::assertStringContainsString('Pre-flight', $result['label']);
+        self::assertStringContainsString('HSV', $result['label']);
+    }
+
+    public function testPostFlightWithin45MinutesOfArrive(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $arrive = new \DateTimeImmutable('2026-08-01 13:00:00');
+        $now = $arrive->modify('+20 minutes');
+
+        $trip = $this->makeTrip($tripRepo, $userId, '2026-08-01', '2026-08-01');
+        $this->makeSegment($tripRepo, $trip->id, [
+            'origin' => 'HSV',
+            'destination' => 'DEN',
+            'departDt' => $arrive->modify('-3 hours')->format('Y-m-d H:i:s'),
+            'arriveDt' => $arrive->format('Y-m-d H:i:s'),
+            'status' => 'landed',
+        ]);
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $result = $engine->resolveForUser($userId, $now);
+
+        self::assertSame('post_flight', $result['status']);
+        self::assertStringContainsString('DEN', $result['label']);
+    }
+
     public function testLayoverBetweenTwoSegments(): void
     {
         $userId = $this->insertUser('dave');
         $tripRepo = new TripRepository($this->db, $this->logger);
-        $now = new \DateTimeImmutable('2026-08-01 12:00:00');
+        // Arrive 10:00, next depart 12:00 (2h gap ≤ 3h). After post-flight ends at 10:45.
+        $now = new \DateTimeImmutable('2026-08-01 11:00:00');
 
         $trip = $this->makeTrip($tripRepo, $userId, '2026-08-01', '2026-08-01');
         $this->makeSegment($tripRepo, $trip->id, [
             'origin' => 'ORD', 'destination' => 'DEN',
-            'departDt' => $now->modify('-3 hours')->format('Y-m-d H:i:s'),
-            'arriveDt' => $now->modify('-30 minutes')->format('Y-m-d H:i:s'),
+            'departDt' => '2026-08-01 08:00:00',
+            'arriveDt' => '2026-08-01 10:00:00',
             'status' => 'landed',
         ]);
         $this->makeSegment($tripRepo, $trip->id, [
             'origin' => 'DEN', 'destination' => 'LAX',
-            'departDt' => $now->modify('+30 minutes')->format('Y-m-d H:i:s'),
-            'arriveDt' => $now->modify('+3 hours')->format('Y-m-d H:i:s'),
+            'departDt' => '2026-08-01 12:00:00',
+            'arriveDt' => '2026-08-01 14:00:00',
             'status' => 'scheduled',
         ]);
 
@@ -104,6 +151,112 @@ final class TripStatusEngineTest extends NexWaypointTestCase
 
         self::assertSame('layover', $result['status']);
         self::assertStringContainsString('DEN', $result['label']);
+    }
+
+    public function testLongGapBecomesRemoteAtCity(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        // Arrive 10:00, next depart 16:00 (6h > 3h). Mid-gap after post-flight.
+        $now = new \DateTimeImmutable('2026-08-01 12:00:00');
+
+        $trip = $this->makeTrip($tripRepo, $userId, '2026-08-01', '2026-08-01');
+        $this->makeSegment($tripRepo, $trip->id, [
+            'origin' => 'HSV', 'destination' => 'DEN',
+            'departDt' => '2026-08-01 07:00:00',
+            'arriveDt' => '2026-08-01 10:00:00',
+            'status' => 'landed',
+        ]);
+        $this->makeSegment($tripRepo, $trip->id, [
+            'origin' => 'DEN', 'destination' => 'HSV',
+            'departDt' => '2026-08-01 16:00:00',
+            'arriveDt' => '2026-08-01 19:00:00',
+            'status' => 'scheduled',
+        ]);
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $result = $engine->resolveForUser($userId, $now);
+
+        self::assertSame('remote', $result['status']);
+        self::assertStringContainsString('DEN', $result['label']);
+        self::assertTrue($result['detail']['from_itinerary'] ?? false);
+        self::assertSame('DEN', $result['detail']['location_city']);
+    }
+
+    public function testReturnHomeLegResumesEnRoute(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $now = new \DateTimeImmutable('2026-08-03 17:00:00');
+
+        $trip = $this->makeTrip($tripRepo, $userId, '2026-08-01', '2026-08-03');
+        $this->makeSegment($tripRepo, $trip->id, [
+            'origin' => 'HSV', 'destination' => 'DEN',
+            'departDt' => '2026-08-01 08:00:00',
+            'arriveDt' => '2026-08-01 10:00:00',
+            'status' => 'landed',
+        ]);
+        $this->makeSegment($tripRepo, $trip->id, [
+            'origin' => 'DEN', 'destination' => 'HSV',
+            'departDt' => '2026-08-03 16:00:00',
+            'arriveDt' => '2026-08-03 19:00:00',
+            'status' => 'en_route',
+        ]);
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $result = $engine->resolveForUser($userId, $now);
+
+        self::assertSame('en_route', $result['status']);
+        self::assertStringContainsString('DEN -> HSV', $result['label']);
+    }
+
+    public function testStatusEngineWithImportedMultiLegRoundTrip(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+
+        $tripRepo->upsertItineraryByConfirmation($userId, 'IMP001', [
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'United',
+                'flight_number' => '4821',
+                'origin' => 'HSV',
+                'destination' => 'DEN',
+                'depart_dt' => '2026-08-10 08:00:00',
+                'arrive_dt' => '2026-08-10 10:00:00',
+            ],
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'United',
+                'flight_number' => '1630',
+                'origin' => 'DEN',
+                'destination' => 'LAX',
+                'depart_dt' => '2026-08-10 12:00:00',
+                'arrive_dt' => '2026-08-10 13:30:00',
+            ],
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'United',
+                'flight_number' => '200',
+                'origin' => 'LAX',
+                'destination' => 'HSV',
+                'depart_dt' => '2026-08-14 16:00:00',
+                'arrive_dt' => '2026-08-14 22:00:00',
+            ],
+        ], null, $userId);
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+
+        // Connection layover in DEN (≤3h) after post-flight window.
+        $layover = $engine->resolveForUser($userId, new \DateTimeImmutable('2026-08-10 11:00:00'));
+        self::assertSame('layover', $layover['status']);
+        self::assertStringContainsString('DEN', $layover['label']);
+
+        // Long gap at LAX before return → remote at city.
+        $remote = $engine->resolveForUser($userId, new \DateTimeImmutable('2026-08-12 12:00:00'));
+        self::assertSame('remote', $remote['status']);
+        self::assertSame('LAX', $remote['detail']['location_city']);
+        self::assertTrue($remote['detail']['from_itinerary']);
     }
 
     public function testManualOverrideUsedWhenNoActiveTravel(): void

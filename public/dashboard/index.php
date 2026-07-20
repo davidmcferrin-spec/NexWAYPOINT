@@ -51,7 +51,9 @@ if (!function_exists('statusBadgeClass')) {
     {
         return match ($status) {
             'home', 'office' => 'badge-status-home',
+            'remote' => 'badge-status-travel',
             'delayed', 'cancelled' => 'badge-status-delay',
+            'pre_flight', 'en_route', 'post_flight', 'layover', 'at_hotel' => 'badge-status-travel',
             default => 'badge-status-travel',
         };
     }
@@ -143,7 +145,7 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
         }
 
         $upcomingTrip = null;
-        if (TeamLocationResolver::isAtBaseStatus($status['status'])) {
+        if (TeamLocationResolver::isAtBaseStatus($status['status'], $status['detail'] ?? [])) {
             $upcomingTrip = $upcomingFinder->findVisible($viewerId, $subject->id, 21);
         }
         $resolved = $locationResolver->resolveWithUpcoming(
@@ -384,7 +386,7 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
 
     <h2>Your upcoming trips <a class="hint" href="/trips/list.php" style="font-weight: 400; font-size: 0.85rem;">View all</a></h2>
     <?php if ($myUpcomingTrips === []): ?>
-        <p class="empty-state">Nothing on the books. <a href="/flights/add.php">Add a flight</a>, <a href="/trains/add.php">add a train</a>, <a href="/trips/list.php">review past trips</a>, or <a href="/hotels/add.php">log a hotel stay</a>.</p>
+        <p class="empty-state">Nothing on the books. <a href="/trips/builder.php">Add a trip</a>, <a href="/trains/add.php">add a train</a>, <a href="/trips/list.php">review past trips</a>, or <a href="/hotels/add.php">log a hotel stay</a>.</p>
     <?php else: ?>
         <?php foreach ($myUpcomingTrips as $trip): ?>
             <div class="card">

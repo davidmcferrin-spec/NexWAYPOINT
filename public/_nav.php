@@ -47,7 +47,9 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
     {
         return match ($status) {
             'home', 'office' => 'badge-status-home',
+            'remote' => 'badge-status-travel',
             'delayed', 'cancelled' => 'badge-status-delay',
+            'pre_flight', 'en_route', 'post_flight', 'layover', 'at_hotel' => 'badge-status-travel',
             default => 'badge-status-travel',
         };
     }
@@ -71,7 +73,7 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
         <a href="/hotels/map.php">Map</a>
         <span class="navbar-sep" aria-hidden="true"></span>
         <a href="/hotels/add.php">Log stay</a>
-        <a href="/flights/add.php">Add flight</a>
+        <a href="/trips/builder.php">Add trip</a>
         <a href="/trains/add.php">Add train</a>
         <span class="navbar-sep" aria-hidden="true"></span>
         <div class="nav-dropdown">

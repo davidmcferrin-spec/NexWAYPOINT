@@ -53,7 +53,7 @@ $statusBadge = static function (string $status): string {
             <p class="hint" style="margin: 0.35rem 0 0;">Itineraries from email import and manual flight/train entries.</p>
         </div>
         <div>
-            <a class="primary" href="/flights/add.php" style="text-decoration: none; display: inline-block; padding: 0.45rem 0.85rem;">Add flight</a>
+            <a class="primary" href="/trips/builder.php" style="text-decoration: none; display: inline-block; padding: 0.45rem 0.85rem;">Add trip</a>
             <a href="/trains/add.php" style="margin-left: 0.5rem;">Add train</a>
         </div>
     </div>
@@ -69,7 +69,7 @@ $statusBadge = static function (string $status): string {
         <p class="empty-state">
             No <?= htmlspecialchars(strtolower($scopeLabel), ENT_QUOTES) ?> trips yet.
             <?php if ($scope === 'all'): ?>
-                <a href="/flights/add.php">Add a flight</a> or forward a confirmation to your mail inbox.
+                <a href="/trips/builder.php">Add a trip</a> or forward a confirmation to your mail inbox.
             <?php endif; ?>
         </p>
     <?php else: ?>
@@ -127,7 +127,12 @@ $statusBadge = static function (string $status): string {
                                 ? 'No segments'
                                 : htmlspecialchars(implode(' · ', $summaryParts), ENT_QUOTES) ?>
                         </td>
-                        <td><a href="/trips/view.php?id=<?= (int) $trip->id ?>">View</a></td>
+                        <td>
+                            <a href="/trips/view.php?id=<?= (int) $trip->id ?>">View</a>
+                            <?php if (in_array($trip->status, ['planned', 'active'], true)): ?>
+                                · <a href="/trips/builder.php?id=<?= (int) $trip->id ?>">Edit</a>
+                            <?php endif; ?>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

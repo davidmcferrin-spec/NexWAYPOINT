@@ -254,11 +254,24 @@ final class TeamTravelPreviewBuilder
             return null;
         }
 
-        $label = 'Layover';
-        if ($canCity) {
-            $city = trim((string) ($current->destination ?? ''));
-            if ($city !== '') {
-                $label = 'Layover in ' . $city;
+        $gapSeconds = $depart->getTimestamp() - $arrive->getTimestamp();
+        $isLayover = $gapSeconds <= 3 * 3600;
+
+        if ($isLayover) {
+            $label = 'Layover';
+            if ($canCity) {
+                $city = trim((string) ($current->destination ?? ''));
+                if ($city !== '') {
+                    $label = 'Layover in ' . $city;
+                }
+            }
+        } else {
+            $label = 'Stay';
+            if ($canCity) {
+                $city = trim((string) ($current->destination ?? ''));
+                if ($city !== '') {
+                    $label = 'In ' . $city;
+                }
             }
         }
 
@@ -269,7 +282,7 @@ final class TeamTravelPreviewBuilder
             }
         }
 
-        return ['type' => 'layover', 'label' => $label];
+        return ['type' => $isLayover ? 'layover' : 'stay', 'label' => $label];
     }
 
     /**

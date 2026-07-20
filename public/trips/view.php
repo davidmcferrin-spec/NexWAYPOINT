@@ -154,6 +154,14 @@ $today = (new DateTimeImmutable('today'))->format('Y-m-d');
 
     <div class="card" style="margin-top: 1.5rem;">
         <h3>Actions</h3>
+        <?php if (in_array($trip->status, ['planned', 'active'], true)): ?>
+            <p style="margin-bottom: 0.75rem;">
+                <a class="primary" href="/trips/builder.php?id=<?= (int) $trip->id ?>"
+                    style="display:inline-block;padding:0.6rem 1.2rem;background:var(--accent);color:var(--accent-contrast);border-radius:4px;text-decoration:none;">
+                    Edit trip &amp; flight legs
+                </a>
+            </p>
+        <?php endif; ?>
         <form method="post" style="display: inline-block; margin-right: 0.75rem;">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
             <input type="hidden" name="action" value="toggle_private">

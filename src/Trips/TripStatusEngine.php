@@ -7,18 +7,25 @@ namespace NexWaypoint\Trips;
 use NexWaypoint\Core\Logger;
 
 /**
- * Resolves a single user's current status string for the dashboard:
- * "Home", "Office", "Remote", "In Flight (ORD -> LAX)", "Layover in Denver",
- * "Delayed - ORD -> LAX", "At hotel in Chicago".
+ * Resolves a user's current status along a multi-leg itinerary.
  *
- * Precedence: an active flight/train/car segment covering "now" wins over
- * everything else; a layover between two segments of the same trip wins
- * over a manual override; a manual user_status_overrides row (home/office/
- * remote/unavailable) covering "now" through expires_on is used when there's
- * no active travel; "Home" is the default when nothing else applies.
+ * Transit timeline (local wall-clock times on segments):
+ *   pre_flight  — [depart − 45m, depart)
+ *   en_route    — [depart, arrive]  (delayed/cancelled override inside)
+ *   post_flight — (arrive, arrive + 45m]
+ *   layover     — after post, until next depart, when gap ≤ 3 hours
+ *   remote      — after post, until next depart, when gap > 3 hours
+ *                 (Working Remote · {arrived city})
+ *   at_hotel    — hotel segment check-in→check-out window
+ *
+ * Manual overrides apply only when no travel phase matches; then Home.
  */
 final class TripStatusEngine
 {
+    public const PRE_FLIGHT_MINUTES = 45;
+    public const POST_FLIGHT_MINUTES = 45;
+    public const LAYOVER_MAX_HOURS = 3;
+
     public function __construct(
         private readonly TripRepository $trips,
         private readonly Logger $logger,
@@ -32,7 +39,8 @@ final class TripStatusEngine
     {
         $now = $now ?? new \DateTimeImmutable('now');
 
-        $activeTrips = $this->trips->findActiveOrUpcoming($userId, 2, $now);
+        // Load trips that could still be in progress (long business trips).
+        $activeTrips = $this->trips->findActiveOrUpcoming($userId, 60, $now);
         $allSegments = [];
         foreach ($activeTrips as $trip) {
             foreach ($this->trips->segmentsForTrip((int) $trip->id) as $segment) {
@@ -40,64 +48,11 @@ final class TripStatusEngine
             }
         }
 
-        // 1. Currently inside a flight/train segment's depart->arrive window.
-        foreach ($allSegments as $segment) {
-            if ($segment->segmentType === 'hotel' || $segment->departDt === null || $segment->arriveDt === null) {
-                continue;
-            }
-            $depart = new \DateTimeImmutable($segment->departDt);
-            $arrive = new \DateTimeImmutable($segment->arriveDt);
-
-            if ($now >= $depart && $now <= $arrive) {
-                if ($segment->status === 'cancelled') {
-                    return $this->result('cancelled', "Cancelled: {$segment->origin} -> {$segment->destination}", $segment);
-                }
-                if ($segment->status === 'delayed') {
-                    return $this->result('delayed', "Delayed: {$segment->origin} -> {$segment->destination}", $segment);
-                }
-                $verb = $segment->segmentType === 'flight' ? 'In Flight' : 'In Transit';
-                return $this->result('en_route', "{$verb}: {$segment->origin} -> {$segment->destination}", $segment);
-            }
+        $travel = $this->resolveTravelPhase($allSegments, $now);
+        if ($travel !== null) {
+            return $travel;
         }
 
-        // 2. Layover: between the arrival of one segment and the departure of
-        // the next segment on the same trip, both same-day.
-        $byTrip = [];
-        foreach ($allSegments as $segment) {
-            $byTrip[$segment->tripId][] = $segment;
-        }
-        foreach ($byTrip as $segments) {
-            usort($segments, static fn (TripSegment $a, TripSegment $b) => strcmp((string) $a->departDt, (string) $b->departDt));
-            for ($i = 0; $i < count($segments) - 1; $i++) {
-                $current = $segments[$i];
-                $next = $segments[$i + 1];
-                if ($current->arriveDt === null || $next->departDt === null) {
-                    continue;
-                }
-                $arrive = new \DateTimeImmutable($current->arriveDt);
-                $nextDepart = new \DateTimeImmutable($next->departDt);
-                if ($now >= $arrive && $now <= $nextDepart) {
-                    $city = $current->destination ?? 'transit';
-                    return $this->result('layover', "Layover in {$city}", $current);
-                }
-            }
-        }
-
-        // 3. Inside a hotel stay window -> "At hotel in {city}".
-        foreach ($allSegments as $segment) {
-            if ($segment->segmentType !== 'hotel' || $segment->departDt === null || $segment->arriveDt === null) {
-                continue;
-            }
-            $checkIn = new \DateTimeImmutable($segment->departDt);
-            $checkOut = new \DateTimeImmutable($segment->arriveDt);
-            if ($now >= $checkIn && $now <= $checkOut) {
-                $city = $segment->destination ?? $segment->origin ?? 'destination';
-                return $this->result('at_hotel', "At hotel in {$city}", $segment);
-            }
-        }
-
-        // 4. No active travel -- fall back to the manual status override
-        // (covers today when effective_date <= today <= expires_on).
         $override = $this->trips->activeStatusOverride($userId, $now);
         if ($override !== null) {
             $labels = ['home' => 'Home', 'office' => 'Office', 'remote' => 'Working Remote', 'unavailable' => 'Unavailable'];
@@ -128,19 +83,146 @@ final class TripStatusEngine
             ];
         }
 
-        // 5. Default.
         return ['status' => 'home', 'label' => 'Home', 'detail' => []];
     }
 
     /**
+     * @param TripSegment[] $allSegments
+     * @return array{status: string, label: string, detail: array<string, mixed>}|null
+     */
+    private function resolveTravelPhase(array $allSegments, \DateTimeImmutable $now): ?array
+    {
+        $byTrip = [];
+        foreach ($allSegments as $segment) {
+            if ($segment->status === 'cancelled') {
+                continue;
+            }
+            $byTrip[$segment->tripId][] = $segment;
+        }
+
+        foreach ($byTrip as $segments) {
+            usort(
+                $segments,
+                static fn (TripSegment $a, TripSegment $b) => strcmp((string) $a->departDt, (string) $b->departDt)
+            );
+
+            $transit = [];
+            foreach ($segments as $segment) {
+                if (in_array($segment->segmentType, ['flight', 'train', 'car'], true)
+                    && $segment->departDt !== null
+                    && $segment->arriveDt !== null
+                ) {
+                    $transit[] = $segment;
+                }
+            }
+
+            for ($i = 0; $i < count($transit); $i++) {
+                $segment = $transit[$i];
+                $depart = new \DateTimeImmutable($segment->departDt);
+                $arrive = new \DateTimeImmutable($segment->arriveDt);
+                $preStart = $depart->modify('-' . self::PRE_FLIGHT_MINUTES . ' minutes');
+                $postEnd = $arrive->modify('+' . self::POST_FLIGHT_MINUTES . ' minutes');
+
+                if ($now >= $preStart && $now < $depart) {
+                    $verb = $segment->segmentType === 'flight' ? 'Pre-flight' : 'Pre-departure';
+                    return $this->result(
+                        'pre_flight',
+                        "{$verb}: {$segment->origin} -> {$segment->destination}",
+                        $segment,
+                        ['location_city' => $segment->destination]
+                    );
+                }
+
+                if ($now >= $depart && $now <= $arrive) {
+                    if ($segment->status === 'cancelled') {
+                        return $this->result('cancelled', "Cancelled: {$segment->origin} -> {$segment->destination}", $segment, [
+                            'location_city' => $segment->destination,
+                        ]);
+                    }
+                    if ($segment->status === 'delayed') {
+                        return $this->result('delayed', "Delayed: {$segment->origin} -> {$segment->destination}", $segment, [
+                            'location_city' => $segment->destination,
+                        ]);
+                    }
+                    $verb = $segment->segmentType === 'flight' ? 'In Flight' : 'In Transit';
+                    return $this->result(
+                        'en_route',
+                        "{$verb}: {$segment->origin} -> {$segment->destination}",
+                        $segment,
+                        ['location_city' => $segment->destination]
+                    );
+                }
+
+                if ($now > $arrive && $now <= $postEnd) {
+                    $city = $segment->destination ?? 'destination';
+                    return $this->result(
+                        'post_flight',
+                        "Post-flight: arrived {$city}",
+                        $segment,
+                        ['location_city' => $segment->destination]
+                    );
+                }
+
+                $next = $transit[$i + 1] ?? null;
+                if ($next === null || $next->departDt === null) {
+                    continue;
+                }
+                $nextDepart = new \DateTimeImmutable($next->departDt);
+                if ($now <= $postEnd || $now >= $nextDepart) {
+                    continue;
+                }
+
+                $gapSeconds = $nextDepart->getTimestamp() - $arrive->getTimestamp();
+                $city = $segment->destination ?? 'transit';
+                if ($gapSeconds <= self::LAYOVER_MAX_HOURS * 3600) {
+                    return $this->result(
+                        'layover',
+                        "Layover in {$city}",
+                        $segment,
+                        ['location_city' => $segment->destination]
+                    );
+                }
+
+                return $this->result(
+                    'remote',
+                    "Working Remote · {$city}",
+                    $segment,
+                    [
+                        'location_city' => $segment->destination,
+                        'location_state' => null,
+                        'from_itinerary' => true,
+                    ]
+                );
+            }
+
+            foreach ($segments as $segment) {
+                if ($segment->segmentType !== 'hotel' || $segment->departDt === null || $segment->arriveDt === null) {
+                    continue;
+                }
+                $checkIn = new \DateTimeImmutable($segment->departDt);
+                $checkOut = new \DateTimeImmutable($segment->arriveDt);
+                if ($now >= $checkIn && $now <= $checkOut) {
+                    $city = $segment->destination ?? $segment->origin ?? 'destination';
+                    return $this->result('at_hotel', "At hotel in {$city}", $segment, [
+                        'location_city' => $segment->destination ?? $segment->origin,
+                    ]);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $extraDetail
      * @return array{status: string, label: string, detail: array<string, mixed>}
      */
-    private function result(string $status, string $label, TripSegment $segment): array
+    private function result(string $status, string $label, TripSegment $segment, array $extraDetail = []): array
     {
         return [
             'status' => $status,
             'label' => $label,
-            'detail' => [
+            'detail' => array_merge([
                 'segment_id' => $segment->id,
                 'trip_id' => $segment->tripId,
                 'carrier' => $segment->carrier,
@@ -148,7 +230,7 @@ final class TripStatusEngine
                 'hotel_stay_id' => $segment->hotelStayId,
                 'origin' => $segment->origin,
                 'destination' => $segment->destination,
-            ],
+            ], $extraDetail),
         ];
     }
 }

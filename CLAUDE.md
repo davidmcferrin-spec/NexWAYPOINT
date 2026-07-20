@@ -40,6 +40,14 @@ global-properties migration).
 Table / Cards / Map views (`localStorage` preference) with Leaflet city
 clusters → face markers.
 
+**Complex itinerary (2026-07-20):** `TripStatusEngine` phases are pre-flight /
+en_route / post-flight (45m windows), layover (gap ≤3h), itinerary remote
+(gap >3h at arrived city), then hotel / override / Home. Times stay naive
+local wall-clock. Trip create/edit uses spreadsheet builder
+(`/trips/builder.php` + `replaceTripLegs`); `/flights/add.php` and
+`/trips/edit.php` redirect there. United parser emits multi-leg `segments[]`;
+round-trip upserts set `destination_city` to the outbound peak, not home.
+
 **Not started:** car/rideshare email parsers, Azure AD SSO,
 PWA/offline, push notifications, approval UI for auto-imported stays
 (currently auto-creates + notifies instead of a pending-confirmation flow).
@@ -157,11 +165,15 @@ PWA/offline, push notifications, approval UI for auto-imported stays
   prefix to lint and test everything before delivery. That tooling doesn't
   ship with the project -- it was throwaway CI for this session only.
 
+- `TripStatusEngine` itinerary `remote` (gap >3h) sets `detail.from_itinerary`
+  so `TeamLocationResolver::isAtBaseStatus` does not treat it like a manual
+  remote override (no upcoming-trip pin swap mid-stay).
+
 ## Immediate next steps (suggested, not started)
 
 1. Car/rideshare email parsers (Enterprise/Hertz/Uber airport).
-2. Hotel-stay edit page (currently add/view/delete only).
-3. Tighten Delta/United/Hilton parsers against more live fixtures (trip
-   details / multi-leg United / Hilton cancel without original conf #).
-4. Decide whether the pending-approval UI ("we found a trip, confirm?")
+2. Tighten Delta/United/Hilton parsers against more live fixtures (trip
+   details / Hilton cancel without original conf #).
+3. Decide whether the pending-approval UI ("we found a trip, confirm?")
    is worth building vs. the current auto-create-and-notify approach.
+4. Airport timezone / UTC storage if multi-zone days become painful.

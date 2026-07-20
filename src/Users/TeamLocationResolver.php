@@ -68,17 +68,21 @@ final class TeamLocationResolver
             }
         }
 
-        if (in_array($code, ['en_route', 'layover', 'delayed', 'cancelled'], true)) {
+        // Pin at the city for the active phase (leg dest / layover / post-arrival).
+        if (in_array($code, ['pre_flight', 'en_route', 'post_flight', 'layover', 'delayed', 'cancelled'], true)) {
+            $phaseCity = isset($detail['location_city']) ? trim((string) $detail['location_city']) : '';
+            if ($phaseCity === '') {
+                $phaseCity = isset($detail['destination']) ? trim((string) $detail['destination']) : '';
+            }
+            if ($phaseCity !== '') {
+                return $this->fromCityState($phaseCity, null);
+            }
             $tripId = isset($detail['trip_id']) ? (int) $detail['trip_id'] : 0;
             if ($tripId > 0) {
                 $trip = $this->trips->find($tripId);
                 if ($trip !== null && trim($trip->destinationCity) !== '') {
                     return $this->fromCityState($trip->destinationCity, null);
                 }
-            }
-            $dest = isset($detail['destination']) ? trim((string) $detail['destination']) : '';
-            if ($dest !== '') {
-                return $this->fromCityState($dest, null);
             }
         }
 
@@ -105,7 +109,7 @@ final class TeamLocationResolver
         $upcomingLabel = null;
 
         if (
-            self::isAtBaseStatus($status['status'])
+            self::isAtBaseStatus($status['status'], $status['detail'] ?? [])
             && $upcomingVisibleTrip !== null
             && trim($upcomingVisibleTrip->destinationCity) !== ''
         ) {
@@ -149,9 +153,22 @@ final class TeamLocationResolver
 
     /**
      * Whether the current status is still at base (eligible for an upcoming-trip pin).
+     * Mid-trip phases (including itinerary gap remote) are not at base.
+     *
+     * @param array<string, mixed> $detail
      */
-    public static function isAtBaseStatus(string $status): bool
+    public static function isAtBaseStatus(string $status, array $detail = []): bool
     {
+        if (in_array($status, [
+            'pre_flight', 'en_route', 'post_flight', 'layover',
+            'delayed', 'cancelled', 'at_hotel',
+        ], true)) {
+            return false;
+        }
+        if ($status === 'remote' && !empty($detail['from_itinerary'])) {
+            return false;
+        }
+
         return in_array($status, ['home', 'office', 'remote', 'unavailable'], true);
     }
 

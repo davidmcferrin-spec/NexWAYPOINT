@@ -172,6 +172,173 @@ final class TripRepository
         return TripSegment::fromRow($row);
     }
 
+    public function findSegment(int $segmentId): ?TripSegment
+    {
+        $row = $this->db->fetchOne('SELECT * FROM trip_segments WHERE id = :id', ['id' => $segmentId]);
+        return $row === null ? null : TripSegment::fromRow($row);
+    }
+
+    public function updateSegment(TripSegment $segment, ?int $actorUserId = null): TripSegment
+    {
+        if ($segment->id === null) {
+            throw new \InvalidArgumentException('Cannot update a TripSegment without an id.');
+        }
+        $data = $segment->toArray();
+        $id = (int) $data['id'];
+        unset($data['id']);
+        $assignments = implode(', ', array_map(static fn (string $c) => "{$c} = :{$c}", array_keys($data)));
+        $data['id'] = $id;
+
+        $this->db->execute(
+            "UPDATE trip_segments SET {$assignments} WHERE id = :id",
+            $data
+        );
+        $this->db->audit($actorUserId, 'update', 'trip_segments', $id, [
+            'segment_type' => $segment->segmentType,
+            'origin' => $segment->origin,
+            'destination' => $segment->destination,
+        ]);
+
+        $updated = $this->findSegment($id);
+        if ($updated === null) {
+            throw new \RuntimeException('Trip segment update succeeded but row could not be re-read.');
+        }
+        return $updated;
+    }
+
+    public function deleteSegment(int $segmentId, ?int $actorUserId = null): void
+    {
+        $existing = $this->findSegment($segmentId);
+        if ($existing === null) {
+            return;
+        }
+        $this->db->execute('DELETE FROM trip_segments WHERE id = :id', ['id' => $segmentId]);
+        $this->db->audit($actorUserId, 'delete', 'trip_segments', $segmentId, [
+            'trip_id' => $existing->tripId,
+            'segment_type' => $existing->segmentType,
+        ]);
+    }
+
+    /**
+     * Replace all flight/train/car legs on a trip in one shot (keeps hotel segments).
+     *
+     * @param list<array{
+     *   segment_type?: string,
+     *   carrier_id?: ?int,
+     *   carrier?: ?string,
+     *   flight_number?: ?string,
+     *   origin?: ?string,
+     *   destination?: ?string,
+     *   depart_dt?: ?string,
+     *   arrive_dt?: ?string,
+     *   confirmation_code?: ?string,
+     *   status?: string
+     * }> $legs
+     * @return TripSegment[]
+     */
+    public function replaceTripLegs(int $tripId, array $legs, ?int $actorUserId = null): array
+    {
+        $trip = $this->find($tripId);
+        if ($trip === null) {
+            throw new \InvalidArgumentException("Trip {$tripId} not found.");
+        }
+
+        foreach ($this->segmentsForTrip($tripId) as $existing) {
+            if (!in_array($existing->segmentType, ['flight', 'train', 'car'], true)) {
+                continue;
+            }
+            if ($existing->id !== null) {
+                $this->deleteSegment((int) $existing->id, $actorUserId);
+            }
+        }
+
+        $created = [];
+        foreach ($legs as $leg) {
+            $created[] = $this->addSegment(new TripSegment(
+                id: null,
+                tripId: $tripId,
+                segmentType: (string) ($leg['segment_type'] ?? 'flight'),
+                segmentSubtype: null,
+                carrierId: isset($leg['carrier_id']) ? (int) $leg['carrier_id'] : null,
+                carrier: $leg['carrier'] ?? null,
+                flightNumber: isset($leg['flight_number']) ? (string) $leg['flight_number'] : null,
+                confirmationCode: isset($leg['confirmation_code']) ? (string) $leg['confirmation_code'] : null,
+                origin: $leg['origin'] ?? null,
+                destination: $leg['destination'] ?? null,
+                departDt: $this->normalizeDateTime($leg['depart_dt'] ?? null),
+                arriveDt: $this->normalizeDateTime($leg['arrive_dt'] ?? null),
+                hotelStayId: null,
+                status: (string) ($leg['status'] ?? 'scheduled'),
+                sourceParseLogId: null,
+            ), $actorUserId);
+        }
+
+        $this->syncTripDatesFromSegments($tripId, $actorUserId);
+        $this->db->audit($actorUserId, 'replace_legs', 'trips', $tripId, ['legs' => count($created)]);
+
+        return $created;
+    }
+
+    /**
+     * Recompute trip start/end from non-cancelled segments (falls back to existing dates).
+     */
+    public function syncTripDatesFromSegments(int $tripId, ?int $actorUserId = null): ?Trip
+    {
+        $trip = $this->find($tripId);
+        if ($trip === null) {
+            return null;
+        }
+
+        $segments = array_values(array_filter(
+            $this->segmentsForTrip($tripId),
+            static fn (TripSegment $s) => $s->status !== 'cancelled'
+        ));
+
+        if ($segments === []) {
+            return $trip;
+        }
+
+        $starts = [];
+        $ends = [];
+        foreach ($segments as $segment) {
+            if ($segment->departDt !== null && $segment->departDt !== '') {
+                $starts[] = substr($segment->departDt, 0, 10);
+            }
+            if ($segment->arriveDt !== null && $segment->arriveDt !== '') {
+                $ends[] = substr($segment->arriveDt, 0, 10);
+            } elseif ($segment->departDt !== null && $segment->departDt !== '') {
+                $ends[] = substr($segment->departDt, 0, 10);
+            }
+        }
+        if ($starts === []) {
+            return $trip;
+        }
+
+        sort($starts);
+        sort($ends);
+        $startDate = $starts[0];
+        $endDate = $ends !== [] ? $ends[array_key_last($ends)] : $startDate;
+        if ($endDate < $startDate) {
+            $endDate = $startDate;
+        }
+
+        if ($startDate === $trip->startDate && $endDate === $trip->endDate) {
+            return $trip;
+        }
+
+        return $this->update(new Trip(
+            id: $trip->id,
+            ownerId: $trip->ownerId,
+            destinationCity: $trip->destinationCity,
+            startDate: $startDate,
+            endDate: $endDate,
+            status: $trip->status,
+            tripPurpose: $trip->tripPurpose,
+            notes: $trip->notes,
+            isPrivate: $trip->isPrivate,
+        ), $actorUserId);
+    }
+
     /**
      * @return TripSegment[]
      */
@@ -386,13 +553,42 @@ final class TripRepository
     }
 
     /**
+     * Pick a display destination for the trip.
+     * Round-trips (last dest ≈ first origin) use the outbound peak city,
+     * not the home airport on the return leg.
+     *
      * @param list<array<string, mixed>> $legs
      */
     private function inferDestinationCity(array $legs): ?string
     {
+        if ($legs === []) {
+            return null;
+        }
+
+        $firstOrigin = strtoupper(trim((string) ($legs[0]['origin'] ?? '')));
+        $lastDest = strtoupper(trim((string) ($legs[count($legs) - 1]['destination'] ?? '')));
+
+        if ($firstOrigin !== '' && $firstOrigin === $lastDest && count($legs) >= 2) {
+            $outboundIdx = (int) floor((count($legs) - 1) / 2);
+            $peak = $legs[$outboundIdx]['destination'] ?? null;
+            if (is_string($peak) && trim($peak) !== '') {
+                return trim($peak);
+            }
+        }
+
         $last = $legs[count($legs) - 1];
         $dest = $last['destination'] ?? null;
         return is_string($dest) && trim($dest) !== '' ? trim($dest) : null;
+    }
+
+    /**
+     * Public wrapper for mail/UI callers that need the round-trip destination heuristic.
+     *
+     * @param list<array<string, mixed>> $legs
+     */
+    public function destinationCityFromLegs(array $legs): ?string
+    {
+        return $this->inferDestinationCity($legs);
     }
 
     private function normalizeDateTime(?string $value): ?string

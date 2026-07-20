@@ -260,6 +260,11 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertNull($result['upcoming']);
         self::assertTrue(TeamLocationResolver::isAtBaseStatus('home'));
         self::assertFalse(TeamLocationResolver::isAtBaseStatus('en_route'));
+        self::assertFalse(TeamLocationResolver::isAtBaseStatus('pre_flight'));
+        self::assertFalse(TeamLocationResolver::isAtBaseStatus('post_flight'));
+        self::assertFalse(TeamLocationResolver::isAtBaseStatus('layover'));
+        self::assertFalse(TeamLocationResolver::isAtBaseStatus('remote', ['from_itinerary' => true]));
+        self::assertTrue(TeamLocationResolver::isAtBaseStatus('remote'));
     }
 
     public function testUpcomingFinderSkipsPrivateTripsForOthers(): void
@@ -411,6 +416,74 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertStringContainsString('2h 30m', $itin[1]['label']);
         self::assertSame('leg', $itin[2]['type']);
         self::assertStringContainsString('LAX', $itin[2]['label']);
+    }
+
+    public function testTravelPreviewLongGapIsStayNotLayover(): void
+    {
+        $ownerId = $this->insertUser('flyer2');
+        $viewerId = $this->insertUser('peer2');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $day = (new \DateTimeImmutable('today'))->modify('+4 days');
+        $start = $day->format('Y-m-d');
+
+        $trip = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Denver, CO',
+            startDate: $start,
+            endDate: $start,
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'United',
+            flightNumber: '10',
+            confirmationCode: 'GAP001',
+            origin: 'HSV',
+            destination: 'DEN',
+            departDt: $day->setTime(8, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(10, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'United',
+            flightNumber: '20',
+            confirmationCode: 'GAP001',
+            origin: 'DEN',
+            destination: 'HSV',
+            departDt: $day->setTime(16, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(19, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $builder = new TeamTravelPreviewBuilder(
+            $tripRepo,
+            new VisibilityEngine(new UserRepository($this->db, $this->logger), new VisibilityRuleRepository($this->db)),
+            new VisibilityBlockRepository($this->db),
+        );
+
+        $preview = $builder->build($viewerId, $ownerId, 21);
+        $itin = $preview[0]['itinerary'];
+        self::assertSame('stay', $itin[1]['type']);
+        self::assertStringContainsString('In DEN', $itin[1]['label']);
+        self::assertStringNotContainsString('Layover', $itin[1]['label']);
     }
 
     public function testTravelPreviewRedactsCityOnItineraryWhenDenied(): void

@@ -8,6 +8,7 @@ use NexWaypoint\Mail\EmailMessage;
 use NexWaypoint\Mail\Parsers\AmericanAirlinesParser;
 use NexWaypoint\Mail\Parsers\AmtrakParser;
 use NexWaypoint\Mail\Parsers\BreezeAirlinesParser;
+use NexWaypoint\Mail\Parsers\UnitedAirlinesParser;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -113,5 +114,78 @@ HTML;
         self::assertSame('A1B2C', $result['confirmation_code']);
         self::assertSame('90', $result['segments'][0]['flight_number']);
         self::assertSame('train', $result['segments'][0]['segment_type']);
+    }
+
+    public function testUnitedMultiLegConfirm(): void
+    {
+        $plain = <<<'TXT'
+Confirmation Number: UA9X2K
+
+Flight 1 of 2 UA 4821
+Huntsville (HSV)
+Denver (DEN)
+Mon, Aug 10, 2026
+8:05 AM
+10:20 AM
+
+Flight 2 of 2 UA 1630
+Denver (DEN)
+Los Angeles (LAX)
+Mon, Aug 10, 2026
+12:15 PM
+1:45 PM
+TXT;
+
+        $parser = new UnitedAirlinesParser();
+        $result = $parser->parse($this->message(
+            'united@united.com',
+            'Your United Airlines Confirmation UA9X2K',
+            $plain
+        ));
+
+        self::assertNotNull($result);
+        self::assertSame('confirm', $result['event']);
+        self::assertSame('UA9X2K', $result['confirmation_code']);
+        self::assertCount(2, $result['segments']);
+        self::assertSame('HSV', $result['segments'][0]['origin']);
+        self::assertSame('DEN', $result['segments'][0]['destination']);
+        self::assertSame('4821', $result['segments'][0]['flight_number']);
+        self::assertSame('DEN', $result['segments'][1]['origin']);
+        self::assertSame('LAX', $result['segments'][1]['destination']);
+        self::assertSame('2026-08-10 08:05:00', $result['segments'][0]['depart_dt']);
+        self::assertSame('2026-08-10 12:15:00', $result['segments'][1]['depart_dt']);
+    }
+
+    public function testUnitedRoundTripTwoLegs(): void
+    {
+        $plain = <<<'TXT'
+Confirmation Number: RTURN1
+
+Flight 1 of 2 UA 100
+Huntsville (HSV)
+Denver (DEN)
+Tue, Sep 1, 2026
+7:00 AM
+9:00 AM
+
+Flight 2 of 2 UA 200
+Denver (DEN)
+Huntsville (HSV)
+Fri, Sep 4, 2026
+5:00 PM
+8:00 PM
+TXT;
+
+        $parser = new UnitedAirlinesParser();
+        $result = $parser->parse($this->message(
+            'united@united.com',
+            'Confirmation Number: RTURN1',
+            $plain
+        ));
+
+        self::assertNotNull($result);
+        self::assertCount(2, $result['segments']);
+        self::assertSame('HSV', $result['segments'][0]['origin']);
+        self::assertSame('HSV', $result['segments'][1]['destination']);
     }
 }

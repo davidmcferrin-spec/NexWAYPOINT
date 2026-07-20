@@ -939,6 +939,12 @@ button.linkish {
     color: var(--text-dim);
     font-size: 0.9rem;
 }
+.trip-layover-row td {
+    background: transparent;
+    border-top: none;
+    padding-top: 0.15rem;
+    padding-bottom: 0.15rem;
+}
 
 .team-map {
     height: min(65vh, 560px);
@@ -1003,6 +1009,115 @@ button.linkish {
         flex: 1 1 100%;
         justify-content: flex-start;
         padding-top: 0.25rem;
+    }
+}
+
+/* Trip itinerary builder */
+.trip-builder {
+    max-width: 1100px;
+}
+
+.trip-builder-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.1rem 1.25rem;
+    box-shadow: var(--shadow);
+}
+
+.trip-builder-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.trip-builder-header h1 {
+    margin: 0 0 0.25rem;
+    font-size: 1.35rem;
+}
+
+.trip-builder-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem 1rem;
+    align-items: end;
+}
+
+.trip-builder-meta .checkbox-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-bottom: 0.35rem;
+}
+
+.trip-legs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+}
+
+.trip-legs-table th,
+.trip-legs-table td {
+    padding: 0.35rem 0.3rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.trip-legs-table th {
+    text-align: left;
+    color: var(--text-dim);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.trip-legs-table input,
+.trip-legs-table select {
+    width: 100%;
+    min-width: 0;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.35rem;
+}
+
+.trip-legs-table .leg-flight { max-width: 5rem; }
+.trip-legs-table .leg-origin,
+.trip-legs-table .leg-dest { max-width: 4.5rem; }
+.trip-legs-table .leg-conf { max-width: 6rem; }
+
+.leg-gap-hint {
+    white-space: nowrap;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    min-width: 6.5rem;
+}
+
+.leg-gap-hint.is-connection { color: var(--accent); }
+.leg-gap-hint.is-stay { color: var(--yellow); }
+
+.leg-row-actions {
+    white-space: nowrap;
+}
+
+.leg-row-actions .linkish {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 0.15rem 0.25rem;
+}
+
+.trip-builder-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-top: 0.75rem;
+}
+
+@media (max-width: 900px) {
+    .trip-legs-table .leg-gap-hint {
+        display: none;
     }
 }
 
