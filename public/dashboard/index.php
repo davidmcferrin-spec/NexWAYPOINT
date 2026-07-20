@@ -203,7 +203,7 @@ try {
 
         <div class="team-view" data-team-panel="table">
             <table>
-                <thead><tr><th>Teammate</th><th>Status</th></tr></thead>
+                <thead><tr><th>Teammate</th><th>Status</th><th>Location</th></tr></thead>
                 <tbody>
                     <?php foreach ($team as $entry): ?>
                         <tr>
@@ -221,6 +221,13 @@ try {
                                 </span>
                             </td>
                             <td><span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span></td>
+                            <td>
+                                <?php if ($entry['location'] !== null): ?>
+                                    <?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?>
+                                <?php else: ?>
+                                    <span class="hint">—</span>
+                                <?php endif; ?>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
