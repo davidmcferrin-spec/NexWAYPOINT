@@ -4,45 +4,55 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
+BACKUP_ROOT="${ROOT_DIR}/storage/backups"
 SKIP_PACKAGES=true
 SKIP_USER=false
-SKIP_WEB_ROOT=false
 WITH_DEV=false
+COMMAND="install"
+UPDATE_REF=""
+RESTORE_TARGET="latest"
+NO_BACKUP=false
+RESTORE_CODE=false
+FORCE_UPDATE=false
 
 # Production layout on DreamHost:
-#   code: /home/dh_w9tij7/NexWAYPOINT
-#   web:  /home/dh_w9tij7/nexwaypoint.area51consulting.com  ->  .../NexWAYPOINT/public
+#   code + public web root: /home/dh_w9tij7/NexWAYPOINT
+#   site: https://nexwaypoint.area51consulting.com
+# Set the domain's Web Directory in the DreamHost panel to NexWAYPOINT/public.
+# Do not replace or symlink /home/dh_w9tij7/nexwaypoint.area51consulting.com.
 DEFAULT_SITE_HOST="nexwaypoint.area51consulting.com"
 DEFAULT_SITE_URL="https://${DEFAULT_SITE_HOST}"
-DEFAULT_WEB_ROOT="/home/dh_w9tij7/${DEFAULT_SITE_HOST}"
 SITE_URL="${DEFAULT_SITE_URL}"
-WEB_ROOT=""
 
 usage() {
     cat <<'EOF'
-Install NexWAYPOINT on DreamHost (no sudo) or a Debian/Ubuntu host.
+Install and maintain NexWAYPOINT on DreamHost (no sudo) or a Debian/Ubuntu host.
 
-Usage: ./setup.sh [options]
+Usage:
+  ./setup.sh [install options]           First-time / re-run install
+  ./setup.sh backup                      Snapshot .env, storage, and DB dump
+  ./setup.sh update [--ref REF]          Backup, then git-fetch/pull the repo
+  ./setup.sh restore [ID|latest] [--code]
+  ./setup.sh list-backups                Show available backup IDs
 
-Options:
+Install options:
   --skip-user          Do not offer to create a local login
-  --skip-web-root      Do not offer to wire the DreamHost document root
-  --install-packages   Attempt apt package installs (requires root/sudo; not
-                       available on managed DreamHost)
-  --with-dev           Offer to run Composer for PHPUnit only (optional)
-  --help               Show this help
+  --install-packages   Attempt apt package installs (requires root/sudo)
+  --with-dev           Offer to run Composer for PHPUnit only
 
-DreamHost note: this app needs no sudo, no apt, and no Composer at runtime.
-Use the DreamHost panel for PHP version/extensions and MySQL. setup.sh only
-configures .env, storage, schema, the first user, the public/ symlink, and cron.
+Update / restore options:
+  --ref REF            Branch, tag, or commit to update to (default: current branch)
+  --no-backup          Skip the automatic pre-update / pre-restore backup
+  --force              Allow update with a dirty git working tree
+  --code               On restore, also check out the git SHA recorded in the backup
 
-The script is safe to rerun: it preserves an existing .env file, skips an
-installed database schema, and does not create users without confirmation.
+Legacy flag forms also work: --backup, --update, --restore [ID], --list-backups
 
-DreamHost production layout:
-  clone:    /home/dh_w9tij7/NexWAYPOINT
-  web root: /home/dh_w9tij7/nexwaypoint.area51consulting.com
-            (symlink to NexWAYPOINT/public)
+DreamHost note: no sudo, apt, or Composer needed at runtime. Use the panel for
+PHP, MySQL, and the domain Web Directory (NexWAYPOINT/public). setup.sh never
+touches /home/dh_w9tij7/nexwaypoint.area51consulting.com.
+
+Backups are stored under storage/backups/<timestamp>/ (outside the web root).
 EOF
 }
 
@@ -341,163 +351,510 @@ install_cron_jobs() {
     echo "Cron jobs installed."
 }
 
-directory_is_effectively_empty() {
-    local path="$1"
-    local entry
-    local count=0
-
-    shopt -s nullglob dotglob
-    for entry in "${path}"/*; do
-        local base
-        base="$(basename -- "${entry}")"
-        case "${base}" in
-            .|..|index.html|index.htm|favicon.ico|.htaccess|dh_error_pages)
-                continue
-                ;;
-        esac
-        count=$((count + 1))
-    done
-    shopt -u nullglob dotglob
-    (( count == 0 ))
+ensure_storage_dirs() {
+    mkdir -p \
+        "${ROOT_DIR}/storage/logs" \
+        "${ROOT_DIR}/storage/cache" \
+        "${ROOT_DIR}/storage/uploads/hotel_photos" \
+        "${BACKUP_ROOT}"
+    chmod 775 \
+        "${ROOT_DIR}/storage" \
+        "${ROOT_DIR}/storage/logs" \
+        "${ROOT_DIR}/storage/cache" \
+        "${ROOT_DIR}/storage/uploads" \
+        "${ROOT_DIR}/storage/uploads/hotel_photos" \
+        "${BACKUP_ROOT}"
 }
 
-configure_web_root() {
-    local public_dir="${ROOT_DIR}/public"
-    local target
-    local backup
-    local current_target
+require_git_repo() {
+    if ! command -v git >/dev/null 2>&1; then
+        echo "git is required for update/backup metadata." >&2
+        exit 1
+    fi
+    if [[ ! -d "${ROOT_DIR}/.git" ]]; then
+        echo "${ROOT_DIR} is not a git checkout. Clone the repo before using update." >&2
+        exit 1
+    fi
+}
 
-    if [[ "${SKIP_WEB_ROOT}" == true ]]; then
+git_current_sha() {
+    git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true
+}
+
+git_current_branch() {
+    git -C "${ROOT_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "DETACHED"
+}
+
+git_working_tree_dirty() {
+    [[ -n "$(git -C "${ROOT_DIR}" status --porcelain 2>/dev/null || true)" ]]
+}
+
+resolve_backup_dir() {
+    local target="${1:-latest}"
+    local latest=""
+
+    if [[ ! -d "${BACKUP_ROOT}" ]]; then
+        echo "No backups found in ${BACKUP_ROOT}." >&2
+        exit 1
+    fi
+
+    if [[ "${target}" == "latest" ]]; then
+        latest="$(
+            shopt -s nullglob
+            for entry in "${BACKUP_ROOT}"/*; do
+                [[ -d "${entry}" ]] && basename -- "${entry}"
+            done | sort | tail -n 1
+        )"
+        if [[ -z "${latest}" ]]; then
+            echo "No backups found in ${BACKUP_ROOT}." >&2
+            exit 1
+        fi
+        target="${latest}"
+    fi
+
+    if [[ ! -d "${BACKUP_ROOT}/${target}" ]]; then
+        echo "Backup not found: ${BACKUP_ROOT}/${target}" >&2
+        exit 1
+    fi
+    printf '%s' "${BACKUP_ROOT}/${target}"
+}
+
+backup_database() {
+    local destination="$1"
+    local driver
+    local sqlite_path
+
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        echo "No .env yet; skipping database dump."
         return
     fi
-    if [[ ! -d "${public_dir}" ]]; then
-        echo "Missing public/ directory at ${public_dir}; cannot wire web root." >&2
-        exit 1
-    fi
 
-    WEB_ROOT="$(prompt_value "DreamHost web document root" "${DEFAULT_WEB_ROOT}")"
-    SITE_URL="$(prompt_value "Public site URL" "${DEFAULT_SITE_URL}")"
-
-    if [[ -L "${WEB_ROOT}" ]]; then
-        current_target="$(readlink -f -- "${WEB_ROOT}" 2>/dev/null || true)"
-        if [[ "${current_target}" == "$(readlink -f -- "${public_dir}")" ]]; then
-            echo "Web root already points at ${public_dir}."
-            return
-        fi
-        if ! ask_yes_no "Replace existing symlink ${WEB_ROOT} with a link to ${public_dir}?" "y"; then
-            return
-        fi
-        rm -- "${WEB_ROOT}"
-    elif [[ -e "${WEB_ROOT}" ]]; then
-        if [[ -d "${WEB_ROOT}" ]] && directory_is_effectively_empty "${WEB_ROOT}"; then
-            if ! ask_yes_no "Replace DreamHost web directory ${WEB_ROOT} with a symlink to ${public_dir}?" "y"; then
-                return
-            fi
-            backup="${WEB_ROOT}.bak.$(date +%Y%m%d%H%M%S)"
-            mv -- "${WEB_ROOT}" "${backup}"
-            echo "Moved previous web directory to ${backup}."
+    driver="$(env_value DB_DRIVER)"
+    if [[ "${driver}" == "sqlite" ]]; then
+        sqlite_path="$(env_value DB_SQLITE_PATH)"
+        if [[ -n "${sqlite_path}" && -f "${sqlite_path}" ]]; then
+            cp -- "${sqlite_path}" "${destination}/database.sqlite"
+            echo "SQLite database copied."
         else
-            echo "Web document root already exists and is not empty: ${WEB_ROOT}" >&2
-            echo "Move/rename it manually, then rerun setup, or use --skip-web-root." >&2
-            return
+            echo "SQLite database file not found; skipping DB backup."
         fi
-    else
-        if ! ask_yes_no "Create symlink ${WEB_ROOT} -> ${public_dir}?" "y"; then
-            return
-        fi
+        return
     fi
 
-    mkdir -p "$(dirname -- "${WEB_ROOT}")"
-    ln -s "${public_dir}" "${WEB_ROOT}"
-    target="$(readlink -f -- "${WEB_ROOT}" 2>/dev/null || true)"
-    if [[ "${target}" != "$(readlink -f -- "${public_dir}")" ]]; then
-        echo "Failed to create web-root symlink at ${WEB_ROOT}." >&2
-        exit 1
+    if [[ "${driver}" != "mysql" ]]; then
+        echo "Unknown DB_DRIVER '${driver}'; skipping DB backup."
+        return
     fi
-    echo "Web root linked: ${WEB_ROOT} -> ${public_dir}"
+
+    if ! command -v mysqldump >/dev/null 2>&1; then
+        echo "mysqldump not available; skipping MySQL dump (code/.env/storage still backed up)."
+        return
+    fi
+
+    MYSQL_PWD="$(env_value DB_PASSWORD)" \
+        mysqldump \
+            --host="$(env_value DB_HOST)" \
+            --port="$(env_value DB_PORT)" \
+            --user="$(env_value DB_USER)" \
+            --single-transaction \
+            --routines \
+            --triggers \
+            "$(env_value DB_NAME)" \
+            > "${destination}/database.sql"
+    echo "MySQL dump written."
 }
 
-while (( $# > 0 )); do
-    case "$1" in
-        --skip-user) SKIP_USER=true ;;
-        --skip-web-root) SKIP_WEB_ROOT=true ;;
-        --install-packages) SKIP_PACKAGES=false ;;
-        --with-dev) WITH_DEV=true ;;
-        --skip-packages)
-            # Kept for compatibility; package installs are already off by default.
-            SKIP_PACKAGES=true
-            ;;
-        --help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1" >&2
-            usage >&2
-            exit 2
-            ;;
-    esac
-    shift
-done
+restore_database() {
+    local source_dir="$1"
+    local driver
+    local sqlite_path
 
-echo "NexWAYPOINT setup"
-echo "Project: ${ROOT_DIR}"
-
-install_packages
-verify_php
-
-mkdir -p \
-    "${ROOT_DIR}/storage/logs" \
-    "${ROOT_DIR}/storage/cache" \
-    "${ROOT_DIR}/storage/uploads/hotel_photos"
-chmod 775 \
-    "${ROOT_DIR}/storage" \
-    "${ROOT_DIR}/storage/logs" \
-    "${ROOT_DIR}/storage/cache" \
-    "${ROOT_DIR}/storage/uploads" \
-    "${ROOT_DIR}/storage/uploads/hotel_photos"
-
-if [[ ! -f "${ENV_FILE}" ]]; then
-    configure_new_env
-else
-    echo "Keeping existing ${ENV_FILE}."
-    chmod 600 "${ENV_FILE}"
-fi
-
-verify_database_extension
-php "${ROOT_DIR}/scripts/init_database.php"
-
-if [[ "${SKIP_USER}" == false ]] && ask_yes_no "Create a local login now?" "y"; then
-    php "${ROOT_DIR}/scripts/create_user.php"
-fi
-
-configure_web_root
-install_cron_jobs
-
-if [[ "${WITH_DEV}" == true ]]; then
-    if ! command -v composer >/dev/null 2>&1; then
-        echo "Composer is not on PATH. Dev tests are optional; the app itself does not need Composer." >&2
-    elif ask_yes_no "Install development/test dependencies (PHPUnit)?" "n"; then
-        composer install --working-dir="${ROOT_DIR}" --no-interaction --prefer-dist
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        echo "No .env present after restore; skipping database restore."
+        return
     fi
-fi
 
-if [[ -z "${WEB_ROOT}" ]]; then
-    WEB_ROOT="${DEFAULT_WEB_ROOT}"
-fi
+    driver="$(env_value DB_DRIVER)"
+    if [[ "${driver}" == "sqlite" ]]; then
+        if [[ -f "${source_dir}/database.sqlite" ]]; then
+            sqlite_path="$(env_value DB_SQLITE_PATH)"
+            if [[ -z "${sqlite_path}" ]]; then
+                sqlite_path="${ROOT_DIR}/storage/nexwaypoint.sqlite"
+            fi
+            mkdir -p "$(dirname -- "${sqlite_path}")"
+            cp -- "${source_dir}/database.sqlite" "${sqlite_path}"
+            echo "SQLite database restored to ${sqlite_path}."
+        else
+            echo "No database.sqlite in backup; skipping DB restore."
+        fi
+        return
+    fi
 
-cat <<EOF
+    if [[ "${driver}" != "mysql" ]]; then
+        echo "Unknown DB_DRIVER '${driver}'; skipping DB restore."
+        return
+    fi
+
+    if [[ ! -f "${source_dir}/database.sql" ]]; then
+        echo "No database.sql in backup; skipping MySQL restore."
+        return
+    fi
+    if ! command -v mysql >/dev/null 2>&1; then
+        echo "mysql client not available; cannot restore database.sql automatically." >&2
+        echo "Import manually: mysql -h HOST -u USER -p DBNAME < ${source_dir}/database.sql" >&2
+        return
+    fi
+
+    MYSQL_PWD="$(env_value DB_PASSWORD)" \
+        mysql \
+            --host="$(env_value DB_HOST)" \
+            --port="$(env_value DB_PORT)" \
+            --user="$(env_value DB_USER)" \
+            "$(env_value DB_NAME)" \
+            < "${source_dir}/database.sql"
+    echo "MySQL database restored."
+}
+
+create_backup() {
+    local stamp
+    local backup_dir
+    local sha
+    local branch
+
+    ensure_storage_dirs
+    stamp="$(date +%Y%m%d%H%M%S)"
+    backup_dir="${BACKUP_ROOT}/${stamp}"
+    mkdir -p "${backup_dir}"
+    chmod 700 "${backup_dir}"
+
+    sha="$(git_current_sha)"
+    branch="$(git_current_branch)"
+
+    {
+        echo "created_at=${stamp}"
+        echo "site=${SITE_URL}"
+        echo "root=${ROOT_DIR}"
+        echo "git_sha=${sha}"
+        echo "git_branch=${branch}"
+        echo "hostname=$(hostname 2>/dev/null || echo unknown)"
+    } > "${backup_dir}/manifest.txt"
+
+    if [[ -f "${ENV_FILE}" ]]; then
+        cp -- "${ENV_FILE}" "${backup_dir}/env"
+        chmod 600 "${backup_dir}/env"
+    else
+        echo "No .env present; backup will omit env."
+    fi
+
+    if [[ -d "${ROOT_DIR}/storage" ]]; then
+        tar -C "${ROOT_DIR}" \
+            --exclude='storage/backups' \
+            -czf "${backup_dir}/storage.tar.gz" \
+            storage
+    fi
+
+    backup_database "${backup_dir}"
+
+    echo "Backup created: ${backup_dir}" >&2
+    printf '%s' "${backup_dir}"
+}
+
+list_backups() {
+    local dir
+    local name
+    local sha
+    local branch
+    local found=false
+
+    ensure_storage_dirs
+    shopt -s nullglob
+    for dir in "${BACKUP_ROOT}"/*; do
+        [[ -d "${dir}" ]] || continue
+        if [[ "${found}" == false ]]; then
+            printf '%-16s  %-10s  %s\n' "ID" "BRANCH" "SHA"
+            found=true
+        fi
+        name="$(basename -- "${dir}")"
+        sha="unknown"
+        branch="unknown"
+        if [[ -f "${dir}/manifest.txt" ]]; then
+            sha="$(awk -F= '/^git_sha=/{print $2}' "${dir}/manifest.txt")"
+            branch="$(awk -F= '/^git_branch=/{print $2}' "${dir}/manifest.txt")"
+        fi
+        printf '%-16s  %-10s  %s\n' "${name}" "${branch:0:10}" "${sha:0:12}"
+    done
+    shopt -u nullglob
+    if [[ "${found}" == false ]]; then
+        echo "No backups in ${BACKUP_ROOT}."
+    fi
+}
+
+cmd_backup() {
+    create_backup >/dev/null
+}
+
+cmd_update() {
+    local before_sha
+    local after_sha
+    local backup_path=""
+    local ref
+    local pull_target
+
+    require_git_repo
+    verify_php
+    ensure_storage_dirs
+
+    before_sha="$(git_current_sha)"
+    ref="${UPDATE_REF}"
+    if [[ -z "${ref}" ]]; then
+        ref="$(git_current_branch)"
+        if [[ "${ref}" == "HEAD" || "${ref}" == "DETACHED" ]]; then
+            echo "Detached HEAD; pass --ref <branch|tag|commit>." >&2
+            exit 2
+        fi
+    fi
+
+    if git_working_tree_dirty && [[ "${FORCE_UPDATE}" != true ]]; then
+        echo "Working tree has local changes. Commit/stash them, or rerun with --force." >&2
+        git -C "${ROOT_DIR}" status --short >&2
+        exit 1
+    fi
+
+    if [[ "${NO_BACKUP}" != true ]]; then
+        echo "Creating pre-update backup..."
+        backup_path="$(create_backup)"
+        echo
+    fi
+
+    echo "Fetching from origin..."
+    git -C "${ROOT_DIR}" fetch --tags --prune origin
+
+    pull_target="${ref}"
+    if git -C "${ROOT_DIR}" show-ref --verify --quiet "refs/remotes/origin/${ref}"; then
+        pull_target="origin/${ref}"
+    fi
+
+    echo "Updating to ${pull_target} (fast-forward only)..."
+    if git -C "${ROOT_DIR}" rev-parse --verify --quiet "refs/heads/${ref}" >/dev/null; then
+        git -C "${ROOT_DIR}" checkout "${ref}"
+        git -C "${ROOT_DIR}" merge --ff-only "${pull_target}"
+    else
+        git -C "${ROOT_DIR}" checkout --detach "${pull_target}"
+    fi
+
+    after_sha="$(git_current_sha)"
+    ensure_storage_dirs
+
+    if [[ -f "${ENV_FILE}" ]]; then
+        verify_database_extension
+        php "${ROOT_DIR}/scripts/init_database.php"
+    else
+        echo "No .env found after update; run ./setup.sh install next."
+    fi
+
+    cat <<EOF
+
+Update complete.
+  Before: ${before_sha}
+  After:  ${after_sha}
+  Ref:    ${ref}
+EOF
+    if [[ -n "${backup_path}" ]]; then
+        echo "  Backup: ${backup_path}"
+        echo "  Rollback data: ./setup.sh restore $(basename -- "${backup_path}")"
+        echo "  Rollback code:  git -C ${ROOT_DIR} checkout ${before_sha}"
+    fi
+}
+
+cmd_restore() {
+    local source_dir
+    local pre_backup=""
+    local recorded_sha
+
+    verify_php
+    ensure_storage_dirs
+    source_dir="$(resolve_backup_dir "${RESTORE_TARGET}")"
+    echo "Restoring from ${source_dir}"
+
+    if [[ "${NO_BACKUP}" != true ]]; then
+        echo "Creating safety backup of current state..."
+        pre_backup="$(create_backup)"
+        echo
+    fi
+
+    if [[ -f "${source_dir}/env" ]]; then
+        cp -- "${source_dir}/env" "${ENV_FILE}"
+        chmod 600 "${ENV_FILE}"
+        echo "Restored .env"
+    fi
+
+    if [[ -f "${source_dir}/storage.tar.gz" ]]; then
+        # Keep existing backups directory intact while replacing other storage.
+        tar -C "${ROOT_DIR}" -xzf "${source_dir}/storage.tar.gz"
+        ensure_storage_dirs
+        echo "Restored storage/"
+    fi
+
+    restore_database "${source_dir}"
+
+    if [[ "${RESTORE_CODE}" == true ]]; then
+        require_git_repo
+        recorded_sha="$(awk -F= '/^git_sha=/{print $2}' "${source_dir}/manifest.txt" 2>/dev/null || true)"
+        if [[ -z "${recorded_sha}" ]]; then
+            echo "Backup has no git_sha; cannot restore code." >&2
+            exit 1
+        fi
+        if git_working_tree_dirty && [[ "${FORCE_UPDATE}" != true ]]; then
+            echo "Working tree dirty; refuse code restore without --force." >&2
+            exit 1
+        fi
+        git -C "${ROOT_DIR}" checkout "${recorded_sha}"
+        echo "Checked out code ${recorded_sha}"
+    fi
+
+    cat <<EOF
+
+Restore complete.
+  Source: ${source_dir}
+EOF
+    if [[ -n "${pre_backup}" ]]; then
+        echo "  Prior state saved at: ${pre_backup}"
+    fi
+}
+
+run_install() {
+    echo "NexWAYPOINT setup"
+    echo "Project: ${ROOT_DIR}"
+
+    install_packages
+    verify_php
+    ensure_storage_dirs
+
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        configure_new_env
+    else
+        echo "Keeping existing ${ENV_FILE}."
+        chmod 600 "${ENV_FILE}"
+    fi
+
+    verify_database_extension
+    php "${ROOT_DIR}/scripts/init_database.php"
+
+    if [[ "${SKIP_USER}" == false ]] && ask_yes_no "Create a local login now?" "y"; then
+        php "${ROOT_DIR}/scripts/create_user.php"
+    fi
+
+    install_cron_jobs
+
+    if [[ "${WITH_DEV}" == true ]]; then
+        if ! command -v composer >/dev/null 2>&1; then
+            echo "Composer is not on PATH. Dev tests are optional; the app itself does not need Composer." >&2
+        elif ask_yes_no "Install development/test dependencies (PHPUnit)?" "n"; then
+            composer install --working-dir="${ROOT_DIR}" --no-interaction --prefer-dist
+        fi
+    fi
+
+    cat <<EOF
 
 Setup complete.
 
 Site: ${SITE_URL}
 Code: ${ROOT_DIR}
-Web:  ${WEB_ROOT}  (should symlink to ${ROOT_DIR}/public)
+Web:  ${ROOT_DIR}/public   (set this as the domain Web Directory in the DreamHost panel)
 
 Next:
-  1. Confirm HTTPS is forced for ${DEFAULT_SITE_HOST} in the DreamHost panel
-  2. Open ${SITE_URL}/login.php
-  3. Forward travel confirmations to the dedicated IMAP mailbox once configured
+  1. In DreamHost panel → Domains → ${DEFAULT_SITE_HOST}, set Web Directory to:
+       ${ROOT_DIR}/public
+     Do not symlink or replace /home/dh_w9tij7/${DEFAULT_SITE_HOST}.
+  2. Confirm HTTPS is forced for ${DEFAULT_SITE_HOST}
+  3. Open ${SITE_URL}/login.php
+  4. Forward travel confirmations to the dedicated IMAP mailbox once configured
+
+Maintenance:
+  ./setup.sh backup
+  ./setup.sh update
+  ./setup.sh restore latest
+  ./setup.sh list-backups
 
 Application logs: ${ROOT_DIR}/storage/logs/app.log
 EOF
+}
+
+while (( $# > 0 )); do
+    case "$1" in
+        install|backup|update|restore|list-backups)
+            COMMAND="$1"
+            ;;
+        --backup)
+            COMMAND="backup"
+            ;;
+        --update)
+            COMMAND="update"
+            ;;
+        --restore)
+            COMMAND="restore"
+            if [[ "${2:-}" != "" && "${2:-}" != --* ]]; then
+                RESTORE_TARGET="$2"
+                shift
+            fi
+            ;;
+        --list-backups)
+            COMMAND="list-backups"
+            ;;
+        --ref)
+            UPDATE_REF="${2:-}"
+            if [[ -z "${UPDATE_REF}" ]]; then
+                echo "--ref requires a branch, tag, or commit." >&2
+                exit 2
+            fi
+            shift
+            ;;
+        --ref=*)
+            UPDATE_REF="${1#*=}"
+            ;;
+        --no-backup)
+            NO_BACKUP=true
+            ;;
+        --force)
+            FORCE_UPDATE=true
+            ;;
+        --code)
+            RESTORE_CODE=true
+            ;;
+        --skip-user) SKIP_USER=true ;;
+        --install-packages) SKIP_PACKAGES=false ;;
+        --with-dev) WITH_DEV=true ;;
+        --skip-packages)
+            SKIP_PACKAGES=true
+            ;;
+        --skip-web-root)
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            if [[ "${COMMAND}" == "restore" && "$1" != --* ]]; then
+                RESTORE_TARGET="$1"
+            else
+                echo "Unknown option: $1" >&2
+                usage >&2
+                exit 2
+            fi
+            ;;
+    esac
+    shift
+done
+
+case "${COMMAND}" in
+    install) run_install ;;
+    backup) cmd_backup ;;
+    update) cmd_update ;;
+    restore) cmd_restore ;;
+    list-backups) list_backups ;;
+    *)
+        echo "Unknown command: ${COMMAND}" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

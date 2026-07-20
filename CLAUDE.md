@@ -75,12 +75,14 @@ All PHP files pass `php -l`.
   overwrites an existing `.env`, skips an existing schema, and only installs
   cron jobs for services whose credentials are configured. Optional
   `--install-packages` / `--with-dev` exist for non-DreamHost hosts.
-- **Production host layout is split clone vs web root.** Code lives at
-  `/home/dh_w9tij7/NexWAYPOINT`; the public site is
-  `https://nexwaypoint.area51consulting.com` with DreamHost document root
-  `/home/dh_w9tij7/nexwaypoint.area51consulting.com` symlinked to
-  `NexWAYPOINT/public`. Storage and secrets stay under the clone, never
-  under the web-facing directory.
+  Maintenance commands: `backup`, `update` (git pull with pre-backup),
+  `restore`, and `list-backups`.
+- **Production host layout keeps the DreamHost domain folder alone.** Code
+  lives at `/home/dh_w9tij7/NexWAYPOINT`; the public site is
+  `https://nexwaypoint.area51consulting.com`. Set the domain's Web Directory
+  in the DreamHost panel to `/home/dh_w9tij7/NexWAYPOINT/public`. Do not
+  symlink or replace `/home/dh_w9tij7/nexwaypoint.area51consulting.com`.
+  Storage and secrets stay under the clone, never under a web-facing path.
 
 ## Things to watch out for
 

@@ -4,7 +4,9 @@ vendor/
 storage/logs/*.log
 storage/cache/*
 storage/uploads/hotel_photos/*
+storage/backups/*
 storage/*.sqlite
 !storage/logs/.gitkeep
 !storage/cache/.gitkeep
 !storage/uploads/hotel_photos/.gitkeep
+!storage/backups/.gitkeep

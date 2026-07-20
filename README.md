@@ -87,10 +87,12 @@ flagged here instead of silently guessed.
 |---|---|
 | Public site | https://nexwaypoint.area51consulting.com |
 | Git clone | `/home/dh_w9tij7/NexWAYPOINT` |
-| Web document root | `/home/dh_w9tij7/nexwaypoint.area51consulting.com` → symlink to `NexWAYPOINT/public` |
+| Panel Web Directory | `/home/dh_w9tij7/NexWAYPOINT/public` |
 
-Keep the clone outside the web root so `config/`, `src/`, `.env`, and
-`storage/` are never HTTP-accessible. `setup.sh` can create the symlink.
+Keep the clone's Web Directory pointed at `public/` so `config/`, `src/`,
+`.env`, and `storage/` stay outside HTTP reach. Set that path in the
+DreamHost panel for the domain — do **not** symlink or replace
+`/home/dh_w9tij7/nexwaypoint.area51consulting.com`.
 
 1. Create an empty MySQL database + user in the DreamHost panel.
 2. Clone and install:
@@ -101,10 +103,6 @@ git clone <repository-url> NexWAYPOINT
 cd NexWAYPOINT
 bash setup.sh
 ```
-
-The installer defaults the web-root prompt to
-`/home/dh_w9tij7/nexwaypoint.area51consulting.com` and links it to
-`public/`.
 
 **No sudo, apt, or Composer is required for production.** DreamHost does
 not give this account package privileges. Use the DreamHost panel for
@@ -117,20 +115,59 @@ on a machine that already has Composer). `setup.sh` then:
   `/home/dh_w9tij7/NexWAYPOINT/storage/...`;
 - prompts for MySQL/SQLite, optional IMAP, and optional FlightAware settings;
 - creates writable storage directories and installs the database schema;
-- securely creates the first local user;
-- wires the DreamHost document root via symlink; and
+- securely creates the first local user; and
 - optionally installs the configured mail/flight cron jobs.
 
 It is safe to rerun. Use `bash setup.sh --help` for options
-(`--skip-web-root`, `--skip-user`, `--with-dev`). To add another
+(`--skip-user`, `--with-dev`). To add another
 local user later:
 
 ```bash
 php scripts/create_user.php
 ```
 
-Force HTTPS for the subdomain in the DreamHost panel, then open
+In the DreamHost panel, set the domain Web Directory to
+`/home/dh_w9tij7/NexWAYPOINT/public`, force HTTPS, then open
 https://nexwaypoint.area51consulting.com/login.php.
+
+### Backup / update / restore
+
+Backups live under `storage/backups/<timestamp>/` (outside the web root)
+and include `.env`, a `storage/` archive (excluding prior backups), a DB
+dump when `mysqldump`/`sqlite` is available, and a manifest with the git
+SHA.
+
+```bash
+# Snapshot current .env, storage, and database
+bash setup.sh backup
+
+# List backup IDs
+bash setup.sh list-backups
+
+# Backup, then git fetch + fast-forward pull on the current branch
+bash setup.sh update
+
+# Update to a specific branch/tag/commit
+bash setup.sh update --ref main
+
+# Restore data from the newest backup (makes a safety backup first)
+bash setup.sh restore latest
+
+# Restore data and check out the recorded git SHA
+bash setup.sh restore 20260719213000 --code
+
+# Skip the automatic safety backup
+bash setup.sh update --no-backup
+bash setup.sh restore latest --no-backup
+```
+
+If the working tree has local edits, `update` refuses unless you pass
+`--force`. Rollback after a bad update:
+
+```bash
+bash setup.sh restore latest          # data
+git checkout <sha-from-update-output> # code, if needed
+```
 
 If cron must be configured through the DreamHost panel instead of the
 installer:
