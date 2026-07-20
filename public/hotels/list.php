@@ -36,7 +36,8 @@ $bathLabels = ['tub' => 'Tub', 'walk_in_shower' => 'Walk-in shower'];
     <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/list.php">Hotels</a>
+        <a href="/hotels/properties.php">Hotels</a>
+        <a href="/hotels/list.php">Stays</a>
         <a href="/hotels/add.php">+ Log a stay</a>
         <a href="/flights/add.php">+ Add a flight</a>
         <a href="/logout.php">Sign out (<?= htmlspecialchars($user->displayName, ENT_QUOTES) ?>)</a>

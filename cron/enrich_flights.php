@@ -12,6 +12,7 @@ declare(strict_types=1);
  */
 
 use NexWaypoint\Trips\AlertEvaluator;
+use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\FlightAwareClient;
 use NexWaypoint\Trips\FlightStatusRepository;
 use NexWaypoint\Trips\NotificationRepository;
@@ -23,6 +24,7 @@ $logger = $app['logger'];
 $db = $app['db'];
 
 $tripRepo = new TripRepository($db, $logger);
+$carrierRepo = new CarrierRepository($db, $logger);
 $flightStatusRepo = new FlightStatusRepository($db);
 $notificationRepo = new NotificationRepository($db);
 $alertEvaluator = new AlertEvaluator($notificationRepo, $logger);
@@ -42,16 +44,26 @@ foreach ($segments as $segment) {
         continue;
     }
 
+    $ident = $segment->flightNumber;
+    if ($segment->carrierId !== null) {
+        $carrier = $carrierRepo->find($segment->carrierId);
+        if ($carrier !== null) {
+            $built = $carrier->flightIdent($segment->flightNumber);
+            if ($built !== null) {
+                $ident = $built;
+            }
+        }
+    }
+
     try {
         $before = $segment->id !== null ? $flightStatusRepo->findBySegment($segment->id) : null;
-        $after = $flightAware->enrichSegment($segment, $segment->flightNumber);
+        $after = $flightAware->enrichSegment($segment, $ident);
 
         if ($after === null) {
             $skipped++;
             continue;
         }
 
-        $trip = null;
         $ownerRow = $db->fetchOne('SELECT owner_id FROM trips WHERE id = :id', ['id' => $segment->tripId]);
         if ($ownerRow !== null) {
             $alertEvaluator->evaluate((int) $ownerRow['owner_id'], $segment, $before, $after);

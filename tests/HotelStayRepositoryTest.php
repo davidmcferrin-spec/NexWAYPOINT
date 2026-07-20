@@ -34,6 +34,7 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
             'stateRegion' => 'IL',
             'postalCode' => '60601',
             'country' => 'USA',
+            'phone' => null,
             'latitude' => null,
             'longitude' => null,
             'hasDesk' => true,
@@ -50,6 +51,8 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
             'hasOffsiteGym' => false,
             'walkToOffice' => false,
             'walkToOfficeNotes' => null,
+            'hasDestinationFee' => false,
+            'destinationFeeNotes' => null,
             'wifiQuality' => 5,
             'noiseLevel' => 2,
             'uniqueFeatures' => null,
@@ -235,6 +238,7 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
             'hasOffsiteGym' => true,
             'walkToOffice' => true,
             'walkToOfficeNotes' => 'NewsNation bureau',
+            'phone' => '312-555-0100',
         ]));
 
         $found = $this->properties->find((int) $created->id);
@@ -244,6 +248,80 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
         self::assertTrue($found->hasOffsiteGym);
         self::assertTrue($found->walkToOffice);
         self::assertSame('NewsNation bureau', $found->walkToOfficeNotes);
+        self::assertSame('312-555-0100', $found->phone);
+    }
+
+    public function testLocationsForUserAndFindAtLocation(): void
+    {
+        $userId = $this->insertUser('dave');
+        $this->properties->create($this->makeProperty($userId, [
+            'hotelName' => 'Hyatt Chicago',
+            'city' => 'Chicago',
+            'stateRegion' => 'IL',
+        ]));
+        $this->properties->create($this->makeProperty($userId, [
+            'hotelName' => 'Marriott Chicago',
+            'city' => 'Chicago',
+            'stateRegion' => 'IL',
+        ]));
+        $this->properties->create($this->makeProperty($userId, [
+            'hotelName' => 'Hilton Dallas',
+            'city' => 'Dallas',
+            'stateRegion' => 'TX',
+        ]));
+
+        $locations = $this->properties->locationsForUser($userId);
+        self::assertCount(2, $locations);
+        $labels = array_column($locations, 'label');
+        self::assertContains('Chicago, IL', $labels);
+        self::assertContains('Dallas, TX', $labels);
+
+        $chicago = $this->properties->findForUserAtLocation($userId, 'Chicago', 'IL');
+        self::assertCount(2, $chicago);
+    }
+
+    public function testDestinationFeeAndSearchFilters(): void
+    {
+        $userId = $this->insertUser('dave');
+        $this->properties->create($this->makeProperty($userId, [
+            'hotelName' => 'Fee Hotel',
+            'city' => 'Austin',
+            'stateRegion' => 'TX',
+            'hasDestinationFee' => true,
+            'destinationFeeNotes' => '$40/night',
+        ]));
+        $this->properties->create($this->makeProperty($userId, [
+            'hotelName' => 'No Fee Inn',
+            'city' => 'Austin',
+            'stateRegion' => 'TX',
+            'hasDestinationFee' => false,
+        ]));
+
+        $withFee = $this->properties->searchForUser($userId, ['destination_fee' => '1', 'city' => 'Austin']);
+        self::assertCount(1, $withFee);
+        self::assertSame('Fee Hotel', $withFee[0]->hotelName);
+        self::assertSame('$40/night', $withFee[0]->destinationFeeNotes);
+    }
+
+    public function testTeammateAdversePreferencesAreVisible(): void
+    {
+        $dave = $this->insertUser('dave');
+        $sara = $this->insertUser('sara');
+        $this->properties->create($this->makeProperty($sara, [
+            'hotelName' => 'Shared Name Hotel',
+            'city' => 'Nashville',
+            'isBlacklisted' => true,
+            'blacklistReason' => 'Mold',
+        ]));
+        $this->properties->create($this->makeProperty($dave, [
+            'hotelName' => 'Shared Name Hotel',
+            'city' => 'Nashville',
+        ]));
+
+        $adverse = $this->properties->findTeammateAdversePreferences($dave, 'Shared Name Hotel', 'Nashville');
+        self::assertCount(1, $adverse);
+        self::assertSame('Sara', $adverse[0]['display_name']);
+        self::assertSame('Mold', $adverse[0]['reason']);
     }
 
     public function testDeleteRemovesRowAndClearsOverallRating(): void

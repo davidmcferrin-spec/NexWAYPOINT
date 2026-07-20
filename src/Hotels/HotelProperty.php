@@ -17,6 +17,7 @@ final class HotelProperty
         public readonly ?string $stateRegion,
         public readonly ?string $postalCode,
         public readonly ?string $country,
+        public readonly ?string $phone,
         public readonly ?float $latitude,
         public readonly ?float $longitude,
         public readonly bool $hasDesk,
@@ -33,6 +34,8 @@ final class HotelProperty
         public readonly bool $hasOffsiteGym,
         public readonly bool $walkToOffice,
         public readonly ?string $walkToOfficeNotes,
+        public readonly bool $hasDestinationFee,
+        public readonly ?string $destinationFeeNotes,
         public readonly ?int $wifiQuality,
         public readonly ?int $noiseLevel,
         public readonly ?string $uniqueFeatures,
@@ -58,6 +61,7 @@ final class HotelProperty
             stateRegion: $row['state_region'] ?? null,
             postalCode: $row['postal_code'] ?? null,
             country: $row['country'] ?? null,
+            phone: $row['phone'] ?? null,
             latitude: isset($row['latitude']) ? (float) $row['latitude'] : null,
             longitude: isset($row['longitude']) ? (float) $row['longitude'] : null,
             hasDesk: (bool) $row['has_desk'],
@@ -74,6 +78,8 @@ final class HotelProperty
             hasOffsiteGym: (bool) ($row['has_offsite_gym'] ?? false),
             walkToOffice: (bool) ($row['walk_to_office'] ?? false),
             walkToOfficeNotes: $row['walk_to_office_notes'] ?? null,
+            hasDestinationFee: (bool) ($row['has_destination_fee'] ?? false),
+            destinationFeeNotes: $row['destination_fee_notes'] ?? null,
             wifiQuality: isset($row['wifi_quality']) ? (int) $row['wifi_quality'] : null,
             noiseLevel: isset($row['noise_level']) ? (int) $row['noise_level'] : null,
             uniqueFeatures: $row['unique_features'] ?? null,
@@ -99,6 +105,7 @@ final class HotelProperty
             'state_region' => $this->stateRegion,
             'postal_code' => $this->postalCode,
             'country' => $this->country,
+            'phone' => $this->phone,
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,
             'has_desk' => $this->hasDesk,
@@ -115,6 +122,8 @@ final class HotelProperty
             'has_offsite_gym' => $this->hasOffsiteGym,
             'walk_to_office' => $this->walkToOffice,
             'walk_to_office_notes' => $this->walkToOfficeNotes,
+            'has_destination_fee' => $this->hasDestinationFee,
+            'destination_fee_notes' => $this->destinationFeeNotes,
             'wifi_quality' => $this->wifiQuality,
             'noise_level' => $this->noiseLevel,
             'unique_features' => $this->uniqueFeatures,
@@ -128,5 +137,43 @@ final class HotelProperty
     {
         $city = $this->city !== null && $this->city !== '' ? ", {$this->city}" : '';
         return $this->hotelName . $city;
+    }
+
+    /** Stable key for City, State location filtering. */
+    public function locationKey(): ?string
+    {
+        $city = trim((string) $this->city);
+        if ($city === '') {
+            return null;
+        }
+        $state = trim((string) $this->stateRegion);
+        return self::makeLocationKey($city, $state !== '' ? $state : null);
+    }
+
+    public function locationLabel(): ?string
+    {
+        $city = trim((string) $this->city);
+        if ($city === '') {
+            return null;
+        }
+        $state = trim((string) $this->stateRegion);
+        return $state !== '' ? "{$city}, {$state}" : $city;
+    }
+
+    public static function makeLocationKey(string $city, ?string $stateRegion): string
+    {
+        return strtolower(trim($city)) . '|' . strtolower(trim((string) $stateRegion));
+    }
+
+    /**
+     * @return array{city: string, state_region: string}
+     */
+    public static function parseLocationKey(string $key): array
+    {
+        $parts = explode('|', $key, 2);
+        return [
+            'city' => $parts[0] ?? '',
+            'state_region' => $parts[1] ?? '',
+        ];
     }
 }

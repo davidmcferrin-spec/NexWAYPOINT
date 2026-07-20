@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
 use NexWaypoint\Core\Env;
-use NexWaypoint\Hotels\HotelProperty;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStay;
 use NexWaypoint\Hotels\HotelStayRepository;
@@ -26,7 +25,6 @@ $otherUsers = array_values(array_filter(
 ));
 
 $errors = [];
-$blacklistWarning = null;
 
 function nullableTrim(?string $value): ?string
 {
@@ -44,90 +42,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'Your session expired. Please resubmit the form.';
     } else {
         $selectedPropertyId = (int) ($_POST['hotel_property_id'] ?? 0);
-        $property = null;
 
         try {
-            if ($selectedPropertyId > 0) {
-                $property = $propertyRepo->find($selectedPropertyId);
-                if ($property === null || $property->userId !== $user->id) {
-                    throw new InvalidArgumentException('Selected property was not found.');
-                }
-                // Allow updating amenities on an existing property when logging a new stay.
-                $property = $propertyRepo->update(new HotelProperty(
-                    id: $property->id,
-                    userId: $user->id,
-                    hotelName: $property->hotelName,
-                    brand: nullableTrim($_POST['brand'] ?? null) ?? $property->brand,
-                    addressLine1: nullableTrim($_POST['address_line1'] ?? null) ?? $property->addressLine1,
-                    addressLine2: nullableTrim($_POST['address_line2'] ?? null) ?? $property->addressLine2,
-                    city: nullableTrim($_POST['city'] ?? null) ?? $property->city,
-                    stateRegion: nullableTrim($_POST['state_region'] ?? null) ?? $property->stateRegion,
-                    postalCode: nullableTrim($_POST['postal_code'] ?? null) ?? $property->postalCode,
-                    country: nullableTrim($_POST['country'] ?? null) ?? $property->country,
-                    latitude: $property->latitude,
-                    longitude: $property->longitude,
-                    hasDesk: $checkbox('has_desk'),
-                    deskNotes: nullableTrim($_POST['desk_notes'] ?? null),
-                    hasPool: $checkbox('has_pool'),
-                    hasHotTub: $checkbox('has_hot_tub'),
-                    hasBreakfast: $checkbox('has_breakfast'),
-                    breakfastNotes: nullableTrim($_POST['breakfast_notes'] ?? null),
-                    hasGym: $checkbox('has_gym'),
-                    hasFreeParking: $checkbox('has_free_parking'),
-                    hasAirportShuttle: $checkbox('has_airport_shuttle'),
-                    hasEvCharging: $checkbox('has_ev_charging'),
-                    hasOnsiteRestaurant: $checkbox('has_onsite_restaurant'),
-                    hasOffsiteGym: $checkbox('has_offsite_gym'),
-                    walkToOffice: $checkbox('walk_to_office'),
-                    walkToOfficeNotes: nullableTrim($_POST['walk_to_office_notes'] ?? null),
-                    wifiQuality: $_POST['wifi_quality'] !== '' ? (int) $_POST['wifi_quality'] : null,
-                    noiseLevel: $_POST['noise_level'] !== '' ? (int) $_POST['noise_level'] : null,
-                    uniqueFeatures: nullableTrim($_POST['unique_features'] ?? null),
-                    isBlacklisted: $checkbox('is_blacklisted'),
-                    blacklistReason: nullableTrim($_POST['blacklist_reason'] ?? null),
-                    overallRating: $property->overallRating,
-                ), $user->id);
-            } else {
-                $hotelName = trim((string) ($_POST['hotel_name'] ?? ''));
-                $city = nullableTrim($_POST['city'] ?? null);
-                $match = $propertyRepo->findMatchingBlacklist($user->id, $hotelName, $city);
-                if ($match !== null) {
-                    $blacklistWarning = "You blacklisted \"{$match->hotelName}\": " . ($match->blacklistReason ?? 'no reason recorded.');
-                }
+            if ($selectedPropertyId < 1) {
+                throw new InvalidArgumentException('Select a hotel property (or Add New from the property list).');
+            }
 
-                $property = $propertyRepo->create(new HotelProperty(
-                    id: null,
-                    userId: $user->id,
-                    hotelName: $hotelName,
-                    brand: nullableTrim($_POST['brand'] ?? null),
-                    addressLine1: nullableTrim($_POST['address_line1'] ?? null),
-                    addressLine2: nullableTrim($_POST['address_line2'] ?? null),
-                    city: $city,
-                    stateRegion: nullableTrim($_POST['state_region'] ?? null),
-                    postalCode: nullableTrim($_POST['postal_code'] ?? null),
-                    country: nullableTrim($_POST['country'] ?? null),
-                    latitude: null,
-                    longitude: null,
-                    hasDesk: $checkbox('has_desk'),
-                    deskNotes: nullableTrim($_POST['desk_notes'] ?? null),
-                    hasPool: $checkbox('has_pool'),
-                    hasHotTub: $checkbox('has_hot_tub'),
-                    hasBreakfast: $checkbox('has_breakfast'),
-                    breakfastNotes: nullableTrim($_POST['breakfast_notes'] ?? null),
-                    hasGym: $checkbox('has_gym'),
-                    hasFreeParking: $checkbox('has_free_parking'),
-                    hasAirportShuttle: $checkbox('has_airport_shuttle'),
-                    hasEvCharging: $checkbox('has_ev_charging'),
-                    hasOnsiteRestaurant: $checkbox('has_onsite_restaurant'),
-                    hasOffsiteGym: $checkbox('has_offsite_gym'),
-                    walkToOffice: $checkbox('walk_to_office'),
-                    walkToOfficeNotes: nullableTrim($_POST['walk_to_office_notes'] ?? null),
-                    wifiQuality: $_POST['wifi_quality'] !== '' ? (int) $_POST['wifi_quality'] : null,
-                    noiseLevel: $_POST['noise_level'] !== '' ? (int) $_POST['noise_level'] : null,
-                    uniqueFeatures: nullableTrim($_POST['unique_features'] ?? null),
-                    isBlacklisted: $checkbox('is_blacklisted'),
-                    blacklistReason: nullableTrim($_POST['blacklist_reason'] ?? null),
-                ), $user->id);
+            $property = $propertyRepo->find($selectedPropertyId);
+            if ($property === null || $property->userId !== $user->id) {
+                throw new InvalidArgumentException('Selected property was not found.');
             }
 
             $bedType = nullableTrim($_POST['bed_type'] ?? null);
@@ -204,17 +127,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $selectedPropertyId = (int) ($_POST['hotel_property_id'] ?? $_GET['property_id'] ?? 0);
-$prefill = null;
 if ($selectedPropertyId > 0) {
-    $prefill = $propertyRepo->find($selectedPropertyId);
-    if ($prefill === null || $prefill->userId !== $user->id) {
-        $prefill = null;
+    $check = $propertyRepo->find($selectedPropertyId);
+    if ($check === null || $check->userId !== $user->id) {
         $selectedPropertyId = 0;
     }
 }
 
+$propertiesJson = array_map(static function ($p) {
+    return [
+        'id' => $p->id,
+        'hotel_name' => $p->hotelName,
+        'city' => $p->city,
+        'state_region' => $p->stateRegion,
+        'location_key' => $p->locationKey(),
+        'location_label' => $p->locationLabel(),
+        'label' => $p->label(),
+        'overall_rating' => $p->overallRating,
+        'phone' => $p->phone,
+    ];
+}, $existingProperties);
+
 $isPrivate = isset($_POST['is_private']) && $_POST['is_private'] === '1';
 $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
+$property = null; // for modal include
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -223,13 +159,15 @@ $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NexWAYPOINT &middot; Log a Hotel Stay</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
+    <script src="/assets/hotel-picker.js" defer></script>
 </head>
 <body>
 <nav class="navbar">
     <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/list.php">Hotels</a>
+        <a href="/hotels/properties.php">Hotels</a>
+        <a href="/hotels/list.php">Stays</a>
         <a href="/hotels/add.php">+ Log a stay</a>
         <a href="/flights/add.php">+ Add a flight</a>
         <a href="/logout.php">Sign out</a>
@@ -242,102 +180,27 @@ $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
     <?php foreach ($errors as $error): ?>
         <p class="alert alert-error"><?= htmlspecialchars($error, ENT_QUOTES) ?></p>
     <?php endforeach; ?>
-    <?php if ($blacklistWarning !== null): ?>
-        <p class="alert alert-error"><?= htmlspecialchars($blacklistWarning, ENT_QUOTES) ?></p>
-    <?php endif; ?>
 
     <form class="stack" method="post" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
 
-        <fieldset>
+        <fieldset id="hotel-picker"
+            data-csrf="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>"
+            data-selected-id="<?= (int) $selectedPropertyId ?>"
+            data-properties="<?= htmlspecialchars(json_encode($propertiesJson, JSON_UNESCAPED_UNICODE), ENT_QUOTES) ?>">
             <legend>Property</legend>
-            <label>Previously stayed property
-                <select name="hotel_property_id" id="hotel_property_id" onchange="window.location='?property_id='+encodeURIComponent(this.value)">
-                    <option value="0">— New property —</option>
-                    <?php foreach ($existingProperties as $prop): ?>
-                        <option value="<?= (int) $prop->id ?>" <?= $selectedPropertyId === $prop->id ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($prop->label(), ENT_QUOTES) ?>
-                            <?php if ($prop->overallRating !== null): ?>
-                                (<?= number_format($prop->overallRating, 1) ?>★)
-                            <?php endif; ?>
-                        </option>
-                    <?php endforeach; ?>
+            <p class="hint">Choose a City, State, then the hotel. Use Add New to create a property.</p>
+            <label>City, State
+                <select id="location_key" name="location_key">
+                    <option value="">— Select location —</option>
                 </select>
             </label>
-            <p class="hint">Pick a prior property to reuse amenities, or choose New property.</p>
-
-            <label>Hotel name<input type="text" name="hotel_name" <?= $prefill === null ? 'required' : 'readonly' ?>
-                value="<?= htmlspecialchars($prefill->hotelName ?? (string) ($_POST['hotel_name'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>Brand<input type="text" name="brand" value="<?= htmlspecialchars($prefill->brand ?? (string) ($_POST['brand'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>Address line 1<input type="text" name="address_line1" value="<?= htmlspecialchars($prefill->addressLine1 ?? (string) ($_POST['address_line1'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>Address line 2<input type="text" name="address_line2" value="<?= htmlspecialchars($prefill->addressLine2 ?? (string) ($_POST['address_line2'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>City<input type="text" name="city" value="<?= htmlspecialchars($prefill->city ?? (string) ($_POST['city'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>State / region<input type="text" name="state_region" value="<?= htmlspecialchars($prefill->stateRegion ?? (string) ($_POST['state_region'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>Postal code<input type="text" name="postal_code" value="<?= htmlspecialchars($prefill->postalCode ?? (string) ($_POST['postal_code'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>Country<input type="text" name="country" value="<?= htmlspecialchars($prefill->country ?? (string) ($_POST['country'] ?? ''), ENT_QUOTES) ?>"></label>
-        </fieldset>
-
-        <fieldset>
-            <legend>Amenities (property)</legend>
-            <div class="checkbox-grid">
-                <?php
-                $amenityChecks = [
-                    'has_desk' => 'Desk suitable for working',
-                    'has_pool' => 'Pool',
-                    'has_hot_tub' => 'Hot tub',
-                    'has_breakfast' => 'Breakfast included',
-                    'has_gym' => 'On-site gym',
-                    'has_offsite_gym' => 'Off-site gym',
-                    'has_free_parking' => 'Free parking',
-                    'has_airport_shuttle' => 'Airport shuttle',
-                    'has_ev_charging' => 'EV charging',
-                    'has_onsite_restaurant' => 'On-site restaurant',
-                    'walk_to_office' => 'Walking distance to office/venue',
-                ];
-                foreach ($amenityChecks as $name => $label):
-                    $checked = $prefill !== null
-                        ? match ($name) {
-                            'has_desk' => $prefill->hasDesk,
-                            'has_pool' => $prefill->hasPool,
-                            'has_hot_tub' => $prefill->hasHotTub,
-                            'has_breakfast' => $prefill->hasBreakfast,
-                            'has_gym' => $prefill->hasGym,
-                            'has_offsite_gym' => $prefill->hasOffsiteGym,
-                            'has_free_parking' => $prefill->hasFreeParking,
-                            'has_airport_shuttle' => $prefill->hasAirportShuttle,
-                            'has_ev_charging' => $prefill->hasEvCharging,
-                            'has_onsite_restaurant' => $prefill->hasOnsiteRestaurant,
-                            'walk_to_office' => $prefill->walkToOffice,
-                            default => false,
-                        }
-                        : (isset($_POST[$name]) && $_POST[$name] === '1');
-                    ?>
-                    <label><input type="checkbox" name="<?= $name ?>" value="1" <?= $checked ? 'checked' : '' ?>> <?= htmlspecialchars($label, ENT_QUOTES) ?></label>
-                <?php endforeach; ?>
-            </div>
-            <label>Which office / venue (if walking distance)<input type="text" name="walk_to_office_notes"
-                value="<?= htmlspecialchars($prefill->walkToOfficeNotes ?? (string) ($_POST['walk_to_office_notes'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>Desk notes<input type="text" name="desk_notes" value="<?= htmlspecialchars($prefill->deskNotes ?? (string) ($_POST['desk_notes'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>Breakfast notes<input type="text" name="breakfast_notes" value="<?= htmlspecialchars($prefill->breakfastNotes ?? (string) ($_POST['breakfast_notes'] ?? ''), ENT_QUOTES) ?>"></label>
-            <label>WiFi quality (1-5)
-                <select name="wifi_quality">
-                    <option value="">—</option>
-                    <?php for ($i = 1; $i <= 5; $i++): ?>
-                        <option value="<?= $i ?>" <?= (($prefill->wifiQuality ?? ($_POST['wifi_quality'] ?? '')) == $i) ? 'selected' : '' ?>><?= $i ?></option>
-                    <?php endfor; ?>
+            <label>Hotel property
+                <select name="hotel_property_id" id="hotel_property_id" required>
+                    <option value="">— Select property —</option>
+                    <option value="__new__">— Add New… —</option>
                 </select>
             </label>
-            <label>Noise level (1 = quiet, 5 = loud)
-                <select name="noise_level">
-                    <option value="">—</option>
-                    <?php for ($i = 1; $i <= 5; $i++): ?>
-                        <option value="<?= $i ?>" <?= (($prefill->noiseLevel ?? ($_POST['noise_level'] ?? '')) == $i) ? 'selected' : '' ?>><?= $i ?></option>
-                    <?php endfor; ?>
-                </select>
-            </label>
-            <label>Unique features<textarea name="unique_features" rows="2"><?= htmlspecialchars($prefill->uniqueFeatures ?? (string) ($_POST['unique_features'] ?? ''), ENT_QUOTES) ?></textarea></label>
-            <label><input type="checkbox" name="is_blacklisted" value="1" <?= ($prefill?->isBlacklisted || (isset($_POST['is_blacklisted']) && $_POST['is_blacklisted'] === '1')) ? 'checked' : '' ?>> Blacklist this property</label>
-            <label>Blacklist reason<input type="text" name="blacklist_reason" value="<?= htmlspecialchars($prefill->blacklistReason ?? (string) ($_POST['blacklist_reason'] ?? ''), ENT_QUOTES) ?>"></label>
         </fieldset>
 
         <fieldset>
@@ -393,5 +256,19 @@ $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
         <button type="submit" class="primary">Save stay</button>
     </form>
 </main>
+
+<div id="property-modal" class="modal-backdrop" hidden>
+    <div class="modal-panel" role="dialog" aria-labelledby="property-modal-title">
+        <h2 id="property-modal-title">Add hotel property</h2>
+        <p id="property-modal-error" class="alert alert-error" hidden></p>
+        <form id="property-modal-form" class="stack">
+            <?php require __DIR__ . '/_property_form_fields.php'; ?>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Save property</button>
+                <button type="button" class="secondary" data-close-modal>Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
 </body>
 </html>

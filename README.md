@@ -9,13 +9,17 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
 
 - **Hotel property + stay tracker** -- properties hold identity/amenities
   (desk/pool/hot tub/breakfast/gym/off-site gym/parking/shuttle/EV charging/
-  on-site restaurant/walk-to-office, WiFi and noise, blacklist). Stays hold
-  visit-specific data (dates, room number, bed/bathroom type, this stay's
-  1–5 rating, price, photos). Overall property rating is the average of
-  stay ratings. When logging a stay you can pick a prior property or create
-  a new one. Warns before you book somewhere you've blacklisted. Suggests
-  criteria you might not be tracking yet, and flags recurring themes in
-  free-text notes.
+  on-site restaurant/walk-to-office, WiFi and noise, phone, blacklist). Stays
+  hold visit-specific data (dates, room number, bed/bathroom type, this stay's
+  1–5 rating, price, photos). Overall property rating is the average of stay
+  ratings. Log a stay by picking **City, State** then a property (or Add New
+  in a modal). Browse/filter/sort properties at `/hotels/properties.php`
+  (destination fee, blacklist, teammate adverse prefs). Edit property details
+  from the stay view. Blacklist is per-user; teammates can see matching
+  adverse preferences (name + reason) for the same hotel/location.
+- **Reusable airline carriers** -- each carrier stores name + IATA; flight
+  entry is carrier dropdown + flight number only. FlightAware enrichment
+  builds the ident as IATA + number. Manage/edit carriers at `/flights/carriers.php`.
 - **Travel dashboard** -- a status engine that resolves each person's
   current state (Home / Office / Remote / In Flight / Layover in X /
   Delayed / At hotel in X) from trip segments and manual overrides.
@@ -268,11 +272,12 @@ composer test              # or: vendor/bin/phpunit
 
 Tests build a fresh in-memory SQLite database per test from
 `database/schema.sqlite.sql` -- no external DB or network access required.
-Current coverage: hotel property + stay repositories (CRUD, property reuse,
-stay rating → overall average, amenity/room validation, blacklist matching),
-visibility engine (all five directions + override precedence), trip status
-engine (home/in-flight/layover/manual override), and the generic hotel
-parser (5 synthetic fixtures).
+Current coverage: hotel property + stay repositories (CRUD, location
+cascade helpers, stay rating → overall average, amenity/room validation,
+blacklist matching), reusable carriers (IATA + flight ident), visibility
+engine (all five directions + override precedence), trip status engine
+(home/in-flight/layover/manual override), and the generic hotel parser
+(5 synthetic fixtures).
 
 ## Project layout
 

@@ -60,11 +60,16 @@ instead of a pending-confirmation flow).
   city+date only. Managers get total exposure of team travel; subordinates
   have limited exposure of managers. Per-hotel / per-trip `is_private` and
   `visibility_blocks` can hide an item from everyone or from selected users.
-- **Hotels are properties vs stays.** Property identity/amenities/blacklist
-  live on `hotel_properties`; visit-specific room/bed/bath/`stay_rating`
+- **Hotels are properties vs stays.** Property identity/amenities/blacklist/
+  phone live on `hotel_properties`; visit-specific room/bed/bath/`stay_rating`
   live on `hotel_stays`. `overall_rating` on the property is
   `AVG(stay_rating)` recomputed on stay create/update/delete. Add-stay UI
-  can pick a prior property or create a new one.
+  filters by **City, State** then property; Add New is a modal. Edit via
+  `public/hotels/edit-property.php`.
+- **Carriers own IATA.** Per-user `carriers` table (name + iata_code);
+  `trip_segments.carrier_id` links flights. Flight form asks for flight
+  number only; enrichment builds FlightAware ident as IATA+number.
+  Manage at `public/flights/carriers.php`.
 - **Auto-import creates the hotel stay directly + notifies**, rather than
   a pending-approval queue the user has to click through. The original
   "We found a trip... Confirm?" flow from the pasted spec is more UI than

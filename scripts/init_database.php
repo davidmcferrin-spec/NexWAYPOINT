@@ -19,6 +19,7 @@ try {
         'hotel_stays',
         'hotel_photos',
         'trips',
+        'carriers',
         'trip_segments',
         'flight_status',
         'parse_log',

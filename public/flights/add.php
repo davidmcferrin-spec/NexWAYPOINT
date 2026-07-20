@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Trips\Carrier;
+use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripSegment;
@@ -14,8 +16,10 @@ $user = $app['auth']->requireAuth();
 
 $userRepo = new UserRepository($app['db'], $app['logger']);
 $tripRepo = new TripRepository($app['db'], $app['logger']);
+$carrierRepo = new CarrierRepository($app['db'], $app['logger']);
 $blockRepo = new VisibilityBlockRepository($app['db']);
 
+$carriers = $carrierRepo->findForUser($user->id);
 $errors = [];
 $otherUsers = array_values(array_filter(
     $userRepo->findAllActive(),
@@ -35,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $errors[] = 'Your session expired. Please resubmit the form.';
     } else {
-        $carrier = nullableTrimFlight($_POST['carrier'] ?? null);
+        $carrierId = (int) ($_POST['carrier_id'] ?? 0);
         $flightNumber = nullableTrimFlight($_POST['flight_number'] ?? null);
         $origin = nullableTrimFlight($_POST['origin'] ?? null);
         $destination = nullableTrimFlight($_POST['destination'] ?? null);
@@ -47,8 +51,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $isPrivate = isset($_POST['is_private']) && $_POST['is_private'] === '1';
         $hideFrom = array_map('intval', $_POST['hide_from'] ?? []);
 
-        if ($carrier === null) {
-            $errors[] = 'Carrier is required.';
+        $carrier = $carrierId > 0 ? $carrierRepo->find($carrierId) : null;
+        if ($carrier === null || $carrier->userId !== $user->id) {
+            $errors[] = 'Select a carrier (or Add New).';
+        } elseif ($carrier->iataCode === null || $carrier->iataCode === '') {
+            $errors[] = 'Selected carrier is missing an IATA code. Edit it under Manage carriers.';
         }
         if ($flightNumber === null) {
             $errors[] = 'Flight number is required.';
@@ -78,12 +85,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($errors === []) {
+        if ($errors === [] && $carrier !== null) {
             try {
                 $startDate = substr((string) $departDt, 0, 10);
                 $endDate = $arriveDt !== null ? substr($arriveDt, 0, 10) : $startDate;
                 if ($endDate < $startDate) {
                     $endDate = $startDate;
+                }
+
+                // Store digits-only flight number; IATA lives on the carrier.
+                $numberOnly = strtoupper(preg_replace('/[^A-Z0-9]/', '', (string) $flightNumber) ?? '');
+                $iata = strtoupper((string) $carrier->iataCode);
+                if (str_starts_with($numberOnly, $iata) && strlen($numberOnly) > strlen($iata)) {
+                    $numberOnly = substr($numberOnly, strlen($iata));
                 }
 
                 $trip = $tripRepo->create(new Trip(
@@ -103,8 +117,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     tripId: (int) $trip->id,
                     segmentType: 'flight',
                     segmentSubtype: null,
-                    carrier: $carrier,
-                    flightNumber: strtoupper((string) $flightNumber),
+                    carrierId: (int) $carrier->id,
+                    carrier: $carrier->name,
+                    flightNumber: $numberOnly,
                     confirmationCode: $confirmation,
                     origin: strtoupper((string) $origin),
                     destination: strtoupper((string) $destination),
@@ -136,6 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $isPrivate = isset($_POST['is_private']) && $_POST['is_private'] === '1';
 $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
+$selectedCarrierId = (int) ($_POST['carrier_id'] ?? 0);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -144,15 +160,17 @@ $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NexWAYPOINT &middot; Add a Flight</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
+    <script src="/assets/carrier-picker.js" defer></script>
 </head>
 <body>
 <nav class="navbar">
     <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/list.php">Hotels</a>
+        <a href="/hotels/properties.php">Hotels</a>
         <a href="/hotels/add.php">+ Log a stay</a>
         <a href="/flights/add.php">+ Add a flight</a>
+        <a href="/flights/carriers.php">Carriers</a>
         <a href="/settings/visibility.php">Sharing</a>
         <a href="/logout.php">Sign out</a>
         <?php require dirname(__DIR__) . '/_theme_toggle.php'; ?>
@@ -160,6 +178,7 @@ $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
 </nav>
 <main class="container">
     <h1>Add a Flight</h1>
+    <p class="hint">Pick a carrier (IATA is stored on the carrier). Enter only the flight number, e.g. <code>1234</code> not <code>DL1234</code>.</p>
 
     <?php foreach ($errors as $error): ?>
         <p class="alert alert-error"><?= htmlspecialchars($error, ENT_QUOTES) ?></p>
@@ -168,8 +187,20 @@ $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
     <form class="stack" method="post">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
 
-        <label>Carrier / airline<input type="text" name="carrier" required value="<?= htmlspecialchars((string) ($_POST['carrier'] ?? ''), ENT_QUOTES) ?>" placeholder="Delta, United, AA…"></label>
-        <label>Flight number<input type="text" name="flight_number" required value="<?= htmlspecialchars((string) ($_POST['flight_number'] ?? ''), ENT_QUOTES) ?>" placeholder="DL1234"></label>
+        <label>Carrier
+            <select name="carrier_id" id="carrier_id" required>
+                <option value="">— Select carrier —</option>
+                <?php foreach ($carriers as $c): ?>
+                    <option value="<?= (int) $c->id ?>" <?= $selectedCarrierId === $c->id ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($c->label(), ENT_QUOTES) ?>
+                    </option>
+                <?php endforeach; ?>
+                <option value="__new__">— Add New… —</option>
+            </select>
+        </label>
+        <p class="hint"><a href="/flights/carriers.php">Manage carriers</a></p>
+
+        <label>Flight number<input type="text" name="flight_number" required value="<?= htmlspecialchars((string) ($_POST['flight_number'] ?? ''), ENT_QUOTES) ?>" placeholder="1234" inputmode="numeric"></label>
         <label>Origin (airport code or city)<input type="text" name="origin" required value="<?= htmlspecialchars((string) ($_POST['origin'] ?? ''), ENT_QUOTES) ?>" placeholder="ORD"></label>
         <label>Destination (airport code or city)<input type="text" name="destination" required value="<?= htmlspecialchars((string) ($_POST['destination'] ?? ''), ENT_QUOTES) ?>" placeholder="ATL"></label>
         <label>Departure<input type="datetime-local" name="depart_dt" required value="<?= htmlspecialchars((string) ($_POST['depart_dt'] ?? ''), ENT_QUOTES) ?>"></label>
@@ -186,5 +217,21 @@ $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
         <button type="submit" class="primary">Save flight</button>
     </form>
 </main>
+
+<div id="carrier-modal" class="modal-backdrop" hidden>
+    <div class="modal-panel" role="dialog" aria-labelledby="carrier-modal-title">
+        <h2 id="carrier-modal-title">Add carrier</h2>
+        <p id="carrier-modal-error" class="alert alert-error" hidden></p>
+        <form id="carrier-modal-form" class="stack">
+            <label>Airline name<input type="text" name="name" required placeholder="Delta Air Lines"></label>
+            <label>IATA code<input type="text" name="iata_code" required maxlength="3" placeholder="DL" style="text-transform:uppercase"></label>
+            <p class="hint">IATA is used with the flight number for FlightAware lookups.</p>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Save carrier</button>
+                <button type="button" class="secondary" data-close-modal>Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
 </body>
 </html>

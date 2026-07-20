@@ -61,6 +61,7 @@ CREATE TABLE hotel_properties (
     state_region            VARCHAR(120) NULL,
     postal_code             VARCHAR(20) NULL,
     country                 VARCHAR(80) NULL,
+    phone                   VARCHAR(40) NULL,
     latitude                DECIMAL(10,7) NULL,
     longitude               DECIMAL(10,7) NULL,
     has_desk                TINYINT(1) NOT NULL DEFAULT 0,
@@ -77,6 +78,8 @@ CREATE TABLE hotel_properties (
     has_offsite_gym         TINYINT(1) NOT NULL DEFAULT 0,
     walk_to_office          TINYINT(1) NOT NULL DEFAULT 0,
     walk_to_office_notes    VARCHAR(255) NULL,
+    has_destination_fee     TINYINT(1) NOT NULL DEFAULT 0,
+    destination_fee_notes   VARCHAR(255) NULL,
     wifi_quality            TINYINT UNSIGNED NULL,
     noise_level             TINYINT UNSIGNED NULL,
     unique_features         TEXT NULL,
@@ -159,11 +162,28 @@ CREATE TABLE trips (
     INDEX idx_trips_dates (start_date, end_date)
 ) ENGINE=InnoDB;
 
+-- ----------------------------------------------------------------------------
+-- carriers: reusable airlines per user (name + IATA for FlightAware idents).
+-- ----------------------------------------------------------------------------
+CREATE TABLE carriers (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT UNSIGNED NOT NULL,
+    name            VARCHAR(100) NOT NULL,
+    iata_code       VARCHAR(3) NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_carriers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_carrier_user_iata (user_id, iata_code),
+    INDEX idx_carriers_user (user_id),
+    INDEX idx_carriers_name (name)
+) ENGINE=InnoDB;
+
 CREATE TABLE trip_segments (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     trip_id             INT UNSIGNED NOT NULL,
     segment_type        ENUM('flight','hotel','train','car') NOT NULL,
     segment_subtype     VARCHAR(50) NULL,
+    carrier_id          INT UNSIGNED NULL,
     carrier             VARCHAR(100) NULL,
     flight_number       VARCHAR(20) NULL,
     confirmation_code   VARCHAR(100) NULL,
@@ -178,9 +198,11 @@ CREATE TABLE trip_segments (
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_segments_trip FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
     CONSTRAINT fk_segments_hotel_stay FOREIGN KEY (hotel_stay_id) REFERENCES hotel_stays(id) ON DELETE SET NULL,
+    CONSTRAINT fk_segments_carrier FOREIGN KEY (carrier_id) REFERENCES carriers(id) ON DELETE SET NULL,
     INDEX idx_segments_trip (trip_id),
     INDEX idx_segments_depart (depart_dt),
-    INDEX idx_segments_type (segment_type)
+    INDEX idx_segments_type (segment_type),
+    INDEX idx_segments_carrier (carrier_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE flight_status (

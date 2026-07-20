@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
@@ -17,6 +18,7 @@ $logger = $app['logger'];
 
 $userRepo = new UserRepository($db, $logger);
 $tripRepo = new TripRepository($db, $logger);
+$carrierRepo = new CarrierRepository($db, $logger);
 $statusEngine = new TripStatusEngine($tripRepo, $logger);
 $visibilityEngine = new VisibilityEngine($userRepo, new VisibilityRuleRepository($db));
 $blockRepo = new VisibilityBlockRepository($db);
@@ -105,7 +107,7 @@ function statusBadgeClass(string $status): string
     <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/list.php">Hotels</a>
+        <a href="/hotels/properties.php">Hotels</a>
         <a href="/hotels/add.php">+ Log a stay</a>
         <a href="/flights/add.php">+ Add a flight</a>
         <a href="/settings/visibility.php">Sharing</a>
@@ -156,6 +158,17 @@ function statusBadgeClass(string $status): string
                     ?>
                     <p>
                         <?= htmlspecialchars(trim(($segment->carrier ?? '') . ' ' . ($segment->flightNumber ?? '')), ENT_QUOTES) ?>
+                        <?php
+                        if ($segment->carrierId !== null) {
+                            $linked = $carrierRepo->find($segment->carrierId);
+                            if ($linked !== null && $linked->iataCode !== null) {
+                                $ident = $linked->flightIdent((string) ($segment->flightNumber ?? ''));
+                                if ($ident !== null) {
+                                    echo ' <span class="hint">(' . htmlspecialchars($ident, ENT_QUOTES) . ')</span>';
+                                }
+                            }
+                        }
+                        ?>
                         · <?= htmlspecialchars(($segment->origin ?? '?') . ' → ' . ($segment->destination ?? '?'), ENT_QUOTES) ?>
                         <?php if ($segment->departDt !== null): ?>
                             · <?= htmlspecialchars($segment->departDt, ENT_QUOTES) ?>

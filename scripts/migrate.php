@@ -314,6 +314,120 @@ try {
         }
     }
 
+    if ($tableExists('hotel_properties') && !$columnExists('hotel_properties', 'phone')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN phone TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN phone VARCHAR(40) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added hotel_properties.phone\n");
+    }
+
+    if ($tableExists('hotel_properties') && !$columnExists('hotel_properties', 'has_destination_fee')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN has_destination_fee INTEGER NOT NULL DEFAULT 0');
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN destination_fee_notes TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN has_destination_fee TINYINT(1) NOT NULL DEFAULT 0');
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN destination_fee_notes VARCHAR(255) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added hotel_properties destination fee columns\n");
+    }
+
+    if (!$tableExists('carriers')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE carriers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    iata_code TEXT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (user_id, iata_code)
+                )"
+            );
+            $pdo->exec('CREATE INDEX idx_carriers_user ON carriers(user_id)');
+            $pdo->exec('CREATE INDEX idx_carriers_name ON carriers(name)');
+        } else {
+            $pdo->exec(
+                "CREATE TABLE carriers (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    name VARCHAR(100) NOT NULL,
+                    iata_code VARCHAR(3) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_carriers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    UNIQUE KEY uq_carrier_user_iata (user_id, iata_code),
+                    INDEX idx_carriers_user (user_id),
+                    INDEX idx_carriers_name (name)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created carriers\n");
+    }
+
+    if ($tableExists('trip_segments') && !$columnExists('trip_segments', 'carrier_id')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE trip_segments ADD COLUMN carrier_id INTEGER NULL');
+        } else {
+            $pdo->exec('ALTER TABLE trip_segments ADD COLUMN carrier_id INT UNSIGNED NULL');
+            $pdo->exec(
+                'ALTER TABLE trip_segments
+                 ADD CONSTRAINT fk_segments_carrier FOREIGN KEY (carrier_id) REFERENCES carriers(id) ON DELETE SET NULL'
+            );
+            $pdo->exec('CREATE INDEX idx_segments_carrier ON trip_segments (carrier_id)');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added trip_segments.carrier_id\n");
+    }
+
+    // Backfill carriers from free-text trip_segments.carrier names
+    if ($tableExists('carriers') && $tableExists('trip_segments') && $columnExists('trip_segments', 'carrier_id')) {
+        $rows = $pdo->query(
+            "SELECT ts.id AS segment_id, ts.carrier AS carrier_name, t.owner_id AS user_id
+             FROM trip_segments ts
+             INNER JOIN trips t ON t.id = ts.trip_id
+             WHERE ts.segment_type = 'flight'
+               AND ts.carrier_id IS NULL
+               AND ts.carrier IS NOT NULL
+               AND TRIM(ts.carrier) != ''"
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($rows !== []) {
+            $findCarrier = $pdo->prepare(
+                'SELECT id FROM carriers WHERE user_id = :uid AND LOWER(name) = LOWER(:name) LIMIT 1'
+            );
+            $insertCarrier = $pdo->prepare(
+                'INSERT INTO carriers (user_id, name, iata_code) VALUES (:uid, :name, NULL)'
+            );
+            $linkSegment = $pdo->prepare('UPDATE trip_segments SET carrier_id = :cid WHERE id = :id');
+            $cache = [];
+            foreach ($rows as $row) {
+                $userId = (int) $row['user_id'];
+                $name = trim((string) $row['carrier_name']);
+                $cacheKey = $userId . '|' . strtolower($name);
+                if (!isset($cache[$cacheKey])) {
+                    $findCarrier->execute(['uid' => $userId, 'name' => $name]);
+                    $existingId = $findCarrier->fetchColumn();
+                    if ($existingId !== false) {
+                        $cache[$cacheKey] = (int) $existingId;
+                    } else {
+                        $insertCarrier->execute(['uid' => $userId, 'name' => $name]);
+                        $cache[$cacheKey] = (int) $pdo->lastInsertId();
+                    }
+                }
+                $linkSegment->execute(['cid' => $cache[$cacheKey], 'id' => $row['segment_id']]);
+            }
+            $changes++;
+            fwrite(STDOUT, 'Backfilled ' . count($cache) . " carriers from flight segments\n");
+        }
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {

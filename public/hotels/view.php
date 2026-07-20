@@ -43,6 +43,7 @@ $bathLabels = ['tub' => 'Tub', 'walk_in_shower' => 'Walk-in shower'];
 
 $rows = [
     'Brand' => $property->brand,
+    'Phone' => $property->phone,
     'Address' => trim(implode(', ', array_filter([
         $property->addressLine1,
         $property->addressLine2,
@@ -66,6 +67,9 @@ $rows = [
     'Walk to office/venue' => $property->walkToOffice
         ? ('Yes' . ($property->walkToOfficeNotes ? ' — ' . $property->walkToOfficeNotes : ''))
         : null,
+    'Destination fee' => $property->hasDestinationFee
+        ? ('Yes' . ($property->destinationFeeNotes ? ' — ' . $property->destinationFeeNotes : ''))
+        : null,
     'Last stay price' => $stay->lastStayPrice !== null
         ? "{$stay->currency} " . number_format($stay->lastStayPrice, 2)
         : null,
@@ -86,7 +90,18 @@ $amenities = array_filter([
     $property->hasEvCharging ? 'EV charging' : null,
     $property->hasOnsiteRestaurant ? 'On-site restaurant' : null,
     $property->walkToOffice ? 'Walk to office' : null,
+    $property->hasDestinationFee ? 'Destination fee' : null,
 ]);
+
+$teammateAdverse = $propertyRepo->findTeammateAdversePreferences($user->id, $property->hotelName, $property->city);
+$locationAdverse = [];
+if ($property->city !== null && trim($property->city) !== '') {
+    $locationAdverse = $propertyRepo->findTeammateAdverseAtLocation(
+        $user->id,
+        $property->city,
+        $property->stateRegion
+    );
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -101,7 +116,8 @@ $amenities = array_filter([
     <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/list.php">Hotels</a>
+        <a href="/hotels/properties.php">Hotels</a>
+        <a href="/hotels/list.php">Stays</a>
         <a href="/hotels/add.php">+ Log a stay</a>
         <a href="/flights/add.php">+ Add a flight</a>
         <a href="/logout.php">Sign out</a>
@@ -109,10 +125,10 @@ $amenities = array_filter([
     </div>
 </nav>
 <main class="container">
-    <p><a href="/hotels/list.php">&larr; Back to hotels</a></p>
+    <p><a href="/hotels/properties.php">&larr; Back to hotels</a></p>
     <h1>
         <?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?>
-        <?php if ($property->isBlacklisted): ?><span class="badge badge-blacklist">Blacklisted</span><?php endif; ?>
+        <?php if ($property->isBlacklisted): ?><span class="badge badge-blacklist">My blacklist</span><?php endif; ?>
         <?php if ($stay->isPrivate): ?><span class="badge badge-blacklist">Private</span><?php endif; ?>
     </h1>
 
@@ -120,7 +136,47 @@ $amenities = array_filter([
         <p class="alert alert-error"><?= htmlspecialchars($property->blacklistReason ?? 'No reason recorded.', ENT_QUOTES) ?></p>
     <?php endif; ?>
 
-    <p><a href="/hotels/add.php?property_id=<?= (int) $property->id ?>">Log another stay at this property</a></p>
+    <?php if ($teammateAdverse !== []): ?>
+        <div class="card">
+            <h3>Teammate adverse preference (same hotel)</h3>
+            <ul>
+                <?php foreach ($teammateAdverse as $a): ?>
+                    <li>
+                        <strong><?= htmlspecialchars($a['display_name'], ENT_QUOTES) ?></strong>
+                        blacklisted this property
+                        <?= $a['reason'] ? ': ' . htmlspecialchars($a['reason'], ENT_QUOTES) : '' ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
+
+    <?php
+    $otherLocation = array_values(array_filter(
+        $locationAdverse,
+        static fn (array $a) => !in_array($a['property_id'], array_column($teammateAdverse, 'property_id'), true)
+    ));
+    ?>
+    <?php if ($otherLocation !== []): ?>
+        <div class="card">
+            <h3>Teammate adverse preferences nearby (same city)</h3>
+            <ul>
+                <?php foreach ($otherLocation as $a): ?>
+                    <li>
+                        <strong><?= htmlspecialchars($a['display_name'], ENT_QUOTES) ?></strong>
+                        — <?= htmlspecialchars($a['hotel_name'], ENT_QUOTES) ?>
+                        <?= $a['reason'] ? ': ' . htmlspecialchars($a['reason'], ENT_QUOTES) : '' ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
+
+    <p>
+        <a href="/hotels/add.php?property_id=<?= (int) $property->id ?>">Log another stay at this property</a>
+        &middot;
+        <a href="/hotels/edit-property.php?id=<?= (int) $property->id ?>">Edit property</a>
+    </p>
 
     <div class="card">
         <table>

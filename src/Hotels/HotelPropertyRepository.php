@@ -80,6 +80,193 @@ final class HotelPropertyRepository
         return $row === null ? null : HotelProperty::fromRow($row);
     }
 
+    /**
+     * Distinct "City, State" locations for the user's properties (skips empty city).
+     *
+     * @return array<int, array{key: string, label: string, city: string, state_region: string}>
+     */
+    public function locationsForUser(int $userId): array
+    {
+        $byKey = [];
+        foreach ($this->findForUser($userId) as $property) {
+            $key = $property->locationKey();
+            $label = $property->locationLabel();
+            if ($key === null || $label === null) {
+                continue;
+            }
+            if (!isset($byKey[$key])) {
+                $byKey[$key] = [
+                    'key' => $key,
+                    'label' => $label,
+                    'city' => (string) $property->city,
+                    'state_region' => (string) ($property->stateRegion ?? ''),
+                ];
+            }
+        }
+        $locations = array_values($byKey);
+        usort($locations, static fn (array $a, array $b) => strcasecmp($a['label'], $b['label']));
+        return $locations;
+    }
+
+    /**
+     * @return HotelProperty[]
+     */
+    public function findForUserAtLocation(int $userId, string $city, ?string $stateRegion): array
+    {
+        $sql = 'SELECT * FROM hotel_properties
+                WHERE user_id = :user_id
+                  AND LOWER(TRIM(COALESCE(city, \'\'))) = LOWER(:city)';
+        $params = ['user_id' => $userId, 'city' => trim($city)];
+        $state = trim((string) $stateRegion);
+        if ($state !== '') {
+            $sql .= ' AND LOWER(TRIM(COALESCE(state_region, \'\'))) = LOWER(:state)';
+            $params['state'] = $state;
+        } else {
+            $sql .= ' AND (state_region IS NULL OR TRIM(state_region) = \'\')';
+        }
+        $sql .= ' ORDER BY hotel_name ASC';
+        $rows = $this->db->fetchAll($sql, $params);
+        return array_map(static fn (array $row) => HotelProperty::fromRow($row), $rows);
+    }
+
+    /**
+     * Filter/sort the current user's properties for the directory UI.
+     *
+     * @param array{
+     *   q?: string,
+     *   city?: string,
+     *   state_region?: string,
+     *   destination_fee?: string,
+     *   blacklisted?: string,
+     *   teammate_adverse?: string
+     * } $filters
+     * @return HotelProperty[]
+     */
+    public function searchForUser(int $userId, array $filters = [], string $sort = 'hotel_name'): array
+    {
+        $allowedSort = [
+            'hotel_name' => 'hotel_name ASC, city ASC',
+            'city' => 'city ASC, hotel_name ASC',
+            'overall_rating' => 'overall_rating DESC, hotel_name ASC',
+            'updated' => 'updated_at DESC',
+        ];
+        $order = $allowedSort[$sort] ?? $allowedSort['hotel_name'];
+
+        $sql = 'SELECT * FROM hotel_properties WHERE user_id = :user_id';
+        $params = ['user_id' => $userId];
+
+        $q = trim((string) ($filters['q'] ?? ''));
+        if ($q !== '') {
+            $sql .= ' AND (LOWER(hotel_name) LIKE LOWER(:q) OR LOWER(COALESCE(brand, \'\')) LIKE LOWER(:q))';
+            $params['q'] = '%' . $q . '%';
+        }
+        $city = trim((string) ($filters['city'] ?? ''));
+        if ($city !== '') {
+            $sql .= ' AND LOWER(TRIM(COALESCE(city, \'\'))) = LOWER(:city)';
+            $params['city'] = $city;
+        }
+        $state = trim((string) ($filters['state_region'] ?? ''));
+        if ($state !== '') {
+            $sql .= ' AND LOWER(TRIM(COALESCE(state_region, \'\'))) = LOWER(:state)';
+            $params['state'] = $state;
+        }
+        $fee = (string) ($filters['destination_fee'] ?? '');
+        if ($fee === '1') {
+            $sql .= ' AND has_destination_fee = 1';
+        } elseif ($fee === '0') {
+            $sql .= ' AND has_destination_fee = 0';
+        }
+        $bl = (string) ($filters['blacklisted'] ?? '');
+        if ($bl === '1') {
+            $sql .= ' AND is_blacklisted = 1';
+        } elseif ($bl === '0') {
+            $sql .= ' AND is_blacklisted = 0';
+        }
+
+        $sql .= " ORDER BY {$order}";
+        $rows = $this->db->fetchAll($sql, $params);
+        $properties = array_map(static fn (array $row) => HotelProperty::fromRow($row), $rows);
+
+        if (($filters['teammate_adverse'] ?? '') === '1') {
+            $properties = array_values(array_filter(
+                $properties,
+                fn (HotelProperty $p) => $this->findTeammateAdversePreferences($userId, $p->hotelName, $p->city) !== []
+            ));
+        }
+
+        return $properties;
+    }
+
+    /**
+     * Other users' blacklists that match this hotel name (+ optional city).
+     * Blacklist remains owned by each user; this only exposes the adverse preference.
+     *
+     * @return array<int, array{user_id: int, display_name: string, hotel_name: string, city: ?string, reason: ?string, property_id: int}>
+     */
+    public function findTeammateAdversePreferences(int $viewerUserId, string $hotelName, ?string $city): array
+    {
+        $sql = 'SELECT hp.id AS property_id, hp.user_id, hp.hotel_name, hp.city, hp.blacklist_reason, u.display_name
+                FROM hotel_properties hp
+                INNER JOIN users u ON u.id = hp.user_id
+                WHERE hp.user_id != :viewer
+                  AND hp.is_blacklisted = 1
+                  AND u.is_active = 1
+                  AND LOWER(hp.hotel_name) = LOWER(:hotel_name)';
+        $params = ['viewer' => $viewerUserId, 'hotel_name' => trim($hotelName)];
+        if ($city !== null && trim($city) !== '') {
+            $sql .= ' AND LOWER(COALESCE(hp.city, \'\')) = LOWER(:city)';
+            $params['city'] = trim($city);
+        }
+        $sql .= ' ORDER BY u.display_name ASC';
+
+        $rows = $this->db->fetchAll($sql, $params);
+        return array_map(static fn (array $row) => [
+            'user_id' => (int) $row['user_id'],
+            'display_name' => (string) $row['display_name'],
+            'hotel_name' => (string) $row['hotel_name'],
+            'city' => $row['city'] ?? null,
+            'reason' => $row['blacklist_reason'] ?? null,
+            'property_id' => (int) $row['property_id'],
+        ], $rows);
+    }
+
+    /**
+     * Teammate blacklists in the same City, State (location-level adverse signal).
+     *
+     * @return array<int, array{user_id: int, display_name: string, hotel_name: string, city: ?string, reason: ?string, property_id: int}>
+     */
+    public function findTeammateAdverseAtLocation(int $viewerUserId, string $city, ?string $stateRegion): array
+    {
+        $city = trim($city);
+        if ($city === '') {
+            return [];
+        }
+        $sql = 'SELECT hp.id AS property_id, hp.user_id, hp.hotel_name, hp.city, hp.blacklist_reason, u.display_name
+                FROM hotel_properties hp
+                INNER JOIN users u ON u.id = hp.user_id
+                WHERE hp.user_id != :viewer
+                  AND hp.is_blacklisted = 1
+                  AND u.is_active = 1
+                  AND LOWER(TRIM(COALESCE(hp.city, \'\'))) = LOWER(:city)';
+        $params = ['viewer' => $viewerUserId, 'city' => $city];
+        $state = trim((string) $stateRegion);
+        if ($state !== '') {
+            $sql .= ' AND LOWER(TRIM(COALESCE(hp.state_region, \'\'))) = LOWER(:state)';
+            $params['state'] = $state;
+        }
+        $sql .= ' ORDER BY u.display_name ASC, hp.hotel_name ASC';
+
+        $rows = $this->db->fetchAll($sql, $params);
+        return array_map(static fn (array $row) => [
+            'user_id' => (int) $row['user_id'],
+            'display_name' => (string) $row['display_name'],
+            'hotel_name' => (string) $row['hotel_name'],
+            'city' => $row['city'] ?? null,
+            'reason' => $row['blacklist_reason'] ?? null,
+            'property_id' => (int) $row['property_id'],
+        ], $rows);
+    }
+
     public function create(HotelProperty $property, ?int $actorUserId = null): HotelProperty
     {
         $this->validate($property);
@@ -180,7 +367,7 @@ final class HotelPropertyRepository
         foreach ([
             'has_desk', 'has_pool', 'has_hot_tub', 'has_breakfast', 'has_gym', 'has_free_parking',
             'has_airport_shuttle', 'has_ev_charging', 'has_onsite_restaurant', 'has_offsite_gym',
-            'walk_to_office', 'is_blacklisted',
+            'walk_to_office', 'has_destination_fee', 'is_blacklisted',
         ] as $boolField) {
             $data[$boolField] = !empty($data[$boolField]) ? 1 : 0;
         }

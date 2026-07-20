@@ -1,0 +1,66 @@
+<?php
+
+declare(strict_types=1);
+
+namespace NexWaypoint\Trips;
+
+final class Carrier
+{
+    public function __construct(
+        public readonly ?int $id,
+        public readonly int $userId,
+        public readonly string $name,
+        public readonly ?string $iataCode,
+    ) {
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function fromRow(array $row): self
+    {
+        return new self(
+            id: isset($row['id']) ? (int) $row['id'] : null,
+            userId: (int) $row['user_id'],
+            name: (string) $row['name'],
+            iataCode: isset($row['iata_code']) && $row['iata_code'] !== ''
+                ? strtoupper((string) $row['iata_code'])
+                : null,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'user_id' => $this->userId,
+            'name' => $this->name,
+            'iata_code' => $this->iataCode,
+        ];
+    }
+
+    public function label(): string
+    {
+        if ($this->iataCode !== null && $this->iataCode !== '') {
+            return "{$this->name} ({$this->iataCode})";
+        }
+        return $this->name;
+    }
+
+    /** FlightAware-style ident: DL1234 */
+    public function flightIdent(string $flightNumber): ?string
+    {
+        $number = strtoupper(preg_replace('/[^A-Z0-9]/', '', $flightNumber) ?? '');
+        if ($number === '' || $this->iataCode === null || $this->iataCode === '') {
+            return null;
+        }
+        // Strip accidental IATA prefix if user typed it into the number field
+        if (str_starts_with($number, $this->iataCode) && strlen($number) > strlen($this->iataCode)) {
+            $number = substr($number, strlen($this->iataCode));
+        }
+        return $this->iataCode . $number;
+    }
+}

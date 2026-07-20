@@ -46,6 +46,7 @@ CREATE TABLE hotel_properties (
     state_region            TEXT NULL,
     postal_code             TEXT NULL,
     country                 TEXT NULL,
+    phone                   TEXT NULL,
     latitude                REAL NULL,
     longitude               REAL NULL,
     has_desk                INTEGER NOT NULL DEFAULT 0,
@@ -62,6 +63,8 @@ CREATE TABLE hotel_properties (
     has_offsite_gym         INTEGER NOT NULL DEFAULT 0,
     walk_to_office          INTEGER NOT NULL DEFAULT 0,
     walk_to_office_notes    TEXT NULL,
+    has_destination_fee     INTEGER NOT NULL DEFAULT 0,
+    destination_fee_notes   TEXT NULL,
     wifi_quality            INTEGER NULL CHECK (wifi_quality IS NULL OR wifi_quality BETWEEN 1 AND 5),
     noise_level             INTEGER NULL CHECK (noise_level IS NULL OR noise_level BETWEEN 1 AND 5),
     unique_features         TEXT NULL,
@@ -128,11 +131,24 @@ CREATE TABLE trips (
 CREATE INDEX idx_trips_owner ON trips(owner_id);
 CREATE INDEX idx_trips_dates ON trips(start_date, end_date);
 
+CREATE TABLE carriers (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    iata_code       TEXT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, iata_code)
+);
+CREATE INDEX idx_carriers_user ON carriers(user_id);
+CREATE INDEX idx_carriers_name ON carriers(name);
+
 CREATE TABLE trip_segments (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     trip_id             INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
     segment_type        TEXT NOT NULL CHECK (segment_type IN ('flight','hotel','train','car')),
     segment_subtype     TEXT NULL,
+    carrier_id          INTEGER NULL REFERENCES carriers(id) ON DELETE SET NULL,
     carrier             TEXT NULL,
     flight_number       TEXT NULL,
     confirmation_code   TEXT NULL,
@@ -147,6 +163,7 @@ CREATE TABLE trip_segments (
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_segments_trip ON trip_segments(trip_id);
+CREATE INDEX idx_segments_carrier ON trip_segments(carrier_id);
 CREATE INDEX idx_segments_depart ON trip_segments(depart_dt);
 CREATE INDEX idx_segments_type ON trip_segments(segment_type);
 
