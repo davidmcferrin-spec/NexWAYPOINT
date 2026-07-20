@@ -143,14 +143,4 @@ final class HiltonHotelParser extends ParserBase
             'room_type' => null,
         ];
     }
-
-    private function monthNum(string $mon): string
-    {
-        $map = [
-            'jan' => '01', 'feb' => '02', 'mar' => '03', 'apr' => '04',
-            'may' => '05', 'jun' => '06', 'jul' => '07', 'aug' => '08',
-            'sep' => '09', 'oct' => '10', 'nov' => '11', 'dec' => '12',
-        ];
-        return $map[strtolower(substr($mon, 0, 3))] ?? '01';
-    }
 }
