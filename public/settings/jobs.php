@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\CronRunRepository;
+use NexWaypoint\Mail\ParseLogRepository;
 use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
@@ -18,12 +19,17 @@ if (!$userRepo->isAdmin($user)) {
 $settingsSection = 'jobs';
 $latest = [];
 $recent = [];
+$parseFailures = [];
 $tableMissing = !$app['db']->tableExists('cron_job_runs');
 
 if (!$tableMissing) {
     $runs = new CronRunRepository($app['db']);
     $latest = $runs->latestByJob();
     $recent = $runs->recent(40);
+}
+
+if ($app['db']->tableExists('parse_log')) {
+    $parseFailures = (new ParseLogRepository($app['db']))->findFailedQueue(25);
 }
 
 $statusBadge = static function (string $status): string {
@@ -108,6 +114,38 @@ $formatSummary = static function (array $summary, ?string $errorMessage = null):
                 <?php endforeach; ?>
             </tbody>
         </table>
+
+        <h2>Mail parse failures</h2>
+        <p class="hint">
+            Why individual messages were sent to <code>ParseFailed</code>.
+            Move a message back to INBOX (unread) to retry after fixing aliases or parsers.
+        </p>
+        <?php if ($parseFailures === []): ?>
+            <p class="empty-state">No failed parses recorded.</p>
+        <?php else: ?>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Received</th>
+                        <th>From</th>
+                        <th>Subject</th>
+                        <th>Type</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($parseFailures as $pf): ?>
+                        <tr>
+                            <td><?= htmlspecialchars((string) $pf['received_at'], ENT_QUOTES) ?></td>
+                            <td><?= htmlspecialchars((string) $pf['from_address'], ENT_QUOTES) ?></td>
+                            <td><?= htmlspecialchars((string) ($pf['subject'] ?? ''), ENT_QUOTES) ?></td>
+                            <td><?= htmlspecialchars((string) ($pf['detected_type'] ?? '—'), ENT_QUOTES) ?></td>
+                            <td><?= htmlspecialchars((string) ($pf['failure_reason'] ?? '—'), ENT_QUOTES) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
 
         <h2>Recent history</h2>
         <?php if ($recent === []): ?>

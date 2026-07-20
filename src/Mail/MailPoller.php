@@ -25,13 +25,16 @@ use NexWaypoint\Users\UserRepository;
 
 /**
  * Orchestrates one polling pass: fetch unseen mail -> normalize forwards ->
- * detect type/event -> match owner by From: -> parse -> upsert/cancel trips
- * or hotel stays.
+ * detect type/event -> match owner by outer From: -> parse -> upsert/cancel.
+ *
+ * Messages may be direct from the vendor or teammate forwards (Gmail /
+ * Outlook / Proton / Yahoo / Apple). ForwardedMailNormalizer runs first so
+ * detectors and brand parsers always see the underlying confirmation.
+ * Events: confirm, change, cancel, ignore (and flight status). Upserts key
+ * on confirmation/PNR so updates replace prior legs/stays.
  *
  * Supported: AA / Delta / United / Breeze flights, Amtrak, Hilton / Marriott /
- * generic hotel confirmations. Folio / bag-receipt / status mail is ignored.
- * Forwards from Gmail / Outlook / Proton / Yahoo / Apple are normalized so
- * parsers see the original confirmation body.
+ * generic hotel. Folio / bag-receipt / status mail is ignored where detected.
  */
 final class MailPoller
 {
@@ -61,8 +64,10 @@ final class MailPoller
     ) {
     }
 
+    private ?string $lastFailureReason = null;
+
     /**
-     * @return array{fetched: int, success: int, failed: int}
+     * @return array{fetched: int, success: int, failed: int, failure_reasons: list<string>}
      */
     public function run(): array
     {
@@ -71,6 +76,8 @@ final class MailPoller
         $messages = $this->source->fetchUnseenMessages();
         $success = 0;
         $failed = 0;
+        /** @var list<string> $failureReasons */
+        $failureReasons = [];
 
         foreach ($messages as $message) {
             try {
@@ -79,10 +86,15 @@ final class MailPoller
                     $success++;
                 } else {
                     $failed++;
+                    $reason = $this->lastFailureReason;
+                    if ($reason !== null) {
+                        $failureReasons[] = $reason;
+                    }
                 }
             } catch (\Throwable $e) {
                 $this->logger->error('Unhandled error processing message', ['uid' => $message->uid, 'error' => $e->getMessage()]);
-                $this->source->markFailed($message->uid, 'Unhandled exception: ' . $e->getMessage());
+                $reason = 'Unhandled exception: ' . $e->getMessage();
+                $this->source->markFailed($message->uid, $reason);
                 $this->parseLog->record(
                     $message->receivedAt,
                     $message->fromAddress,
@@ -91,23 +103,31 @@ final class MailPoller
                     $this->sourceName,
                     null,
                     'failed',
-                    'Unhandled exception during processing',
+                    $reason,
                     null,
                     null,
                     null,
                 );
                 $failed++;
+                $failureReasons[] = $reason;
             }
         }
 
         $this->source->disconnect();
 
         $this->logger->info('Mail poll complete', ['fetched' => count($messages), 'success' => $success, 'failed' => $failed]);
-        return ['fetched' => count($messages), 'success' => $success, 'failed' => $failed];
+        return [
+            'fetched' => count($messages),
+            'success' => $success,
+            'failed' => $failed,
+            'failure_reasons' => $failureReasons,
+        ];
     }
 
     private function processOne(EmailMessage $message, float $minConfidence): bool
     {
+        $this->lastFailureReason = null;
+
         if ($this->parseLog->alreadyProcessed($message->uid, $this->sourceName)) {
             $this->logger->info('Skipping already-logged message', ['uid' => $message->uid]);
             $this->source->markProcessed($message->uid);
@@ -130,7 +150,12 @@ final class MailPoller
         }
 
         if ($detection['type'] === 'unknown') {
-            $this->fail($message, 'unknown', 'Unrecognized sender/subject pattern', $owner->id);
+            $this->fail(
+                $message,
+                'unknown',
+                'Unrecognized sender/subject pattern (subject: ' . mb_substr($message->subject, 0, 120) . ')',
+                $owner->id
+            );
             return false;
         }
 
@@ -503,6 +528,7 @@ final class MailPoller
 
     private function fail(EmailMessage $message, string $detectedType, string $reason, ?int $matchedUserId = null, ?float $confidence = null): void
     {
+        $this->lastFailureReason = $reason;
         $this->source->markFailed($message->uid, $reason);
         $this->parseLog->record(
             $message->receivedAt,

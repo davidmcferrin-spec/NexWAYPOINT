@@ -7,11 +7,12 @@ namespace NexWaypoint\Mail;
 /**
  * Classifies an inbound email as flight / hotel / train / car / unknown
  * based on sender domain (suffix match), forwarded-body vendor clues, and
- * subject keywords for event type.
+ * subject keywords for event type (confirm / change / cancel / ignore /
+ * status).
  *
- * Forwarded confirmations often have From: = the NexWAYPOINT user (for
- * ownership matching). In that case we still classify by scanning subject
- * + body for known vendor domains / brand phrases.
+ * Direct vendor mail: From: is aa.com / hilton.com / etc.
+ * Forwards: From: is the teammate; classify via body vendor domains and
+ * brand phrases so parsers still route correctly.
  */
 final class EmailConfirmationDetector
 {
@@ -59,6 +60,8 @@ final class EmailConfirmationDetector
         'marriott.com' => ['type' => 'hotel', 'domain' => 'marriott.com'],
         'res-marriott.com' => ['type' => 'hotel', 'domain' => 'marriott.com'],
         'marriott bonvoy' => ['type' => 'hotel', 'domain' => 'marriott.com'],
+        'tribute portfolio' => ['type' => 'hotel', 'domain' => 'marriott.com'],
+        'autograph collection' => ['type' => 'hotel', 'domain' => 'marriott.com'],
         'amtrak.com' => ['type' => 'train', 'domain' => 'amtrak.com'],
         'amtrak' => ['type' => 'train', 'domain' => 'amtrak.com'],
     ];
@@ -194,6 +197,11 @@ final class EmailConfirmationDetector
                 || str_contains($subjectLower, 'cancelled')) {
                 return 'cancel';
             }
+            if (str_contains($subjectLower, 'modified') || str_contains($subjectLower, 'modification')
+                || str_contains($subjectLower, 'updated reservation') || str_contains($subjectLower, 'reservation update')
+                || str_contains($subjectLower, 'change to your') || str_contains($subjectLower, 'itinerary change')) {
+                return 'change';
+            }
             if (str_contains($subjectLower, 'confirmation') || str_contains($haystack, 'check-in')
                 || str_contains($haystack, 'check in')) {
                 return 'confirm';
@@ -224,15 +232,22 @@ final class EmailConfirmationDetector
                 return 'cancel';
             }
             if (str_contains($subjectLower, 'time change') || str_contains($subjectLower, 'schedule change')
-                || str_contains($subjectLower, 'rebooked') || str_contains($subjectLower, 'new itinerary')) {
+                || str_contains($subjectLower, 'rebooked') || str_contains($subjectLower, 'rebook')
+                || str_contains($subjectLower, 'new itinerary') || str_contains($subjectLower, 'itinerary change')
+                || str_contains($subjectLower, 'flight update') || str_contains($subjectLower, 'updated itinerary')) {
                 return 'change';
             }
             return 'confirm';
         }
 
         if ($type === 'train') {
-            if (str_contains($subjectLower, 'refund')) {
+            if (str_contains($subjectLower, 'refund') || str_contains($subjectLower, 'cancel')
+                || str_contains($subjectLower, 'canceled') || str_contains($subjectLower, 'cancelled')) {
                 return 'cancel';
+            }
+            if (str_contains($subjectLower, 'updated') || str_contains($subjectLower, 'schedule change')
+                || str_contains($subjectLower, 'modified') || str_contains($subjectLower, 'change to')) {
+                return 'change';
             }
             return 'confirm';
         }

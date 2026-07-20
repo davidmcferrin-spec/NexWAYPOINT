@@ -1,0 +1,30 @@
+---
+description: Mail confirmation parsers — direct, forwarded, and change events
+globs: src/Mail/**/*.php,tests/**/*Mail*,tests/**/*Parser*,tests/**/*Forward*
+alwaysApply: false
+---
+
+# Mail parsers (hotel / flight / train)
+
+Confirmations arrive **direct from the vendor** or as **forwards** (Proton,
+Gmail, Outlook, Yahoo, Apple). Updates, rebooks, and cancellations are
+normal — not edge cases.
+
+## Pipeline (do not bypass)
+
+1. Outer `From:` → owner via `user_emails` (never assume vendor is From).
+2. `ForwardedMailNormalizer::normalize()` before detect/parse.
+3. `EmailConfirmationDetector` — vendor domain from From **or** forwarded
+   body / content hints.
+4. Brand parser — extract fields; return `event` of `confirm` | `change` |
+   `cancel` | `ignore` as appropriate.
+5. Upsert by confirmation/PNR (changes replace legs / update stay).
+
+## Parser agility
+
+- Use `ParserBase::messageText()` (dequotes + scrubs common MIME noise).
+- Prefer **several** regex/date patterns per field; templates drift.
+- Fixture every real failing `.eml` under `tests/` — widen the parser,
+  don't hardcode one mailbox.
+- Hilton/Marriott/AA/etc. must work on both direct and `Fw:` copies of
+  the same confirmation.

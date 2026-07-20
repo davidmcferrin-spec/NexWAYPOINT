@@ -79,6 +79,17 @@ pending-confirmation flow).
   `trip_segments.carrier_id` links flights. Flight form asks for flight
   number only; enrichment builds FlightAware ident as IATA+number.
   Manage under Settings → Site catalogs (`/settings/site.php`); shared site-wide catalog.
+- **Mail parsers must handle direct vendor mail AND teammate forwards, plus
+  confirm / change / cancel.** Ownership always uses the outer `From:`
+  (matched via `user_emails`). `ForwardedMailNormalizer` strips Fw:/Fwd:
+  wrappers (Gmail, Outlook, Proton, Yahoo, Apple) before detect/parse so
+  parsers see the underlying confirmation. Brand parsers (AA, Hilton,
+  Marriott, …) must tolerate quoted bodies, soft line-breaks, zero-width
+  characters, and template drift — prefer multiple date/code/property
+  patterns over one brittle regex. Upserts by confirmation/PNR already
+  absorb updates; cancels and schedule changes are first-class events.
+  When a live `.eml` fails, add a fixture test and widen the parser, do
+  not special-case one mailbox.
 - **Auto-import creates the hotel stay / trip segments directly + notifies**,
   rather than a pending-approval queue the user has to click through. The
   original "We found a trip... Confirm?" flow from the pasted spec is more

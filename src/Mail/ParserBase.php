@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace NexWaypoint\Mail;
 
 /**
- * Shared regex-extraction helpers for concrete parsers. Confidence scoring
- * is tracked per-instance across the last parse() call -- concrete parsers
- * call recordFieldFound()/recordFieldMissing() as they extract each field
- * and confidenceScore() averages the result.
+ * Shared regex-extraction helpers for concrete parsers.
+ *
+ * Callers receive messages already run through ForwardedMailNormalizer
+ * (direct vendor mail or Gmail/Outlook/Proton/Yahoo/Apple forwards). Use
+ * messageText() so quote markers, soft breaks, and common MIME noise are
+ * stripped before field extraction. Parsers should accept confirm, change,
+ * and cancel wording — upserts key on confirmation/PNR.
  */
 abstract class ParserBase implements ParserInterface
 {
@@ -91,6 +94,8 @@ abstract class ParserBase implements ParserInterface
         $formats = [
             'M j, Y', 'F j, Y', 'm/d/Y', 'Y-m-d', 'D, M j, Y', 'j M Y',
             'D, M j Y', 'l, F j, Y', 'l, M j, Y', 'M j Y',
+            'M-d-Y', 'M-j-Y', 'd-M-Y', 'j-M-Y',
+            'D, F j, Y', 'l, F j Y',
         ];
         foreach ($formats as $format) {
             $date = \DateTime::createFromFormat($format, trim($raw));
@@ -149,13 +154,29 @@ abstract class ParserBase implements ParserInterface
         return null;
     }
 
+    /**
+     * Plain (preferred) or HTML body, dequoted and scrubbed for extraction.
+     * Safe for both direct vendor mail and normalized forwards.
+     */
     protected function messageText(EmailMessage $message): string
     {
         $plain = trim($message->bodyPlain);
-        if ($plain !== '') {
-            return ForwardedMailNormalizer::dequoteText($plain);
-        }
-        return ForwardedMailNormalizer::dequoteText($this->htmlToText($message->bodyHtml));
+        $text = $plain !== ''
+            ? ForwardedMailNormalizer::dequoteText($plain)
+            : ForwardedMailNormalizer::dequoteText($this->htmlToText($message->bodyHtml));
+        return $this->scrubMimeNoise($text);
+    }
+
+    /**
+     * Vendor HTML→text often inserts zero-width spaces; forwards leave
+     * fancy dashes and NBSP. Normalize once so brand parsers stay lean.
+     */
+    protected function scrubMimeNoise(string $text): string
+    {
+        $text = preg_replace('/[\x{200B}-\x{200D}\x{FEFF}]/u', '', $text) ?? $text;
+        $text = str_replace(["\u{00A0}", "\u{2013}", "\u{2014}", '–', '—'], [' ', '-', '-', '-', '-'], $text);
+        $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
+        return trim($text);
     }
 
     protected function htmlToText(string $html): string

@@ -67,6 +67,13 @@ try {
     $fetched = (int) ($result['fetched'] ?? 0);
     $success = (int) ($result['success'] ?? 0);
     $failed = (int) ($result['failed'] ?? 0);
+    /** @var list<string> $failureReasons */
+    $failureReasons = is_array($result['failure_reasons'] ?? null) ? $result['failure_reasons'] : [];
+    $errorMessage = null;
+    if ($failureReasons !== []) {
+        // Keep short for cron_job_runs.error_message (VARCHAR 500).
+        $errorMessage = mb_substr(implode('; ', array_slice($failureReasons, 0, 3)), 0, 500);
+    }
 
     if ($failed > 0 && $success === 0 && $fetched > 0) {
         $status = CronRunRepository::STATUS_FAILED;
@@ -83,11 +90,14 @@ try {
             'success' => $success,
             'failed' => $failed,
             'source' => preg_match('/^[a-z0-9_]{1,40}$/', $sourceName) ? $sourceName : null,
-        ]);
+        ], null, $errorMessage);
     }
 
     if (PHP_SAPI === 'cli') {
         fwrite(STDOUT, sprintf("Fetched: %d, Success: %d, Failed: %d\n", $fetched, $success, $failed));
+        foreach ($failureReasons as $reason) {
+            fwrite(STDERR, '  fail: ' . $reason . "\n");
+        }
     }
 } catch (\Throwable $e) {
     $logger->error('Mail poll job aborted', ['error' => $e->getMessage()]);
