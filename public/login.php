@@ -26,8 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NexWAYPOINT &middot; Sign in</title>
-    <link rel="stylesheet" href="/assets/style.css">
+    <?php require __DIR__ . '/_head_assets.php'; ?>
 </head>
 <body class="auth-page">
 <main class="auth-box">
@@ -44,6 +45,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <button type="submit">Sign in</button>
     </form>
+    <div class="theme-toggle-wrap">
+        <?php require __DIR__ . '/_theme_toggle.php'; ?>
+    </div>
 </main>
 </body>
 </html>
