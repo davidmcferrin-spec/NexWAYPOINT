@@ -34,6 +34,37 @@ final class TripRepository
     }
 
     /**
+     * Filter the owner's trips for the history UI.
+     *
+     * @param 'all'|'upcoming'|'past'|'cancelled' $scope
+     * @return Trip[]
+     */
+    public function searchForOwner(int $ownerId, string $scope = 'all', ?\DateTimeImmutable $asOf = null): array
+    {
+        $asOf ??= new \DateTimeImmutable('today');
+        $today = $asOf->format('Y-m-d');
+        $trips = $this->findForOwner($ownerId);
+
+        if ($scope === 'all') {
+            return $trips;
+        }
+
+        return array_values(array_filter(
+            $trips,
+            static function (Trip $trip) use ($scope, $today): bool {
+                $cancelled = $trip->status === 'cancelled';
+                $ended = $trip->endDate < $today || $trip->status === 'completed';
+                return match ($scope) {
+                    'cancelled' => $cancelled,
+                    'past' => !$cancelled && $ended,
+                    'upcoming' => !$cancelled && !$ended,
+                    default => true,
+                };
+            }
+        ));
+    }
+
+    /**
      * Trips that overlap "now" or start within the given number of days --
      * used by TripStatusEngine and the team dashboard.
      *

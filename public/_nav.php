@@ -16,6 +16,7 @@ $navIsAdmin = $user->isAdmin || $user->role === 'manager';
     <div class="navbar-brand"><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
+        <a href="/trips/list.php">Trips</a>
         <a href="/hotels/properties.php">Hotels</a>
         <a href="/hotels/map.php">Map</a>
         <span class="navbar-sep" aria-hidden="true"></span>

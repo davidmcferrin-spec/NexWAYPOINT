@@ -129,13 +129,18 @@ function statusBadgeClass(string $status): string
         </table>
     <?php endif; ?>
 
-    <h2>Your upcoming trips</h2>
+    <h2>Your upcoming trips <a class="hint" href="/trips/list.php" style="font-weight: 400; font-size: 0.85rem;">View all</a></h2>
     <?php if ($myUpcomingTrips === []): ?>
-        <p class="empty-state">Nothing on the books. <a href="/flights/add.php">Add a flight</a>, <a href="/trains/add.php">add a train</a>, or <a href="/hotels/add.php">log a hotel stay</a>.</p>
+        <p class="empty-state">Nothing on the books. <a href="/flights/add.php">Add a flight</a>, <a href="/trains/add.php">add a train</a>, <a href="/trips/list.php">review past trips</a>, or <a href="/hotels/add.php">log a hotel stay</a>.</p>
     <?php else: ?>
         <?php foreach ($myUpcomingTrips as $trip): ?>
             <div class="card">
-                <h3><?= htmlspecialchars($trip->destinationCity, ENT_QUOTES) ?> <?php if ($trip->isPrivate): ?><span class="badge badge-blacklist">Private</span><?php endif; ?></h3>
+                <h3>
+                    <a href="/trips/view.php?id=<?= (int) $trip->id ?>">
+                        <?= htmlspecialchars($trip->destinationCity, ENT_QUOTES) ?>
+                    </a>
+                    <?php if ($trip->isPrivate): ?><span class="badge badge-blacklist">Private</span><?php endif; ?>
+                </h3>
                 <p><?= htmlspecialchars($trip->startDate, ENT_QUOTES) ?> &rarr; <?= htmlspecialchars($trip->endDate, ENT_QUOTES) ?></p>
                 <?php if ($trip->tripPurpose !== null): ?><p><?= htmlspecialchars($trip->tripPurpose, ENT_QUOTES) ?></p><?php endif; ?>
                 <?php
