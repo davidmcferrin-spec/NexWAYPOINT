@@ -147,44 +147,13 @@ final class DreamHostImapSource implements MailSourceInterface
      */
     private function extractBodies(\IMAP\Connection $connection, int $uid, object|false $structure): array
     {
-        if ($structure === false) {
-            return ['', ''];
-        }
-
-        if (!isset($structure->parts) || !is_array($structure->parts)) {
-            // Single-part message.
-            $body = imap_fetchbody($connection, $uid, '1', FT_UID | FT_PEEK);
-            $body = $this->decodePart($body, $structure->encoding ?? 0);
-            return ($structure->subtype ?? '') === 'HTML' ? ['', $body] : [$body, ''];
-        }
-
-        $plain = '';
-        $html = '';
-        foreach ($structure->parts as $index => $part) {
-            $partNumber = (string) ($index + 1);
-            $subtype = strtoupper($part->subtype ?? '');
-            if ($subtype !== 'PLAIN' && $subtype !== 'HTML') {
-                continue;
+        return ImapMimeBodyExtractor::extract(
+            $structure,
+            static function (string $partNumber) use ($connection, $uid): string {
+                $raw = imap_fetchbody($connection, $uid, $partNumber, FT_UID | FT_PEEK);
+                return is_string($raw) ? $raw : '';
             }
-            $raw = imap_fetchbody($connection, $uid, $partNumber, FT_UID | FT_PEEK);
-            $decoded = $this->decodePart($raw, $part->encoding ?? 0);
-            if ($subtype === 'PLAIN') {
-                $plain .= $decoded;
-            } else {
-                $html .= $decoded;
-            }
-        }
-
-        return [$plain, $html];
-    }
-
-    private function decodePart(string $raw, int $encoding): string
-    {
-        return match ($encoding) {
-            3 => (string) base64_decode($raw), // ENCBASE64
-            4 => (string) quoted_printable_decode($raw), // ENCQUOTEDPRINTABLE
-            default => $raw,
-        };
+        );
     }
 
     private function extractEmailAddress(string $fromHeader): string

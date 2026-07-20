@@ -44,7 +44,10 @@ final class EmailConfirmationDetector
     private const CONTENT_HINTS = [
         'info.email.aa.com' => ['type' => 'flight', 'domain' => 'aa.com'],
         'american airlines' => ['type' => 'flight', 'domain' => 'aa.com'],
+        'american eagle' => ['type' => 'flight', 'domain' => 'aa.com'],
+        'aadvantage' => ['type' => 'flight', 'domain' => 'aa.com'],
         'aa.com' => ['type' => 'flight', 'domain' => 'aa.com'],
+        'your trip confirmation' => ['type' => 'flight', 'domain' => 'aa.com'],
         'delta air lines' => ['type' => 'flight', 'domain' => 'delta.com'],
         'delta.com' => ['type' => 'flight', 'domain' => 'delta.com'],
         'united airlines' => ['type' => 'flight', 'domain' => 'united.com'],
@@ -97,6 +100,14 @@ final class EmailConfirmationDetector
             }
         }
 
+        if ($type === 'unknown') {
+            $forwarded = $this->detectFromForwardedFromHeader($message->bestText());
+            if ($forwarded !== null) {
+                $type = $forwarded['type'];
+                $matched = $forwarded['domain'];
+            }
+        }
+
         if ($type === 'unknown' && in_array($domain, self::RIDESHARE_DOMAINS, true)) {
             $haystack = strtolower($message->subject . ' ' . $message->bestText());
             foreach (self::AIRPORT_KEYWORDS as $keyword) {
@@ -134,6 +145,34 @@ final class EmailConfirmationDetector
         foreach ($keys as $needle) {
             if (str_contains($lower, $needle)) {
                 return self::CONTENT_HINTS[$needle];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Outlook/Gmail/Proton forwards often include "From: Vendor <addr@domain>".
+     *
+     * @return array{type: string, domain: string}|null
+     */
+    private function detectFromForwardedFromHeader(string $text): ?array
+    {
+        if (preg_match_all(
+            '/^From:\s*.*?([a-z0-9._%+\-]+@([a-z0-9.\-]+\.[a-z]{2,}))/mi',
+            $text,
+            $matches,
+            PREG_SET_ORDER
+        ) === false || $matches === []) {
+            return null;
+        }
+        foreach ($matches as $match) {
+            $domain = strtolower($match[2]);
+            foreach (self::SENDER_DOMAIN_SUFFIXES as $candidateType => $suffixes) {
+                foreach ($suffixes as $suffix) {
+                    if ($domain === $suffix || str_ends_with($domain, '.' . $suffix)) {
+                        return ['type' => $candidateType, 'domain' => $suffix];
+                    }
+                }
             }
         }
         return null;

@@ -19,8 +19,11 @@ final class ParseLogRepository
 
     public function alreadyProcessed(string $mailUid, string $source): bool
     {
+        // Failed rows may be retried after moving mail back to INBOX (same UID).
         $row = $this->db->fetchOne(
-            'SELECT id FROM parse_log WHERE mail_uid = :uid AND source = :source',
+            "SELECT id FROM parse_log
+             WHERE mail_uid = :uid AND source = :source
+               AND parse_status IN ('success', 'ignored')",
             ['uid' => $mailUid, 'source' => $source]
         );
         return $row !== null;

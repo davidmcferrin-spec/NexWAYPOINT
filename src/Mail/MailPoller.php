@@ -24,11 +24,14 @@ use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Users\UserRepository;
 
 /**
- * Orchestrates one polling pass: fetch unseen mail -> detect type/event ->
- * match owner by From: -> parse -> upsert/cancel trips or hotel stays.
+ * Orchestrates one polling pass: fetch unseen mail -> normalize forwards ->
+ * detect type/event -> match owner by From: -> parse -> upsert/cancel trips
+ * or hotel stays.
  *
  * Supported: AA / Delta / United / Breeze flights, Amtrak, Hilton / Marriott /
  * generic hotel confirmations. Folio / bag-receipt / status mail is ignored.
+ * Forwards from Gmail / Outlook / Proton / Yahoo / Apple are normalized so
+ * parsers see the original confirmation body.
  */
 final class MailPoller
 {
@@ -111,7 +114,10 @@ final class MailPoller
             return true;
         }
 
-        $detection = $this->detector->detect($message);
+        // Outer From: still used for ownership; subject/body cleaned for vendor parsers.
+        $normalized = ForwardedMailNormalizer::normalize($message);
+
+        $detection = $this->detector->detect($normalized);
         $owner = $this->users->findByEmail($message->fromAddress);
 
         if ($owner === null) {
@@ -139,7 +145,7 @@ final class MailPoller
             return false;
         }
 
-        $extracted = $parser->parse($message);
+        $extracted = $parser->parse($normalized);
         $confidence = $parser->confidenceScore();
         $event = is_array($extracted) ? (string) ($extracted['event'] ?? $detection['event']) : $detection['event'];
 

@@ -151,10 +151,11 @@ abstract class ParserBase implements ParserInterface
 
     protected function messageText(EmailMessage $message): string
     {
-        if (trim($message->bodyPlain) !== '') {
-            return $message->bodyPlain;
+        $plain = trim($message->bodyPlain);
+        if ($plain !== '') {
+            return ForwardedMailNormalizer::dequoteText($plain);
         }
-        return $this->htmlToText($message->bodyHtml);
+        return ForwardedMailNormalizer::dequoteText($this->htmlToText($message->bodyHtml));
     }
 
     protected function htmlToText(string $html): string

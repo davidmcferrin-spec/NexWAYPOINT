@@ -25,9 +25,11 @@ final class EmailMessage
     public function bestText(): string
     {
         if (trim($this->bodyPlain) !== '') {
-            return $this->bodyPlain;
+            return ForwardedMailNormalizer::dequoteText($this->bodyPlain);
         }
         // Fall back to a crude HTML-to-text strip if only HTML was available.
-        return trim(html_entity_decode(strip_tags($this->bodyHtml)));
+        return ForwardedMailNormalizer::dequoteText(
+            trim(html_entity_decode(strip_tags($this->bodyHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8'))
+        );
     }
 }

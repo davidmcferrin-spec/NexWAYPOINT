@@ -49,6 +49,10 @@ final class AmericanAirlinesParser extends ParserBase
             $event = 'change';
         }
 
+        if ($segments === []) {
+            $segments = $this->parsePlainConfirmation($text, $subject);
+        }
+
         $code = $segments[0]['confirmation_code'] ?? null;
         if ($code === null) {
             $code = $this->extractFirstMatch([
@@ -75,6 +79,79 @@ final class AmericanAirlinesParser extends ParserBase
             'confirmation_code' => strtoupper($code),
             'segments' => $segments,
         ];
+    }
+
+    /**
+     * Plain-text / forwarded AA confirmation (no Schema.org JSON-LD).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function parsePlainConfirmation(string $text, string $subject): array
+    {
+        $origin = null;
+        $destination = null;
+        if (preg_match('/\(([A-Z]{3})\s*[-–—]\s*([A-Z]{3})\)/', $subject, $m) === 1) {
+            $origin = $m[1];
+            $destination = $m[2];
+        }
+
+        if (!preg_match('/\bAA\s*(\d{1,4})\b/i', $text, $fm)) {
+            return [];
+        }
+        $flightNumber = $this->normalizeFlightNumber($fm[1], 'AA');
+        if ($flightNumber === null) {
+            return [];
+        }
+
+        if ($origin === null || $destination === null) {
+            // Prefer airport codes that appear as their own lines (AA receipt layout).
+            if (preg_match_all('/(?:^|\n)\s*>?\s*([A-Z]{3})\s*(?:\n|$)/', $text, $am) >= 1) {
+                $codes = [];
+                $stop = ['THE', 'AND', 'FOR', 'YOU', 'ARE', 'ALL', 'NEW', 'NOW', 'APP', 'PDF', 'USA', 'USD', 'EST', 'CST', 'PST', 'EDT', 'CDT', 'GMT', 'UTC', 'FAQ', 'VIP', 'PRO', 'AA'];
+                foreach ($am[1] as $code) {
+                    if (!in_array($code, $stop, true)) {
+                        $codes[] = $code;
+                    }
+                }
+                $codes = array_values(array_unique($codes));
+                if (count($codes) >= 2) {
+                    $origin = $codes[0];
+                    $destination = $codes[1];
+                }
+            }
+        }
+
+        if ($origin === null || $destination === null) {
+            return [];
+        }
+
+        $depart = null;
+        if (preg_match(
+            '/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})/i',
+            $text,
+            $dm
+        ) === 1) {
+            if (preg_match('/\b(\d{1,2}:\d{2}\s*[AP]M)\b/i', $text, $tm) === 1) {
+                $depart = $this->parseFlexibleDateTime($dm[1] . ' ' . $tm[1]);
+            } else {
+                $depart = $this->parseFlexibleDateTime($dm[1]);
+            }
+        }
+
+        $this->recordField(true); // flight number
+        $this->recordField(true); // route
+        $this->recordField($depart !== null);
+
+        return [[
+            'confirmation_code' => null,
+            'carrier_iata' => 'AA',
+            'carrier_name' => 'American Airlines',
+            'flight_number' => $flightNumber,
+            'origin' => $origin,
+            'destination' => $destination,
+            'depart_dt' => $depart,
+            'arrive_dt' => null,
+        ]];
     }
 
     /**
