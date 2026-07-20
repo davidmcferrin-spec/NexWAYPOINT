@@ -11,6 +11,7 @@ WITH_DEV=false
 COMMAND="install"
 UPDATE_REF=""
 RESTORE_TARGET="latest"
+RESET_USERNAME="admin"
 NO_BACKUP=false
 RESTORE_CODE=false
 FORCE_UPDATE=false
@@ -37,10 +38,11 @@ Usage:
   ./setup.sh backup                      Snapshot .env, storage, and DB dump
   ./setup.sh update [--ref REF]          Backup, git-pull, then redeploy web
   ./setup.sh restore [ID|latest] [--code]
+  ./setup.sh reset-password [--username NAME]
   ./setup.sh list-backups                Show available backup IDs
 
 Install options:
-  --skip-user          Do not offer to create a local login
+  --skip-user          Do not auto-seed the admin account
   --skip-deploy        Do not publish public/ into the DreamHost web directory
   --web-root PATH      DreamHost domain web directory
                        (default: /home/dh_w9tij7/nexwaypoint.area51consulting.com)
@@ -49,6 +51,7 @@ Install options:
 
 Update / restore options:
   --ref REF            Branch, tag, or commit to update to (default: current branch)
+  --username NAME      Username for reset-password (default: admin)
   --no-backup          Skip the automatic pre-update / pre-restore backup
   --force              Allow update with a dirty git working tree
   --code               On restore, also check out the git SHA recorded in the backup
@@ -225,6 +228,8 @@ configure_new_env() {
     set_env_value "FLIGHTAWARE_RATELIMIT_STATE_FILE" "${ROOT_DIR}/storage/cache/flightaware_ratelimit.json"
     set_env_value "HOTEL_PHOTO_UPLOAD_DIR" "${ROOT_DIR}/storage/uploads/hotel_photos"
     set_env_value "SESSION_SECRET" "$(php -r 'echo bin2hex(random_bytes(32));')"
+    set_env_value "ADMIN_USERNAME" "admin"
+    set_env_value "ADMIN_EMAIL" "admin@${DEFAULT_SITE_HOST}"
 
     timezone="$(prompt_value "Application timezone" "America/Chicago")"
     set_env_value "APP_TIMEZONE" "${timezone}"
@@ -815,6 +820,15 @@ EOF
     fi
 }
 
+cmd_reset_password() {
+    verify_php
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        echo "No ${ENV_FILE}; run ./setup.sh install first." >&2
+        exit 1
+    fi
+    php "${ROOT_DIR}/scripts/reset_password.php" --username="${RESET_USERNAME}"
+}
+
 run_install() {
     echo "NexWAYPOINT setup"
     echo "Project: ${ROOT_DIR}"
@@ -833,8 +847,10 @@ run_install() {
     verify_database_extension
     php "${ROOT_DIR}/scripts/init_database.php"
 
-    if [[ "${SKIP_USER}" == false ]] && ask_yes_no "Create a local login now?" "y"; then
-        php "${ROOT_DIR}/scripts/create_user.php"
+    if [[ "${SKIP_USER}" == false ]]; then
+        echo
+        echo "Seeding admin account (skipped if users already exist)..."
+        php "${ROOT_DIR}/scripts/seed_admin.php"
     fi
 
     echo
@@ -862,11 +878,13 @@ Web:  ${WEB_ROOT}  (symlinks into ${ROOT_DIR}/public)
 Next:
   1. Leave the DreamHost Web Directory as ${WEB_ROOT} (default domain folder)
   2. Confirm HTTPS is forced for ${DEFAULT_SITE_HOST}
-  3. Open ${SITE_URL}/login.php
-  4. Forward travel confirmations to the dedicated IMAP mailbox once configured
+  3. Open ${SITE_URL}/login.php (admin password printed above if this was a fresh install)
+  4. Delete storage/admin-credentials.txt after first login
+  5. Forward travel confirmations to the dedicated IMAP mailbox once configured
 
 Maintenance:
   ./setup.sh deploy
+  ./setup.sh reset-password
   ./setup.sh backup
   ./setup.sh update
   ./setup.sh restore latest
@@ -878,7 +896,7 @@ EOF
 
 while (( $# > 0 )); do
     case "$1" in
-        install|deploy|backup|update|restore|list-backups)
+        install|deploy|backup|update|restore|reset-password|list-backups)
             COMMAND="$1"
             ;;
         --backup)
@@ -931,6 +949,17 @@ while (( $# > 0 )); do
         --code)
             RESTORE_CODE=true
             ;;
+        --username)
+            RESET_USERNAME="${2:-}"
+            if [[ -z "${RESET_USERNAME}" ]]; then
+                echo "--username requires a login name." >&2
+                exit 2
+            fi
+            shift
+            ;;
+        --username=*)
+            RESET_USERNAME="${1#*=}"
+            ;;
         --skip-user) SKIP_USER=true ;;
         --skip-deploy) SKIP_DEPLOY=true ;;
         --install-packages) SKIP_PACKAGES=false ;;
@@ -964,6 +993,7 @@ case "${COMMAND}" in
     backup) cmd_backup ;;
     update) cmd_update ;;
     restore) cmd_restore ;;
+    reset-password) cmd_reset_password ;;
     list-backups) list_backups ;;
     *)
         echo "Unknown command: ${COMMAND}" >&2

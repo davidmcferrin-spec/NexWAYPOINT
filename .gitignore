@@ -5,6 +5,7 @@ storage/logs/*.log
 storage/cache/*
 storage/uploads/hotel_photos/*
 storage/backups/*
+storage/admin-credentials.txt
 storage/*.sqlite
 !storage/logs/.gitkeep
 !storage/cache/.gitkeep

@@ -122,4 +122,19 @@ final class UserRepository
         }
         return $user;
     }
+
+    public function updatePassword(int $userId, string $plainPassword, ?int $actorUserId = null): void
+    {
+        if (strlen($plainPassword) < 12) {
+            throw new \InvalidArgumentException('Password must be at least 12 characters.');
+        }
+
+        $hash = password_hash($plainPassword, PASSWORD_DEFAULT);
+        $this->db->execute(
+            'UPDATE users SET password_hash = :hash, updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+            ['hash' => $hash, 'id' => $userId]
+        );
+        $this->db->audit($actorUserId, 'update_password', 'users', $userId, []);
+        $this->logger->info('User password updated', ['id' => $userId]);
+    }
 }

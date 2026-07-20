@@ -116,16 +116,23 @@ on a machine that already has Composer). `setup.sh` then:
   `/home/dh_w9tij7/NexWAYPOINT/storage/...`;
 - prompts for MySQL/SQLite, optional IMAP, and optional FlightAware settings;
 - creates writable storage directories and installs the database schema;
-- securely creates the first local user;
+- auto-seeds the `admin` account with a random password if no users exist; and
 - publishes `public/` into `/home/dh_w9tij7/nexwaypoint.area51consulting.com`; and
 - optionally installs the configured mail/flight cron jobs.
 
 It is safe to rerun. Use `bash setup.sh --help` for options
-(`--skip-user`, `--skip-deploy`, `--web-root`, `--with-dev`). To add another
-local user later:
+(`--skip-user`, `--skip-deploy`, `--web-root`, `--with-dev`). Additional
+users:
 
 ```bash
 php scripts/create_user.php
+```
+
+Reset a password (prints a new random value once):
+
+```bash
+bash setup.sh reset-password
+bash setup.sh reset-password --username admin
 ```
 
 Force HTTPS for the subdomain in the DreamHost panel, then open

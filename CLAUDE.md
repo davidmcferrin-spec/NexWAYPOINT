@@ -24,7 +24,9 @@ server-rendered PHP UI exists for login, hotel list/add/view, dashboard,
 and sharing settings. VPS deployment is bootstrapped by an idempotent
 `setup.sh` that installs/verifies dependencies, creates `.env`, initializes
 MySQL or SQLite, creates the first local user, and configures eligible cron
-jobs. Additional users can be created with `scripts/create_user.php`.
+jobs. Additional users can be created with `scripts/create_user.php`. Install
+auto-seeds `admin` with a random password when the database has no users;
+`setup.sh reset-password` generates a new one.
 
 **Not started:** flight/train/car email parsers (only hotel), Azure AD
 SSO, map view, PWA/offline, push notifications, hotel-stay edit page,
