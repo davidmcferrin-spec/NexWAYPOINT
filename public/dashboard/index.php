@@ -2,11 +2,16 @@
 
 declare(strict_types=1);
 
-use NexWaypoint\Core\Csrf;
+use NexWaypoint\Core\AppearanceCatalog;
+use NexWaypoint\Core\SiteSettingsRepository;
+use NexWaypoint\Hotels\Geocoder;
+use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
+use NexWaypoint\Users\TeamLocationResolver;
 use NexWaypoint\Users\UserRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
 use NexWaypoint\Visibility\VisibilityEngine;
@@ -24,54 +29,44 @@ $statusEngine = new TripStatusEngine($tripRepo, $logger);
 $visibilityEngine = new VisibilityEngine($userRepo, new VisibilityRuleRepository($db));
 $blockRepo = new VisibilityBlockRepository($db);
 $notifications = new NotificationRepository($db);
+$locationResolver = new TeamLocationResolver(
+    $tripRepo,
+    new HotelStayRepository($db, $logger),
+    new HotelPropertyRepository($db, $logger),
+    new Geocoder($logger),
+);
 
-$statusErrors = [];
-$statusMessage = null;
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form'] ?? '') === 'status_override') {
-    if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
-        $statusErrors[] = 'Your session expired. Please resubmit.';
-    } else {
-        $action = (string) ($_POST['action'] ?? '');
-        try {
-            if ($action === 'set') {
-                $status = (string) ($_POST['status'] ?? '');
-                $expiresOn = (string) ($_POST['expires_on'] ?? '');
-                $note = trim((string) ($_POST['note'] ?? ''));
-                $tripRepo->setStatusOverride(
-                    $user->id,
-                    $status,
-                    $note !== '' ? $note : null,
-                    $expiresOn,
-                    $user->id,
-                );
-                $statusMessage = 'Status override saved until ' . $expiresOn . '.';
-            } elseif ($action === 'clear') {
-                $tripRepo->clearStatusOverride($user->id, $user->id);
-                $statusMessage = 'Manual status override cleared.';
-            } else {
-                throw new InvalidArgumentException('Unknown action.');
-            }
-        } catch (Throwable $e) {
-            $statusErrors[] = $e->getMessage();
-        }
-    }
-}
-
-$myStatus = $statusEngine->resolveForUser($user->id);
-$myOverride = $tripRepo->activeStatusOverride($user->id);
 $myUpcomingTrips = $tripRepo->findActiveOrUpcoming($user->id, 60);
 $unreadCount = $notifications->unreadCount($user->id);
 
-$todayYmd = (new DateTimeImmutable('today'))->format('Y-m-d');
-$defaultExpires = $myOverride['expires_on']
-    ?? $myOverride['effective_date']
-    ?? $todayYmd;
-$formStatus = (string) ($myOverride['status'] ?? 'home');
-$formNote = (string) ($myOverride['note'] ?? '');
-$overrideActive = $myOverride !== null;
-$travelOverridesManual = $overrideActive
-    && !in_array($myStatus['status'], ['home', 'office', 'remote', 'unavailable'], true);
+if (!function_exists('statusBadgeClass')) {
+    function statusBadgeClass(string $status): string
+    {
+        return match ($status) {
+            'home', 'office' => 'badge-status-home',
+            'delayed', 'cancelled' => 'badge-status-delay',
+            default => 'badge-status-travel',
+        };
+    }
+}
+
+if (!function_exists('nexwaypoint_initials')) {
+    function nexwaypoint_initials(string $name): string
+    {
+        $parts = preg_split('/\s+/', trim($name)) ?: [];
+        $letters = '';
+        foreach ($parts as $part) {
+            if ($part === '') {
+                continue;
+            }
+            $letters .= strtoupper(substr($part, 0, 1));
+            if (strlen($letters) >= 2) {
+                break;
+            }
+        }
+        return $letters !== '' ? $letters : '?';
+    }
+}
 
 /**
  * Manual work-state statuses (home/office/remote/unavailable) are always
@@ -92,6 +87,7 @@ foreach ($userRepo->findAllActive() as $teammate) {
     $tripId = $status['detail']['trip_id'] ?? null;
 
     $displayLabel = $status['label'];
+    $destinationVisible = true;
     if (!in_array($status['status'], $alwaysVisibleStatuses, true) && $tripId !== null) {
         $trip = $tripRepo->find((int) $tripId);
         $hidden = $trip !== null && $blockRepo->isHiddenFromViewer(
@@ -103,6 +99,7 @@ foreach ($userRepo->findAllActive() as $teammate) {
         );
 
         if ($hidden) {
+            $destinationVisible = false;
             $displayLabel = match ($status['status']) {
                 'en_route', 'layover', 'delayed', 'at_hotel' => 'Traveling',
                 'cancelled' => 'Travel disrupted',
@@ -113,6 +110,7 @@ foreach ($userRepo->findAllActive() as $teammate) {
             $visibility = $visibilityEngine->getVisibleFields($user->id, $teammate->id, $tripIsPrivate);
 
             if (!in_array('destination_city', $visibility['visible_fields'], true)) {
+                $destinationVisible = false;
                 $displayLabel = match ($status['status']) {
                     'en_route' => 'Traveling',
                     'layover' => 'Traveling (layover)',
@@ -125,18 +123,53 @@ foreach ($userRepo->findAllActive() as $teammate) {
         }
     }
 
-    $team[] = ['user' => $teammate, 'status' => $status['status'], 'label' => $displayLabel];
+    $location = $locationResolver->resolve($teammate, $status, $destinationVisible);
+
+    $team[] = [
+        'user' => $teammate,
+        'status' => $status['status'],
+        'label' => $displayLabel,
+        'location' => $location,
+        'avatar_url' => $teammate->hasPhoto() ? '/media/avatar.php?id=' . $teammate->id : null,
+        'photo_focus_x' => $teammate->photoFocusX,
+        'photo_focus_y' => $teammate->photoFocusY,
+        'initials' => nexwaypoint_initials($teammate->displayName),
+    ];
 }
 
 $travelingCount = count(array_filter($team, static fn (array $t) => !in_array($t['status'], $alwaysVisibleStatuses, true)));
 
-function statusBadgeClass(string $status): string
-{
-    return match ($status) {
-        'home', 'office' => 'badge-status-home',
-        'delayed', 'cancelled' => 'badge-status-delay',
-        default => 'badge-status-travel',
-    };
+$mapPeople = [];
+foreach ($team as $entry) {
+    if ($entry['location'] === null) {
+        continue;
+    }
+    $mapPeople[] = [
+        'id' => $entry['user']->id,
+        'name' => $entry['user']->displayName,
+        'status' => $entry['status'],
+        'label' => $entry['label'],
+        'lat' => $entry['location']['lat'],
+        'lon' => $entry['location']['lon'],
+        'city_label' => $entry['location']['city_label'],
+        'city_key' => $entry['location']['city_key'],
+        'avatar_url' => $entry['avatar_url'],
+        'photo_focus_x' => $entry['photo_focus_x'],
+        'photo_focus_y' => $entry['photo_focus_y'],
+        'initials' => $entry['initials'],
+    ];
+}
+
+$basemap = AppearanceCatalog::resolveMapBasemap(null);
+try {
+    $settings = new SiteSettingsRepository($db, $logger);
+    if ($settings->tableReady()) {
+        $basemap = AppearanceCatalog::resolveMapBasemap(
+            $settings->get(SiteSettingsRepository::KEY_MAP_STYLE, AppearanceCatalog::defaultMapBasemap())
+        );
+    }
+} catch (Throwable) {
+    // Keep default basemap.
 }
 ?>
 <!DOCTYPE html>
@@ -146,67 +179,81 @@ function statusBadgeClass(string $status): string
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NexWAYPOINT &middot; Dashboard</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
-    <div class="card">
-        <h3>
-            <button type="button" class="status-override-trigger" data-open-modal="status-override-modal"
-                title="Set a temporary status override">
-                Your status
-            </button>
-        </h3>
-        <p>
-            <span class="badge <?= statusBadgeClass($myStatus['status']) ?>"><?= htmlspecialchars($myStatus['label'], ENT_QUOTES) ?></span>
-            <?php if ($overrideActive && !$travelOverridesManual): ?>
-                <span class="hint">
-                    · Manual until <?= htmlspecialchars((string) ($myOverride['expires_on'] ?? $myOverride['effective_date']), ENT_QUOTES) ?>
-                </span>
-            <?php elseif ($travelOverridesManual): ?>
-                <span class="hint">
-                    · Travel is showing now; your manual override resumes after travel
-                    (through <?= htmlspecialchars((string) ($myOverride['expires_on'] ?? $myOverride['effective_date']), ENT_QUOTES) ?>)
-                </span>
-            <?php endif; ?>
-        </p>
-        <?php if (!empty($myStatus['detail']['note'])): ?>
-            <p class="hint"><?= htmlspecialchars((string) $myStatus['detail']['note'], ENT_QUOTES) ?></p>
-        <?php endif; ?>
-        <p class="hint">
-            <button type="button" class="linkish" data-open-modal="status-override-modal">Change status</button>
-            (temporary override with an end date)
-        </p>
-
-        <?php if ($statusMessage !== null): ?>
-            <p class="alert alert-success"><?= htmlspecialchars($statusMessage, ENT_QUOTES) ?></p>
-        <?php endif; ?>
-
-        <?php if ($unreadCount > 0): ?>
-            <p>
-                <a href="/alerts/index.php"><?= $unreadCount ?> unread alert<?= $unreadCount === 1 ? '' : 's' ?></a>
-                — email imports and flight status changes.
-            </p>
-        <?php endif; ?>
-    </div>
-
     <h1>Who's traveling this week</h1>
-    <p><?= $travelingCount ?> of <?= count($team) ?> teammates currently traveling.</p>
+    <p><?= $travelingCount ?> of <?= count($team) ?> teammates currently traveling.
+        <?php if ($unreadCount > 0): ?>
+            · <a href="/alerts/index.php"><?= $unreadCount ?> unread alert<?= $unreadCount === 1 ? '' : 's' ?></a>
+        <?php endif; ?>
+    </p>
 
     <?php if ($team === []): ?>
         <p class="empty-state">No other active teammates yet.</p>
     <?php else: ?>
-        <table>
-            <thead><tr><th>Teammate</th><th>Status</th></tr></thead>
-            <tbody>
+        <div class="view-toggle" role="tablist" aria-label="Team view">
+            <button type="button" class="view-toggle-btn is-active" data-team-view="table" role="tab" aria-selected="true">Table</button>
+            <button type="button" class="view-toggle-btn" data-team-view="cards" role="tab" aria-selected="false">Cards</button>
+            <button type="button" class="view-toggle-btn" data-team-view="map" role="tab" aria-selected="false">Map</button>
+        </div>
+
+        <div class="team-view" data-team-panel="table">
+            <table>
+                <thead><tr><th>Teammate</th><th>Status</th></tr></thead>
+                <tbody>
+                    <?php foreach ($team as $entry): ?>
+                        <tr>
+                            <td>
+                                <span class="team-name-cell">
+                                    <?php if ($entry['avatar_url']): ?>
+                                        <img class="avatar-circle avatar-sm"
+                                            src="<?= htmlspecialchars($entry['avatar_url'], ENT_QUOTES) ?>"
+                                            alt=""
+                                            style="object-position: <?= (float) $entry['photo_focus_x'] ?>% <?= (float) $entry['photo_focus_y'] ?>%;">
+                                    <?php else: ?>
+                                        <span class="avatar-circle avatar-sm avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
+                                    <?php endif; ?>
+                                    <?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?>
+                                </span>
+                            </td>
+                            <td><span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="team-view" data-team-panel="cards" hidden>
+            <div class="team-card-grid">
                 <?php foreach ($team as $entry): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?></td>
-                        <td><span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span></td>
-                    </tr>
+                    <article class="team-card">
+                        <?php if ($entry['avatar_url']): ?>
+                            <img class="avatar-circle avatar-lg"
+                                src="<?= htmlspecialchars($entry['avatar_url'], ENT_QUOTES) ?>"
+                                alt=""
+                                style="object-position: <?= (float) $entry['photo_focus_x'] ?>% <?= (float) $entry['photo_focus_y'] ?>%;">
+                        <?php else: ?>
+                            <span class="avatar-circle avatar-lg avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
+                        <?php endif; ?>
+                        <h3 class="team-card-name"><?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?></h3>
+                        <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
+                    </article>
                 <?php endforeach; ?>
-            </tbody>
-        </table>
+            </div>
+        </div>
+
+        <div class="team-view" data-team-panel="map" hidden>
+            <?php if ($mapPeople === []): ?>
+                <p class="empty-state">No teammates have a map location yet. Set a home city under <a href="/settings/profile.php">My profile</a>, or travel with a visible destination.</p>
+            <?php else: ?>
+                <div id="team-map" class="team-map" role="img" aria-label="Teammate locations"></div>
+                <p class="hint">Zoom in to see faces. City clusters show how many people are in that city.</p>
+            <?php endif; ?>
+        </div>
     <?php endif; ?>
 
     <h2>Your upcoming trips <a class="hint" href="/trips/list.php" style="font-weight: 400; font-size: 0.85rem;">View all</a></h2>
@@ -253,86 +300,21 @@ function statusBadgeClass(string $status): string
         <?php endforeach; ?>
     <?php endif; ?>
 </main>
-
-<div id="status-override-modal" class="modal-backdrop" <?= $statusErrors !== [] ? '' : 'hidden' ?>>
-    <div class="modal-panel" role="dialog" aria-labelledby="status-override-modal-title">
-        <h2 id="status-override-modal-title">Set status override</h2>
-        <p class="hint">
-            Temporary status for the team board. Active travel (in flight, layover, hotel)
-            still takes priority while you are on the road.
-        </p>
-        <?php foreach ($statusErrors as $err): ?>
-            <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
-        <?php endforeach; ?>
-        <form method="post" class="stack status-override-form">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-            <input type="hidden" name="form" value="status_override">
-            <div class="status-override-row">
-                <label>Status
-                    <select name="status" required>
-                        <?php foreach ([
-                            'home' => 'Home',
-                            'office' => 'Office',
-                            'remote' => 'Working remote',
-                            'unavailable' => 'Unavailable',
-                        ] as $value => $label): ?>
-                            <option value="<?= $value ?>" <?= $formStatus === $value ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($label, ENT_QUOTES) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Until
-                    <input type="date" name="expires_on" required
-                        min="<?= htmlspecialchars($todayYmd, ENT_QUOTES) ?>"
-                        value="<?= htmlspecialchars((string) $defaultExpires, ENT_QUOTES) ?>">
-                </label>
-            </div>
-            <label>Note (optional)
-                <input type="text" name="note" maxlength="255"
-                    value="<?= htmlspecialchars($formNote, ENT_QUOTES) ?>"
-                    placeholder="e.g. WFH while waiting on parts">
-            </label>
-            <div class="modal-actions">
-                <button type="submit" class="primary" name="action" value="set">Save override</button>
-                <?php if ($overrideActive): ?>
-                    <button type="submit" class="secondary" name="action" value="clear">Clear override</button>
-                <?php endif; ?>
-                <button type="button" class="secondary" data-close-modal>Cancel</button>
-            </div>
-        </form>
-    </div>
-</div>
+<?php if ($mapPeople !== []): ?>
 <script>
-(function () {
-    var modal = document.getElementById('status-override-modal');
-    if (!modal) return;
-    function openModal() {
-        modal.hidden = false;
-        document.body.classList.add('modal-open');
-        var first = modal.querySelector('select[name="status"]');
-        if (first) first.focus();
-    }
-    function closeModal() {
-        modal.hidden = true;
-        document.body.classList.remove('modal-open');
-    }
-    document.querySelectorAll('[data-open-modal="status-override-modal"]').forEach(function (btn) {
-        btn.addEventListener('click', openModal);
-    });
-    modal.querySelectorAll('[data-close-modal]').forEach(function (btn) {
-        btn.addEventListener('click', closeModal);
-    });
-    modal.addEventListener('click', function (ev) {
-        if (ev.target === modal) closeModal();
-    });
-    document.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Escape' && !modal.hidden) closeModal();
-    });
-    if (!modal.hidden) {
-        document.body.classList.add('modal-open');
-    }
-})();
+window.NEXWAYPOINT_TEAM_MAP = <?= json_encode([
+    'people' => $mapPeople,
+    'basemap' => [
+        'url' => $basemap['url'],
+        'attribution' => $basemap['attribution'],
+        'maxZoom' => $basemap['maxZoom'],
+    ],
+], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR) ?>;
 </script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/team-map.js'), ENT_QUOTES) ?>"></script>
+<?php endif; ?>
+<script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/team-view.js'), ENT_QUOTES) ?>"></script>
 </body>
 </html>

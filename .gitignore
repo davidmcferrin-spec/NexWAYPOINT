@@ -5,10 +5,12 @@ vendor/
 storage/logs/*.log
 storage/cache/*
 storage/uploads/hotel_photos/*
+storage/uploads/avatars/*
 storage/backups/*
 storage/admin-credentials.txt
 storage/*.sqlite
 !storage/logs/.gitkeep
 !storage/cache/.gitkeep
 !storage/uploads/hotel_photos/.gitkeep
+!storage/uploads/avatars/.gitkeep
 !storage/backups/.gitkeep

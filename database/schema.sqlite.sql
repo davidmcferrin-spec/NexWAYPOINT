@@ -21,6 +21,13 @@ CREATE TABLE users (
     is_system       INTEGER NOT NULL DEFAULT 0,
     timezone        TEXT NOT NULL DEFAULT 'America/Chicago',
     is_active       INTEGER NOT NULL DEFAULT 1,
+    photo_path      TEXT NULL,
+    photo_focus_x   REAL NOT NULL DEFAULT 50,
+    photo_focus_y   REAL NOT NULL DEFAULT 50,
+    home_city       TEXT NULL,
+    home_state      TEXT NULL,
+    home_lat        REAL NULL,
+    home_lon        REAL NULL,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -52,6 +59,8 @@ CREATE TABLE user_status_overrides (
     user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status          TEXT NOT NULL CHECK (status IN ('home','office','remote','unavailable')),
     note            TEXT NULL,
+    location_city   TEXT NULL,
+    location_state  TEXT NULL,
     effective_date  TEXT NOT NULL,
     expires_on      TEXT NULL,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),

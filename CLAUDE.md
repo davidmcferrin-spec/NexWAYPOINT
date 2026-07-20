@@ -11,7 +11,7 @@ time, based in Huntsville, AL. Builds his own tools: Python/PHP/MySQL or
 SQLite, self-hosted, reliability and low-maintenance-while-traveling over
 feature breadth. Prefers direct technical pushback over agreement.
 
-## Status as of this build (2026-07-19)
+## Status as of this build (2026-07-20)
 
 v1 scaffold is complete and passes lint + tests: hotel tracker split into
 site-wide `hotel_properties` (identity, amenities including EV/restaurant/
@@ -33,6 +33,12 @@ colors, default theme) is under Settings → Appearance. Install auto-seeds
 `admin` with a random password; `setup.sh reset-password` regenerates.
 Existing DBs need `php scripts/migrate.php` after pull (includes
 global-properties migration).
+
+**Team board UX (2026-07-20):** profile photo upload with face-center crop
+(Settings → My profile), home city for map pins, nav-centered
+`You are: <Status>` override (remote requires city/state), dashboard
+Table / Cards / Map views (`localStorage` preference) with Leaflet city
+clusters → face markers.
 
 **Not started:** car/rideshare email parsers, Azure AD SSO,
 PWA/offline, push notifications, approval UI for auto-imported stays

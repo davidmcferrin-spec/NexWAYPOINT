@@ -8,6 +8,8 @@ declare(strict_types=1);
  */
 
 use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Trips\TripRepository;
+use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\User;
 
 /** @var User $user */
@@ -20,9 +22,48 @@ if (!isset($unreadCount) && isset($app) && is_array($app) && isset($app['db'])) 
 }
 $unreadCount = (int) ($unreadCount ?? 0);
 $navIsAdmin = $user->isAdmin || $user->role === 'manager';
+
+$statusFlash = null;
+if (isset($_SESSION['nexwaypoint_status_flash']) && is_array($_SESSION['nexwaypoint_status_flash'])) {
+    $statusFlash = $_SESSION['nexwaypoint_status_flash'];
+    unset($_SESSION['nexwaypoint_status_flash']);
+}
+
+$navStatusLabel = 'Home';
+$navStatusCode = 'home';
+if (isset($app) && is_array($app) && isset($app['db'], $app['logger'])) {
+    try {
+        $navStatusEngine = new TripStatusEngine(new TripRepository($app['db'], $app['logger']), $app['logger']);
+        $navResolved = $navStatusEngine->resolveForUser($user->id);
+        $navStatusLabel = (string) $navResolved['label'];
+        $navStatusCode = (string) $navResolved['status'];
+    } catch (Throwable) {
+        // Keep defaults if status engine unavailable.
+    }
+}
+
+if (!function_exists('nexwaypoint_status_badge_class')) {
+    function nexwaypoint_status_badge_class(string $status): string
+    {
+        return match ($status) {
+            'home', 'office' => 'badge-status-home',
+            'delayed', 'cancelled' => 'badge-status-delay',
+            default => 'badge-status-travel',
+        };
+    }
+}
 ?>
 <nav class="navbar">
     <div class="navbar-brand"><a href="/dashboard/index.php">NexWAYPOINT</a></div>
+    <div class="navbar-status">
+        <span class="navbar-status-prefix">You are:</span>
+        <button type="button"
+            class="navbar-status-trigger badge <?= htmlspecialchars(nexwaypoint_status_badge_class($navStatusCode), ENT_QUOTES) ?>"
+            data-open-modal="status-override-modal"
+            title="Set a temporary status override">
+            <?= htmlspecialchars($navStatusLabel, ENT_QUOTES) ?>
+        </button>
+    </div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/trips/list.php">Trips</a>
@@ -68,3 +109,9 @@ $navIsAdmin = $user->isAdmin || $user->role === 'manager';
         <?php require __DIR__ . '/_theme_toggle.php'; ?>
     </div>
 </nav>
+<?php if (isset($statusFlash) && is_array($statusFlash) && ($statusFlash['type'] ?? '') === 'success'): ?>
+    <div class="container status-flash-banner">
+        <p class="alert alert-success"><?= htmlspecialchars((string) $statusFlash['text'], ENT_QUOTES) ?></p>
+    </div>
+<?php endif; ?>
+<?php require __DIR__ . '/_status_override_modal.php'; ?>

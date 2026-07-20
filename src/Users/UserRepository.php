@@ -462,6 +462,113 @@ final class UserRepository
     }
 
     /**
+     * Update home city/state and optional cached coordinates for team map pins.
+     */
+    public function updateHomeLocation(
+        int $userId,
+        ?string $homeCity,
+        ?string $homeState,
+        ?float $homeLat = null,
+        ?float $homeLon = null,
+        ?int $actorUserId = null,
+    ): User {
+        if (!$this->db->columnExists('users', 'home_city')) {
+            throw new \RuntimeException('users.home_city missing; run php scripts/migrate.php');
+        }
+
+        $homeCity = $homeCity !== null ? trim($homeCity) : null;
+        $homeState = $homeState !== null ? trim($homeState) : null;
+        if ($homeCity === '') {
+            $homeCity = null;
+        }
+        if ($homeState === '') {
+            $homeState = null;
+        }
+        if ($homeCity === null) {
+            $homeState = null;
+            $homeLat = null;
+            $homeLon = null;
+        }
+
+        $this->db->execute(
+            'UPDATE users SET
+                home_city = :city,
+                home_state = :state,
+                home_lat = :lat,
+                home_lon = :lon,
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id',
+            [
+                'city' => $homeCity,
+                'state' => $homeState,
+                'lat' => $homeLat,
+                'lon' => $homeLon,
+                'id' => $userId,
+            ]
+        );
+        $this->db->audit($actorUserId, 'update_home_location', 'users', $userId, [
+            'home_city' => $homeCity,
+            'home_state' => $homeState,
+        ]);
+
+        $user = $this->find($userId);
+        if ($user === null) {
+            throw new \RuntimeException('User update succeeded but row could not be re-read.');
+        }
+        return $user;
+    }
+
+    /**
+     * Persist avatar filesystem path and circular crop focus (0–100 percent).
+     */
+    public function updatePhoto(
+        int $userId,
+        ?string $photoPath,
+        float $focusX = 50.0,
+        float $focusY = 50.0,
+        ?int $actorUserId = null,
+    ): User {
+        if (!$this->db->columnExists('users', 'photo_path')) {
+            throw new \RuntimeException('users.photo_path missing; run php scripts/migrate.php');
+        }
+
+        $focusX = max(0.0, min(100.0, $focusX));
+        $focusY = max(0.0, min(100.0, $focusY));
+        if ($photoPath !== null) {
+            $photoPath = trim($photoPath);
+            if ($photoPath === '') {
+                $photoPath = null;
+            }
+        }
+
+        $this->db->execute(
+            'UPDATE users SET
+                photo_path = :path,
+                photo_focus_x = :fx,
+                photo_focus_y = :fy,
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id',
+            [
+                'path' => $photoPath,
+                'fx' => $focusX,
+                'fy' => $focusY,
+                'id' => $userId,
+            ]
+        );
+        $this->db->audit($actorUserId, 'update_photo', 'users', $userId, [
+            'has_photo' => $photoPath !== null,
+            'photo_focus_x' => $focusX,
+            'photo_focus_y' => $focusY,
+        ]);
+
+        $user = $this->find($userId);
+        if ($user === null) {
+            throw new \RuntimeException('User update succeeded but row could not be re-read.');
+        }
+        return $user;
+    }
+
+    /**
      * @return list<int>
      */
     public function dottedManagerIds(int $userId): array

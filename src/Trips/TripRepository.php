@@ -451,15 +451,31 @@ final class TripRepository
         $this->db->audit($actorUserId, 'update_status', 'trip_segments', $segmentId, ['status' => $status]);
     }
 
-    public function setLatestUserStatus(int $userId, string $status, ?string $note, ?int $actorUserId = null): void
-    {
+    public function setLatestUserStatus(
+        int $userId,
+        string $status,
+        ?string $note,
+        ?int $actorUserId = null,
+        ?string $locationCity = null,
+        ?string $locationState = null,
+    ): void {
         $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
-        $this->setStatusOverride($userId, $status, $note, $today, $actorUserId);
+        $this->setStatusOverride(
+            $userId,
+            $status,
+            $note,
+            $today,
+            $actorUserId,
+            null,
+            $locationCity,
+            $locationState,
+        );
     }
 
     /**
      * Set a manual work-status override from today through $expiresOn (inclusive).
      * Travel segments still take precedence over this in TripStatusEngine.
+     * Remote requires location_city (and preferably location_state).
      */
     public function setStatusOverride(
         int $userId,
@@ -468,6 +484,8 @@ final class TripRepository
         string $expiresOn,
         ?int $actorUserId = null,
         ?string $effectiveDate = null,
+        ?string $locationCity = null,
+        ?string $locationState = null,
     ): void {
         $allowed = ['home', 'office', 'remote', 'unavailable'];
         if (!in_array($status, $allowed, true)) {
@@ -488,65 +506,94 @@ final class TripRepository
             $note = null;
         }
 
-        $hasExpires = $this->db->columnExists('user_status_overrides', 'expires_on');
+        $locationCity = $locationCity !== null ? trim($locationCity) : null;
+        $locationState = $locationState !== null ? trim($locationState) : null;
+        if ($locationCity === '') {
+            $locationCity = null;
+        }
+        if ($locationState === '') {
+            $locationState = null;
+        }
 
-        if ($hasExpires) {
-            if ($this->db->driver() === 'sqlite') {
-                $this->db->execute(
-                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date, expires_on)
-                     VALUES (:user_id, :status, :note, :date, :expires)
-                     ON CONFLICT(user_id, effective_date) DO UPDATE SET
-                        status = excluded.status,
-                        note = excluded.note,
-                        expires_on = excluded.expires_on',
-                    [
-                        'user_id' => $userId,
-                        'status' => $status,
-                        'note' => $note,
-                        'date' => $effectiveDate,
-                        'expires' => $expiresOn,
-                    ]
-                );
-            } else {
-                $this->db->execute(
-                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date, expires_on)
-                     VALUES (:user_id, :status, :note, :date, :expires)
-                     ON DUPLICATE KEY UPDATE
-                        status = VALUES(status),
-                        note = VALUES(note),
-                        expires_on = VALUES(expires_on)',
-                    [
-                        'user_id' => $userId,
-                        'status' => $status,
-                        'note' => $note,
-                        'date' => $effectiveDate,
-                        'expires' => $expiresOn,
-                    ]
-                );
+        if ($status === 'remote') {
+            if ($locationCity === null) {
+                throw new \InvalidArgumentException('City is required when status is Working remote.');
             }
         } else {
-            // Pre-migrate installs: one-day override only.
-            if ($this->db->driver() === 'sqlite') {
-                $this->db->execute(
-                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date)
-                     VALUES (:user_id, :status, :note, :date)
-                     ON CONFLICT(user_id, effective_date) DO UPDATE SET status = excluded.status, note = excluded.note',
-                    ['user_id' => $userId, 'status' => $status, 'note' => $note, 'date' => $effectiveDate]
-                );
-            } else {
-                $this->db->execute(
-                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date)
-                     VALUES (:user_id, :status, :note, :date)
-                     ON DUPLICATE KEY UPDATE status = VALUES(status), note = VALUES(note)',
-                    ['user_id' => $userId, 'status' => $status, 'note' => $note, 'date' => $effectiveDate]
-                );
-            }
+            $locationCity = null;
+            $locationState = null;
+        }
+
+        $hasExpires = $this->db->columnExists('user_status_overrides', 'expires_on');
+        $hasLocation = $this->db->columnExists('user_status_overrides', 'location_city');
+
+        $cols = ['user_id', 'status', 'note', 'effective_date'];
+        $params = [
+            'user_id' => $userId,
+            'status' => $status,
+            'note' => $note,
+            'date' => $effectiveDate,
+        ];
+        if ($hasExpires) {
+            $cols[] = 'expires_on';
+            $params['expires'] = $expiresOn;
+        }
+        if ($hasLocation) {
+            $cols[] = 'location_city';
+            $cols[] = 'location_state';
+            $params['loc_city'] = $locationCity;
+            $params['loc_state'] = $locationState;
+        }
+
+        $placeholders = [];
+        foreach ($cols as $col) {
+            $placeholders[] = match ($col) {
+                'effective_date' => ':date',
+                'expires_on' => ':expires',
+                'location_city' => ':loc_city',
+                'location_state' => ':loc_state',
+                default => ':' . $col,
+            };
+        }
+
+        $updateParts = ['status = excluded.status', 'note = excluded.note'];
+        $mysqlUpdate = ['status = VALUES(status)', 'note = VALUES(note)'];
+        if ($hasExpires) {
+            $updateParts[] = 'expires_on = excluded.expires_on';
+            $mysqlUpdate[] = 'expires_on = VALUES(expires_on)';
+        }
+        if ($hasLocation) {
+            $updateParts[] = 'location_city = excluded.location_city';
+            $updateParts[] = 'location_state = excluded.location_state';
+            $mysqlUpdate[] = 'location_city = VALUES(location_city)';
+            $mysqlUpdate[] = 'location_state = VALUES(location_state)';
+        }
+
+        $colList = implode(', ', $cols);
+        $valList = implode(', ', $placeholders);
+
+        if ($this->db->driver() === 'sqlite') {
+            $this->db->execute(
+                "INSERT INTO user_status_overrides ({$colList})
+                 VALUES ({$valList})
+                 ON CONFLICT(user_id, effective_date) DO UPDATE SET " . implode(', ', $updateParts),
+                $params
+            );
+        } else {
+            $this->db->execute(
+                "INSERT INTO user_status_overrides ({$colList})
+                 VALUES ({$valList})
+                 ON DUPLICATE KEY UPDATE " . implode(', ', $mysqlUpdate),
+                $params
+            );
         }
 
         $this->db->audit($actorUserId, 'set_status_override', 'user_status_overrides', null, [
             'user_id' => $userId,
             'status' => $status,
             'expires_on' => $expiresOn,
+            'location_city' => $locationCity,
+            'location_state' => $locationState,
         ]);
     }
 

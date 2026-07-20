@@ -227,6 +227,7 @@ configure_new_env() {
     set_env_value "DB_SQLITE_PATH" "${ROOT_DIR}/storage/nexwaypoint.sqlite"
     set_env_value "FLIGHTAWARE_RATELIMIT_STATE_FILE" "${ROOT_DIR}/storage/cache/flightaware_ratelimit.json"
     set_env_value "HOTEL_PHOTO_UPLOAD_DIR" "${ROOT_DIR}/storage/uploads/hotel_photos"
+    set_env_value "AVATAR_UPLOAD_DIR" "${ROOT_DIR}/storage/uploads/avatars"
     set_env_value "SESSION_SECRET" "$(php -r 'echo bin2hex(random_bytes(32));')"
     set_env_value "ADMIN_USERNAME" "admin"
     set_env_value "ADMIN_EMAIL" "admin@${DEFAULT_SITE_HOST}"
@@ -369,6 +370,7 @@ ensure_storage_dirs() {
         "${ROOT_DIR}/storage/logs" \
         "${ROOT_DIR}/storage/cache" \
         "${ROOT_DIR}/storage/uploads/hotel_photos" \
+        "${ROOT_DIR}/storage/uploads/avatars" \
         "${BACKUP_ROOT}"
     chmod 775 \
         "${ROOT_DIR}/storage" \
@@ -376,6 +378,7 @@ ensure_storage_dirs() {
         "${ROOT_DIR}/storage/cache" \
         "${ROOT_DIR}/storage/uploads" \
         "${ROOT_DIR}/storage/uploads/hotel_photos" \
+        "${ROOT_DIR}/storage/uploads/avatars" \
         "${BACKUP_ROOT}"
 }
 

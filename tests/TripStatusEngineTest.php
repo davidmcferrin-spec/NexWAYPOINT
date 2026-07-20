@@ -112,14 +112,38 @@ final class TripStatusEngineTest extends NexWaypointTestCase
         $tripRepo = new TripRepository($this->db, $this->logger);
         $today = new \DateTimeImmutable('today');
 
-        $tripRepo->setLatestUserStatus($userId, 'remote', 'Working from hotel this week');
+        $tripRepo->setLatestUserStatus($userId, 'office', 'Working from hotel this week');
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $result = $engine->resolveForUser($userId, $today);
+
+        self::assertSame('office', $result['status']);
+        self::assertSame('Working from hotel this week', $result['detail']['note']);
+        self::assertTrue($result['detail']['override']);
+    }
+
+    public function testRemoteOverrideIncludesLocationInLabel(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $today = new \DateTimeImmutable('today');
+
+        $tripRepo->setStatusOverride(
+            $userId,
+            'remote',
+            null,
+            $today->format('Y-m-d'),
+            $userId,
+            null,
+            'Denver',
+            'CO',
+        );
 
         $engine = new TripStatusEngine($tripRepo, $this->logger);
         $result = $engine->resolveForUser($userId, $today);
 
         self::assertSame('remote', $result['status']);
-        self::assertSame('Working from hotel this week', $result['detail']['note']);
-        self::assertTrue($result['detail']['override']);
+        self::assertSame('Working Remote · Denver, CO', $result['label']);
     }
 
     public function testManualOverrideHonorsExpiryDate(): void

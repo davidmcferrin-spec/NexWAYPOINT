@@ -103,14 +103,27 @@ final class TripStatusEngine
             $labels = ['home' => 'Home', 'office' => 'Office', 'remote' => 'Working Remote', 'unavailable' => 'Unavailable'];
             $status = (string) $override['status'];
             $expiresOn = $override['expires_on'] ?? $override['effective_date'] ?? null;
+            $locationCity = isset($override['location_city']) && $override['location_city'] !== ''
+                ? (string) $override['location_city']
+                : null;
+            $locationState = isset($override['location_state']) && $override['location_state'] !== ''
+                ? (string) $override['location_state']
+                : null;
+            $label = $labels[$status] ?? ucfirst($status);
+            if ($status === 'remote' && $locationCity !== null) {
+                $place = $locationState !== null ? "{$locationCity}, {$locationState}" : $locationCity;
+                $label = "Working Remote · {$place}";
+            }
             return [
                 'status' => $status,
-                'label' => $labels[$status] ?? ucfirst($status),
+                'label' => $label,
                 'detail' => [
                     'note' => $override['note'] ?? null,
                     'override' => true,
                     'effective_date' => $override['effective_date'] ?? null,
                     'expires_on' => $expiresOn,
+                    'location_city' => $locationCity,
+                    'location_state' => $locationState,
                 ],
             ];
         }
@@ -132,6 +145,9 @@ final class TripStatusEngine
                 'trip_id' => $segment->tripId,
                 'carrier' => $segment->carrier,
                 'confirmation_code' => $segment->confirmationCode,
+                'hotel_stay_id' => $segment->hotelStayId,
+                'origin' => $segment->origin,
+                'destination' => $segment->destination,
             ],
         ];
     }

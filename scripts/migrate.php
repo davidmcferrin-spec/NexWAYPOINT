@@ -1197,6 +1197,90 @@ try {
         fwrite(STDOUT, "Created site_settings\n");
     }
 
+    // User avatars + home city for team map pins.
+    if ($tableExists('users') && !$columnExists('users', 'photo_path')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN photo_path TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN photo_path VARCHAR(500) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.photo_path\n");
+    }
+    if ($tableExists('users') && !$columnExists('users', 'photo_focus_x')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN photo_focus_x REAL NOT NULL DEFAULT 50');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN photo_focus_x DECIMAL(5,2) NOT NULL DEFAULT 50.00');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.photo_focus_x\n");
+    }
+    if ($tableExists('users') && !$columnExists('users', 'photo_focus_y')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN photo_focus_y REAL NOT NULL DEFAULT 50');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN photo_focus_y DECIMAL(5,2) NOT NULL DEFAULT 50.00');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.photo_focus_y\n");
+    }
+    if ($tableExists('users') && !$columnExists('users', 'home_city')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_city TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_city VARCHAR(120) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.home_city\n");
+    }
+    if ($tableExists('users') && !$columnExists('users', 'home_state')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_state TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_state VARCHAR(120) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.home_state\n");
+    }
+    if ($tableExists('users') && !$columnExists('users', 'home_lat')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_lat REAL NULL');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_lat DECIMAL(10,7) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.home_lat\n");
+    }
+    if ($tableExists('users') && !$columnExists('users', 'home_lon')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_lon REAL NULL');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN home_lon DECIMAL(10,7) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.home_lon\n");
+    }
+
+    if ($tableExists('user_status_overrides') && !$columnExists('user_status_overrides', 'location_city')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE user_status_overrides ADD COLUMN location_city TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE user_status_overrides ADD COLUMN location_city VARCHAR(120) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added user_status_overrides.location_city\n");
+    }
+    if ($tableExists('user_status_overrides') && !$columnExists('user_status_overrides', 'location_state')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE user_status_overrides ADD COLUMN location_state TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE user_status_overrides ADD COLUMN location_state VARCHAR(120) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added user_status_overrides.location_state\n");
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {
