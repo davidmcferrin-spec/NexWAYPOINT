@@ -237,6 +237,43 @@ table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
 th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
 th { color: var(--text-dim); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; }
 
+table.filterable-table { margin-top: 0.5rem; }
+table.filterable-table thead tr:first-child th a {
+    color: var(--text-dim);
+    text-decoration: none;
+}
+table.filterable-table thead tr:first-child th a:hover { color: var(--accent); }
+table.filterable-table .table-filters th {
+    text-transform: none;
+    font-weight: 400;
+    vertical-align: top;
+    padding-top: 0.35rem;
+    padding-bottom: 0.65rem;
+    background: var(--panel);
+}
+table.filterable-table .table-filters input,
+table.filterable-table .table-filters select {
+    width: 100%;
+    padding: 0.35rem 0.45rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--text);
+    font-size: 0.85rem;
+}
+table.filterable-table .table-filter-pair {
+    display: flex;
+    gap: 0.35rem;
+}
+table.filterable-table .table-filter-pair input[name="state_region"] {
+    width: 3.5rem;
+    flex: 0 0 3.5rem;
+}
+table.filterable-table .table-filter-go {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+}
+
 .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
 .badge-blacklist { background: var(--badge-blacklist-bg); color: var(--red); }
 .badge-status-home { background: var(--badge-home-bg); color: var(--green); }
