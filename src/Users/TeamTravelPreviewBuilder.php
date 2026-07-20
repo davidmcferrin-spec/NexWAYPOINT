@@ -6,6 +6,7 @@ namespace NexWaypoint\Users;
 
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\TripSegment;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
@@ -25,6 +26,7 @@ final class TeamTravelPreviewBuilder
         private readonly VisibilityBlockRepository $blocks,
         private readonly ?HotelStayRepository $stays = null,
         private readonly ?HotelPropertyRepository $properties = null,
+        private readonly ?AirportRepository $airports = null,
     ) {
     }
 
@@ -248,8 +250,8 @@ final class TeamTravelPreviewBuilder
         }
 
         try {
-            $arrive = new \DateTimeImmutable($current->arriveDt);
-            $depart = new \DateTimeImmutable($next->departDt);
+            $arrive = $this->arriveInstant($current);
+            $depart = $this->departInstant($next);
         } catch (\Exception) {
             return null;
         }
@@ -287,6 +289,24 @@ final class TeamTravelPreviewBuilder
         }
 
         return ['type' => $isLayover ? 'layover' : 'stay', 'label' => $label];
+    }
+
+    private function departInstant(TripSegment $segment): \DateTimeImmutable
+    {
+        $dt = (string) $segment->departDt;
+        if ($this->airports !== null) {
+            return $this->airports->instant($segment->origin, $dt);
+        }
+        return new \DateTimeImmutable($dt);
+    }
+
+    private function arriveInstant(TripSegment $segment): \DateTimeImmutable
+    {
+        $dt = (string) $segment->arriveDt;
+        if ($this->airports !== null) {
+            return $this->airports->instant($segment->destination, $dt);
+        }
+        return new \DateTimeImmutable($dt);
     }
 
     /**

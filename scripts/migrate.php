@@ -1281,6 +1281,75 @@ try {
         fwrite(STDOUT, "Added user_status_overrides.location_state\n");
     }
 
+    // --- airports (IATA → IANA timezone) --------------------------------------
+    if (!$tableExists('airports')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE airports (
+                    iata TEXT NOT NULL PRIMARY KEY,
+                    name TEXT NULL,
+                    timezone TEXT NOT NULL,
+                    latitude REAL NULL,
+                    longitude REAL NULL
+                )"
+            );
+        } else {
+            $pdo->exec(
+                "CREATE TABLE airports (
+                    iata CHAR(3) NOT NULL,
+                    name VARCHAR(150) NULL,
+                    timezone VARCHAR(64) NOT NULL,
+                    latitude DECIMAL(10,7) NULL,
+                    longitude DECIMAL(10,7) NULL,
+                    PRIMARY KEY (iata)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created airports\n");
+    }
+
+    if ($tableExists('airports')) {
+        $seedPath = dirname(__DIR__) . '/data/airports_us.php';
+        if (is_file($seedPath)) {
+            /** @var list<array{iata: string, name: string, timezone: string}> $seedRows */
+            $seedRows = require $seedPath;
+            $countBefore = (int) $pdo->query('SELECT COUNT(*) FROM airports')->fetchColumn();
+            if ($driver === 'sqlite') {
+                $upsert = $pdo->prepare(
+                    'INSERT INTO airports (iata, name, timezone) VALUES (:iata, :name, :tz)
+                     ON CONFLICT(iata) DO UPDATE SET
+                       name = excluded.name,
+                       timezone = excluded.timezone'
+                );
+            } else {
+                $upsert = $pdo->prepare(
+                    'INSERT INTO airports (iata, name, timezone) VALUES (:iata, :name, :tz)
+                     ON DUPLICATE KEY UPDATE
+                       name = VALUES(name),
+                       timezone = VALUES(timezone)'
+                );
+            }
+            foreach ($seedRows as $row) {
+                $iata = strtoupper(trim((string) ($row['iata'] ?? '')));
+                $tz = trim((string) ($row['timezone'] ?? ''));
+                if (strlen($iata) !== 3 || $tz === '') {
+                    continue;
+                }
+                $upsert->execute([
+                    'iata' => $iata,
+                    'name' => trim((string) ($row['name'] ?? '')) ?: null,
+                    'tz' => $tz,
+                ]);
+            }
+            $countAfter = (int) $pdo->query('SELECT COUNT(*) FROM airports')->fetchColumn();
+            if ($countAfter > $countBefore) {
+                $changes++;
+                fwrite(STDOUT, 'Seeded ' . ($countAfter - $countBefore) . " airports\n");
+            }
+        }
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {

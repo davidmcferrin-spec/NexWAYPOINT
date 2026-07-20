@@ -7,6 +7,7 @@ use NexWaypoint\Core\SiteSettingsRepository;
 use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
@@ -28,7 +29,7 @@ $logger = $app['logger'];
 $userRepo = new UserRepository($db, $logger);
 $tripRepo = new TripRepository($db, $logger);
 $carrierRepo = new CarrierRepository($db, $logger);
-$statusEngine = new TripStatusEngine($tripRepo, $logger);
+$statusEngine = new TripStatusEngine($tripRepo, $logger, new AirportRepository($db, $logger));
 $visibilityEngine = new VisibilityEngine($userRepo, new VisibilityRuleRepository($db));
 $blockRepo = new VisibilityBlockRepository($db);
 $notifications = new NotificationRepository($db);
@@ -47,6 +48,7 @@ $travelPreview = new TeamTravelPreviewBuilder(
     $blockRepo,
     $stayRepo,
     $propertyRepo,
+    new AirportRepository($db, $logger),
 );
 
 $myUpcomingTrips = $tripRepo->findActiveOrUpcoming($user->id, 60);

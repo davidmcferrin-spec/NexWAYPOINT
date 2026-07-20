@@ -9,7 +9,12 @@ use NexWaypoint\Core\Logger;
 /**
  * Resolves a user's current status along a multi-leg itinerary.
  *
- * Transit timeline (local wall-clock times on segments):
+ * Transit times on segments are naive local wall-clock strings. Depart is
+ * interpreted in the origin airport timezone; arrive in the destination
+ * airport timezone (IATA via AirportRepository). Unknown codes fall back
+ * to APP_TIMEZONE. Hotel windows stay in APP_TIMEZONE (city labels, not IATA).
+ *
+ * Transit timeline:
  *   pre_flight  — [depart − 45m, depart)
  *   en_route    — [depart, arrive]  (delayed/cancelled override inside)
  *   post_flight — (arrive, arrive + 45m]
@@ -29,6 +34,7 @@ final class TripStatusEngine
     public function __construct(
         private readonly TripRepository $trips,
         private readonly Logger $logger,
+        private readonly ?AirportRepository $airports = null,
     ) {
     }
 
@@ -118,8 +124,8 @@ final class TripStatusEngine
 
             for ($i = 0; $i < count($transit); $i++) {
                 $segment = $transit[$i];
-                $depart = new \DateTimeImmutable($segment->departDt);
-                $arrive = new \DateTimeImmutable($segment->arriveDt);
+                $depart = $this->departInstant($segment);
+                $arrive = $this->arriveInstant($segment);
                 $preStart = $depart->modify('-' . self::PRE_FLIGHT_MINUTES . ' minutes');
                 $postEnd = $arrive->modify('+' . self::POST_FLIGHT_MINUTES . ' minutes');
 
@@ -170,7 +176,7 @@ final class TripStatusEngine
                 if ($next === null || $next->departDt === null) {
                     continue;
                 }
-                $nextDepart = new \DateTimeImmutable($next->departDt);
+                $nextDepart = $this->departInstant($next);
                 if ($now <= $postEnd || $now >= $nextDepart) {
                     continue;
                 }
@@ -223,6 +229,7 @@ final class TripStatusEngine
             if ($segment->segmentType !== 'hotel' || $segment->departDt === null || $segment->arriveDt === null) {
                 continue;
             }
+            // Hotel stays are city-local wall clocks in APP_TIMEZONE (not airport IATA).
             $checkIn = new \DateTimeImmutable($segment->departDt);
             $checkOut = new \DateTimeImmutable($segment->arriveDt);
             if ($now >= $checkIn && $now <= $checkOut) {
@@ -233,6 +240,24 @@ final class TripStatusEngine
             }
         }
         return null;
+    }
+
+    private function departInstant(TripSegment $segment): \DateTimeImmutable
+    {
+        return $this->wallClockInstant($segment->origin, (string) $segment->departDt);
+    }
+
+    private function arriveInstant(TripSegment $segment): \DateTimeImmutable
+    {
+        return $this->wallClockInstant($segment->destination, (string) $segment->arriveDt);
+    }
+
+    private function wallClockInstant(?string $airportCode, string $naiveDt): \DateTimeImmutable
+    {
+        if ($this->airports !== null) {
+            return $this->airports->instant($airportCode, $naiveDt);
+        }
+        return new \DateTimeImmutable($naiveDt);
     }
 
     /**

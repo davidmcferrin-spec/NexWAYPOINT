@@ -219,6 +219,15 @@ CREATE INDEX idx_carriers_user ON carriers(user_id);
 CREATE INDEX idx_carriers_name ON carriers(name);
 CREATE INDEX idx_carriers_type ON carriers(carrier_type);
 
+-- airports: IATA → IANA timezone for interpreting naive segment wall-clock times.
+CREATE TABLE airports (
+    iata        TEXT NOT NULL PRIMARY KEY,
+    name        TEXT NULL,
+    timezone    TEXT NOT NULL,
+    latitude    REAL NULL,
+    longitude   REAL NULL
+);
+
 CREATE TABLE trip_segments (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     trip_id             INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,

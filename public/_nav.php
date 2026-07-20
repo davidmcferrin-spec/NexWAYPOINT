@@ -8,6 +8,7 @@ declare(strict_types=1);
  */
 
 use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\User;
@@ -33,7 +34,11 @@ $navStatusLabel = 'Home';
 $navStatusCode = 'home';
 if (isset($app) && is_array($app) && isset($app['db'], $app['logger'])) {
     try {
-        $navStatusEngine = new TripStatusEngine(new TripRepository($app['db'], $app['logger']), $app['logger']);
+        $navStatusEngine = new TripStatusEngine(
+            new TripRepository($app['db'], $app['logger']),
+            $app['logger'],
+            new AirportRepository($app['db'], $app['logger']),
+        );
         $navResolved = $navStatusEngine->resolveForUser($user->id);
         $navStatusLabel = (string) $navResolved['label'];
         $navStatusCode = (string) $navResolved['status'];

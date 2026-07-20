@@ -52,7 +52,7 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
             'TX',
         );
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = new TripStatusEngine($tripRepo, $this->logger, new \NexWaypoint\Trips\AirportRepository($this->db, $this->logger));
         $result = $engine->resolveForUser($userId, $today);
 
         self::assertSame('remote', $result['status']);

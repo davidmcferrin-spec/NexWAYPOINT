@@ -10,6 +10,7 @@ declare(strict_types=1);
  */
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 
@@ -20,7 +21,11 @@ if (!isset($app) || !is_array($app) || !isset($app['db'], $app['logger'])) {
 }
 
 $navTripRepo = new TripRepository($app['db'], $app['logger']);
-$navStatusEngine = new TripStatusEngine($navTripRepo, $app['logger']);
+$navStatusEngine = new TripStatusEngine(
+    $navTripRepo,
+    $app['logger'],
+    new AirportRepository($app['db'], $app['logger']),
+);
 $navMyStatus = $navStatusEngine->resolveForUser($user->id);
 $navMyOverride = $navTripRepo->activeStatusOverride($user->id);
 

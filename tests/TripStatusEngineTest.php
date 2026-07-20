@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace NexWaypoint\Tests;
 
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripSegment;
@@ -11,6 +12,11 @@ use NexWaypoint\Trips\TripStatusEngine;
 
 final class TripStatusEngineTest extends NexWaypointTestCase
 {
+    private function engine(TripRepository $tripRepo): TripStatusEngine
+    {
+        return new TripStatusEngine($tripRepo, $this->logger, new AirportRepository($this->db, $this->logger));
+    }
+
     private function makeTrip(TripRepository $repo, int $ownerId, string $start, string $end): Trip
     {
         return $repo->create(new Trip(
@@ -52,7 +58,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
     public function testDefaultsToHomeWithNoActivity(): void
     {
         $userId = $this->insertUser('dave');
-        $engine = new TripStatusEngine(new TripRepository($this->db, $this->logger), $this->logger);
+        $engine = $this->engine(new TripRepository($this->db, $this->logger));
 
         $result = $engine->resolveForUser($userId);
 
@@ -72,7 +78,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'status' => 'en_route',
         ]);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $now);
 
         self::assertSame('en_route', $result['status']);
@@ -94,7 +100,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'arriveDt' => $depart->modify('+3 hours')->format('Y-m-d H:i:s'),
         ]);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $now);
 
         self::assertSame('pre_flight', $result['status']);
@@ -118,7 +124,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'status' => 'landed',
         ]);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $now);
 
         self::assertSame('post_flight', $result['status']);
@@ -146,7 +152,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'status' => 'scheduled',
         ]);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $now);
 
         self::assertSame('layover', $result['status']);
@@ -174,7 +180,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'status' => 'scheduled',
         ]);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $now);
 
         self::assertSame('remote', $result['status']);
@@ -203,7 +209,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'status' => 'en_route',
         ]);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $now);
 
         self::assertSame('en_route', $result['status']);
@@ -245,7 +251,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             ],
         ], null, $userId);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
 
         // Connection layover in DEN (≤3h) after post-flight window.
         $layover = $engine->resolveForUser($userId, new \DateTimeImmutable('2026-08-10 11:00:00'));
@@ -350,7 +356,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             $userId
         );
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $mid = $engine->resolveForUser($userId, new \DateTimeImmutable('2026-08-11 12:00:00'));
         self::assertSame('at_hotel', $mid['status']);
         self::assertStringContainsString('Denver', $mid['label']);
@@ -375,7 +381,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'status' => 'landed',
         ]);
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $now);
         self::assertSame('post_flight', $result['status']);
         self::assertStringContainsString('Post-arrival', $result['label']);
@@ -389,7 +395,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
 
         $tripRepo->setLatestUserStatus($userId, 'office', 'Working from hotel this week');
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $today);
 
         self::assertSame('office', $result['status']);
@@ -414,7 +420,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             'CO',
         );
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         $result = $engine->resolveForUser($userId, $today);
 
         self::assertSame('remote', $result['status']);
@@ -438,7 +444,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             '2026-07-20',
         );
 
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         self::assertSame('unavailable', $engine->resolveForUser($userId, $start)['status']);
         self::assertSame('unavailable', $engine->resolveForUser($userId, $mid)['status']);
         self::assertSame('home', $engine->resolveForUser($userId, $after)['status']);
@@ -457,10 +463,48 @@ final class TripStatusEngineTest extends NexWaypointTestCase
             $today->modify('+5 days')->format('Y-m-d'),
             $userId,
         );
-        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $engine = $this->engine($tripRepo);
         self::assertSame('office', $engine->resolveForUser($userId, $today)['status']);
 
         $tripRepo->clearStatusOverride($userId, $userId, $today);
         self::assertSame('home', $engine->resolveForUser($userId, $today)['status']);
+    }
+
+    /**
+     * HSV (Central) → DEN (Mountain): arrive "10:00" is mountain local = 11:00 central.
+     * Naive APP_TIMEZONE compare would wrongly treat 10:30 CT as post-arrival.
+     */
+    public function testCrossTimezoneArrivalUsesDestinationAirport(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+
+        $trip = $this->makeTrip($tripRepo, $userId, '2026-08-01', '2026-08-01');
+        $this->makeSegment($tripRepo, (int) $trip->id, [
+            'origin' => 'HSV',
+            'destination' => 'DEN',
+            'departDt' => '2026-08-01 08:00:00',
+            'arriveDt' => '2026-08-01 10:00:00',
+        ]);
+
+        $engine = $this->engine($tripRepo);
+
+        // 10:30 America/Chicago — still airborne until 11:00 CT (10:00 MT).
+        $midFlight = new \DateTimeImmutable('2026-08-01 10:30:00', new \DateTimeZone('America/Chicago'));
+        self::assertSame('en_route', $engine->resolveForUser($userId, $midFlight)['status']);
+
+        // 11:15 America/Chicago — within 45m post-arrival window.
+        $post = new \DateTimeImmutable('2026-08-01 11:15:00', new \DateTimeZone('America/Chicago'));
+        self::assertSame('post_flight', $engine->resolveForUser($userId, $post)['status']);
+    }
+
+    public function testAirportRepositoryResolvesKnownIata(): void
+    {
+        $airports = new AirportRepository(null, $this->logger);
+        self::assertSame('America/Chicago', $airports->timezoneForCode('hsv'));
+        self::assertSame('America/Denver', $airports->timezoneForCode('DEN'));
+        self::assertSame('America/New_York', $airports->timezoneForCode('DCA'));
+        self::assertNull($airports->timezoneForCode('New York, NY'));
+        self::assertNull($airports->timezoneForCode(null));
     }
 }

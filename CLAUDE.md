@@ -44,16 +44,19 @@ opens a 21-day travel look-ahead modal.
 
 **Complex itinerary (2026-07-20):** `TripStatusEngine` phases are pre-flight /
 en_route / post-flight (45m windows), layover (gap ≤3h), itinerary remote
-(gap >3h at arrived city), then hotel / override / Home. Times stay naive
-local wall-clock. Trip create/edit uses spreadsheet builder
+(gap >3h at arrived city), then hotel / override / Home. Segment times stay
+naive local wall-clock; depart is interpreted in the **origin** airport
+IANA TZ and arrive in the **destination** airport TZ via `airports` lookup
+(`data/airports_us.php` seed + `AirportRepository`). Unknown codes / trains
+fall back to `APP_TIMEZONE`. Trip create/edit uses spreadsheet builder
 (`/trips/builder.php` + `replaceTripLegs` / `replaceTripHotels`); Mode is
 Flight or Train; hotels attach via `hotel_stay_id` (existing stay or create
-inline). Long transit gaps use `at_hotel` when a linked hotel covers `now`.
-`/flights/add.php` and `/trains/add.php` redirect to the builder.
+inline; multiple stays per trip OK). Long transit gaps use `at_hotel` when
+a linked hotel covers `now`. `/flights/add.php` and `/trains/add.php`
+redirect to the builder.
 
-**Not started:** car/rideshare email parsers, Azure AD SSO,
-PWA/offline, push notifications, approval UI for auto-imported stays
-(currently auto-creates + notifies instead of a pending-confirmation flow).
+**Not started:** Azure AD SSO, PWA/offline, push notifications.
+Mail auto-import stays on auto-create + notify (no pending-approval queue).
 
 ## Key architecture decisions (and why)
 
@@ -171,12 +174,15 @@ PWA/offline, push notifications, approval UI for auto-imported stays
 - `TripStatusEngine` itinerary `remote` (gap >3h) sets `detail.from_itinerary`
   so `TeamLocationResolver::isAtBaseStatus` does not treat it like a manual
   remote override (upcoming trips never relocate an at-base pin).
+- **Airport timezones for status math.** Segment `depart_dt` / `arrive_dt`
+  remain naive local wall-clock (builder + mail parsers unchanged). At compare
+  time, depart uses origin IATA TZ and arrive uses destination IATA TZ from
+  `airports` (seeded from `data/airports_us.php`). Avoids storing UTC while
+  fixing HSV→DEN style multi-zone days. Hotels stay on `APP_TIMEZONE`.
 
 ## Immediate next steps (suggested, not started)
 
-1. Car/rideshare email parsers (Enterprise/Hertz/Uber airport).
-2. Tighten Delta/United/Hilton parsers against more live fixtures (trip
+1. Tighten Delta/United/Hilton parsers against more live fixtures (trip
    details / Hilton cancel without original conf #).
-3. Decide whether the pending-approval UI ("we found a trip, confirm?")
-   is worth building vs. the current auto-create-and-notify approach.
-4. Airport timezone / UTC storage if multi-zone days become painful.
+2. Expand `airports` seed / admin UI if non-US hubs are missing.
+3. Optionally use `users.timezone` for "now" when home ≠ `APP_TIMEZONE`.
