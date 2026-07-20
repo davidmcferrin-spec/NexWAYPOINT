@@ -36,11 +36,11 @@ $statusBadge = static function (string $status): string {
     };
 };
 
-$formatSummary = static function (array $summary): string {
-    if ($summary === []) {
-        return '—';
-    }
+$formatSummary = static function (array $summary, ?string $errorMessage = null): string {
     $parts = [];
+    if ($errorMessage !== null && trim($errorMessage) !== '') {
+        $parts[] = trim($errorMessage);
+    }
     foreach ($summary as $key => $value) {
         if (is_bool($value)) {
             $parts[] = $key . '=' . ($value ? 'yes' : 'no');
@@ -48,7 +48,7 @@ $formatSummary = static function (array $summary): string {
             $parts[] = $key . '=' . (string) $value;
         }
     }
-    return implode(', ', $parts);
+    return $parts === [] ? '—' : implode(' · ', $parts);
 };
 ?>
 <!DOCTYPE html>
@@ -65,7 +65,9 @@ $formatSummary = static function (array $summary): string {
     <?php require __DIR__ . '/_settings_nav.php'; ?>
     <h1>Cron / service status</h1>
     <p class="hint">
-        Last run status for cron jobs. Counts only — no flight numbers, hotels, emails, or user travel details.
+        Last run status for cron jobs. Counts and short operational errors only —
+        no flight numbers, hotels, mailbox contents, or user travel details.
+        Configure IMAP / FlightAware under <a href="/settings/integrations.php">Integrations</a>.
     </p>
 
     <?php if ($tableMissing): ?>
@@ -100,7 +102,7 @@ $formatSummary = static function (array $summary): string {
                             </td>
                             <td><?= htmlspecialchars($row['started_at'], ENT_QUOTES) ?></td>
                             <td><?= htmlspecialchars((string) ($row['finished_at'] ?? '—'), ENT_QUOTES) ?></td>
-                            <td><?= htmlspecialchars($formatSummary($row['summary']), ENT_QUOTES) ?></td>
+                            <td><?= htmlspecialchars($formatSummary($row['summary'], $row['error_message'] ?? null), ENT_QUOTES) ?></td>
                         <?php endif; ?>
                     </tr>
                 <?php endforeach; ?>
@@ -129,13 +131,11 @@ $formatSummary = static function (array $summary): string {
                                 <span class="badge <?= $statusBadge($row['status']) ?>">
                                     <?= htmlspecialchars($row['status'], ENT_QUOTES) ?>
                                 </span>
-                            </td>
-                            <td>
-                                <?= htmlspecialchars($formatSummary($row['summary']), ENT_QUOTES) ?>
                                 <?php if ($row['error_class']): ?>
                                     <span class="hint"><?= htmlspecialchars((string) $row['error_class'], ENT_QUOTES) ?></span>
                                 <?php endif; ?>
                             </td>
+                            <td><?= htmlspecialchars($formatSummary($row['summary'], $row['error_message'] ?? null), ENT_QUOTES) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

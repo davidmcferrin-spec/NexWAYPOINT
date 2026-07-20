@@ -32,6 +32,7 @@ $navIsAdmin = $user->isAdmin || $user->role === 'manager';
                 <?php if ($navIsAdmin): ?>
                     <span class="nav-dropdown-sep" aria-hidden="true"></span>
                     <a role="menuitem" href="/settings/site.php">Site catalogs</a>
+                    <a role="menuitem" href="/settings/integrations.php">Integrations</a>
                     <a role="menuitem" href="/settings/jobs.php">Cron / service status</a>
                     <a role="menuitem" href="/settings/users.php">Users</a>
                 <?php endif; ?>

@@ -92,7 +92,7 @@ try {
 } catch (\Throwable $e) {
     $logger->error('Mail poll job aborted', ['error' => $e->getMessage()]);
     if ($runId !== null && $runs !== null) {
-        $runs->finish($runId, CronRunRepository::STATUS_FAILED, [], $e::class);
+        $runs->finish($runId, CronRunRepository::STATUS_FAILED, [], $e::class, $e->getMessage());
     }
     if (PHP_SAPI === 'cli') {
         fwrite(STDERR, 'Mail poll aborted: ' . $e->getMessage() . "\n");

@@ -423,6 +423,7 @@ CREATE TABLE notifications (
 -- ----------------------------------------------------------------------------
 -- cron_job_runs: last/history of scheduled jobs. Summaries are aggregates only
 -- (counts/status) — never store flight numbers, hotels, emails, or user travel.
+-- error_message may hold a short operational failure reason (IMAP/API), sanitized.
 -- ----------------------------------------------------------------------------
 CREATE TABLE cron_job_runs (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -432,6 +433,7 @@ CREATE TABLE cron_job_runs (
     status          ENUM('running','ok','warning','failed') NOT NULL DEFAULT 'running',
     summary_json    JSON NULL,
     error_class     VARCHAR(120) NULL,
+    error_message   VARCHAR(500) NULL,
     INDEX idx_cron_runs_job_started (job_name, started_at),
     INDEX idx_cron_runs_started (started_at)
 ) ENGINE=InnoDB;

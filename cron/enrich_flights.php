@@ -119,7 +119,7 @@ try {
 } catch (\Throwable $e) {
     $logger->error('Flight enrichment job aborted', ['error' => $e->getMessage()]);
     if ($runId !== null && $runs !== null) {
-        $runs->finish($runId, CronRunRepository::STATUS_FAILED, [], $e::class);
+        $runs->finish($runId, CronRunRepository::STATUS_FAILED, [], $e::class, $e->getMessage());
     }
     if (PHP_SAPI === 'cli') {
         fwrite(STDERR, 'Flight enrichment aborted: ' . $e->getMessage() . "\n");

@@ -754,7 +754,8 @@ try {
                     finished_at TEXT NULL,
                     status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','ok','warning','failed')),
                     summary_json TEXT NULL,
-                    error_class TEXT NULL
+                    error_class TEXT NULL,
+                    error_message TEXT NULL
                 )"
             );
             $pdo->exec('CREATE INDEX idx_cron_runs_job_started ON cron_job_runs(job_name, started_at)');
@@ -769,6 +770,7 @@ try {
                     status ENUM('running','ok','warning','failed') NOT NULL DEFAULT 'running',
                     summary_json JSON NULL,
                     error_class VARCHAR(120) NULL,
+                    error_message VARCHAR(500) NULL,
                     INDEX idx_cron_runs_job_started (job_name, started_at),
                     INDEX idx_cron_runs_started (started_at)
                 ) ENGINE=InnoDB"
@@ -776,6 +778,16 @@ try {
         }
         $changes++;
         fwrite(STDOUT, "Created cron_job_runs\n");
+    }
+
+    if ($tableExists('cron_job_runs') && !$columnExists('cron_job_runs', 'error_message')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE cron_job_runs ADD COLUMN error_message TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE cron_job_runs ADD COLUMN error_message VARCHAR(500) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added cron_job_runs.error_message\n");
     }
 
     if ($changes === 0) {

@@ -326,7 +326,8 @@ CREATE TABLE cron_job_runs (
     finished_at     TEXT NULL,
     status          TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','ok','warning','failed')),
     summary_json    TEXT NULL,
-    error_class     TEXT NULL
+    error_class     TEXT NULL,
+    error_message   TEXT NULL
 );
 CREATE INDEX idx_cron_runs_job_started ON cron_job_runs(job_name, started_at);
 CREATE INDEX idx_cron_runs_started ON cron_job_runs(started_at);

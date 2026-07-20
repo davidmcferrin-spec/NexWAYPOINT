@@ -38,6 +38,10 @@ $settingsSection = 'hub';
                 <h3>Site catalogs</h3>
                 <p>Airline carriers, rail operators, offices/venues, and hotel brands.</p>
             </a>
+            <a class="settings-card" href="/settings/integrations.php">
+                <h3>Integrations</h3>
+                <p>IMAP mail credentials and FlightAware AeroAPI key / rate limits.</p>
+            </a>
             <a class="settings-card" href="/settings/jobs.php">
                 <h3>Cron / service status</h3>
                 <p>Last cron run status for mail polling and flight enrichment (counts only).</p>

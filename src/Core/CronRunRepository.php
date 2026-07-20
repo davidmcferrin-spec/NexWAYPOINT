@@ -8,6 +8,7 @@ namespace NexWaypoint\Core;
  * Records scheduled job runs for the admin Settings → Jobs page.
  * Summaries must stay aggregate-only (counts/status) — never store travel
  * details, emails, flight numbers, hotel names, or user identifiers.
+ * error_message may hold a short operational failure reason (sanitized).
  */
 final class CronRunRepository
 {
@@ -42,8 +43,13 @@ final class CronRunRepository
     /**
      * @param array<string, int|float|string|bool|null> $summary Aggregate counters only
      */
-    public function finish(int $runId, string $status, array $summary = [], ?string $errorClass = null): void
-    {
+    public function finish(
+        int $runId,
+        string $status,
+        array $summary = [],
+        ?string $errorClass = null,
+        ?string $errorMessage = null,
+    ): void {
         $allowed = [self::STATUS_OK, self::STATUS_WARNING, self::STATUS_FAILED];
         if (!in_array($status, $allowed, true)) {
             $status = self::STATUS_FAILED;
@@ -62,6 +68,27 @@ final class CronRunRepository
             }
         }
 
+        $params = [
+            'status' => $status,
+            'summary' => $safe === [] ? null : json_encode($safe, JSON_UNESCAPED_SLASHES),
+            'error_class' => $errorClass !== null ? substr($errorClass, 0, 120) : null,
+            'id' => $runId,
+        ];
+
+        if ($this->db->columnExists('cron_job_runs', 'error_message')) {
+            $this->db->execute(
+                'UPDATE cron_job_runs
+                 SET finished_at = CURRENT_TIMESTAMP,
+                     status = :status,
+                     summary_json = :summary,
+                     error_class = :error_class,
+                     error_message = :error_message
+                 WHERE id = :id',
+                $params + ['error_message' => $this->sanitizeErrorMessage($errorMessage)]
+            );
+            return;
+        }
+
         $this->db->execute(
             'UPDATE cron_job_runs
              SET finished_at = CURRENT_TIMESTAMP,
@@ -69,12 +96,7 @@ final class CronRunRepository
                  summary_json = :summary,
                  error_class = :error_class
              WHERE id = :id',
-            [
-                'status' => $status,
-                'summary' => $safe === [] ? null : json_encode($safe, JSON_UNESCAPED_SLASHES),
-                'error_class' => $errorClass !== null ? substr($errorClass, 0, 120) : null,
-                'id' => $runId,
-            ]
+            $params
         );
     }
 
@@ -111,6 +133,29 @@ final class CronRunRepository
     }
 
     /**
+     * Strip emails / collapse whitespace; cap length. Operational text only.
+     */
+    private function sanitizeErrorMessage(?string $message): ?string
+    {
+        if ($message === null) {
+            return null;
+        }
+        $message = trim(preg_replace('/\s+/u', ' ', $message) ?? '');
+        if ($message === '') {
+            return null;
+        }
+        $message = preg_replace(
+            '/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/',
+            '[redacted]',
+            $message
+        ) ?? $message;
+        if (strlen($message) > 500) {
+            $message = substr($message, 0, 497) . '...';
+        }
+        return $message;
+    }
+
+    /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>
      */
@@ -132,6 +177,7 @@ final class CronRunRepository
             'status' => (string) $row['status'],
             'summary' => $summary,
             'error_class' => $row['error_class'] ?? null,
+            'error_message' => $row['error_message'] ?? null,
         ];
     }
 }

@@ -36,4 +36,29 @@ final class CronRunRepositoryTest extends NexWaypointTestCase
         self::assertArrayNotHasKey('hotel_name', $row['summary']);
         self::assertArrayNotHasKey('evil', $row['summary']);
     }
+
+    public function testFailedRunStoresSanitizedErrorMessage(): void
+    {
+        if (!$this->db->tableExists('cron_job_runs')) {
+            self::markTestSkipped('cron_job_runs not in test schema');
+        }
+
+        $repo = new CronRunRepository($this->db);
+        $id = $repo->begin(CronRunRepository::JOB_POLL_MAIL);
+        $repo->finish(
+            $id,
+            CronRunRepository::STATUS_FAILED,
+            [],
+            \RuntimeException::class,
+            'Unable to connect to IMAP mailbox: [AUTHENTICATIONFAILED] for user@example.com'
+        );
+
+        $row = $repo->latestByJob()[CronRunRepository::JOB_POLL_MAIL];
+        self::assertSame('failed', $row['status']);
+        self::assertSame(\RuntimeException::class, $row['error_class']);
+        self::assertNotNull($row['error_message']);
+        self::assertStringContainsString('AUTHENTICATIONFAILED', (string) $row['error_message']);
+        self::assertStringNotContainsString('user@example.com', (string) $row['error_message']);
+        self::assertStringContainsString('[redacted]', (string) $row['error_message']);
+    }
 }
