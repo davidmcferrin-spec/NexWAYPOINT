@@ -10,6 +10,7 @@ use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\TeamLocationResolver;
+use NexWaypoint\Users\TeamTravelPreviewBuilder;
 use NexWaypoint\Users\TeamUpcomingTripFinder;
 use NexWaypoint\Users\UserRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
@@ -289,5 +290,50 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
 
         self::assertNull($finder->findVisible($viewerId, $ownerId, 21));
         self::assertNotNull($finder->findVisible($ownerId, $ownerId, 21));
+    }
+
+    public function testTravelPreviewHidesPrivateTripsFromOthers(): void
+    {
+        $ownerId = $this->insertUser('owner2');
+        $viewerId = $this->insertUser('viewer2');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $start = (new \DateTimeImmutable('today'))->modify('+2 days')->format('Y-m-d');
+        $end = (new \DateTimeImmutable('today'))->modify('+4 days')->format('Y-m-d');
+
+        $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Denver, CO',
+            startDate: $start,
+            endDate: $end,
+            status: 'planned',
+            tripPurpose: 'Secret',
+            notes: null,
+            isPrivate: true,
+        ));
+        $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Atlanta, GA',
+            startDate: $start,
+            endDate: $end,
+            status: 'planned',
+            tripPurpose: 'Shoot',
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $builder = new TeamTravelPreviewBuilder(
+            $tripRepo,
+            new VisibilityEngine(new UserRepository($this->db, $this->logger), new VisibilityRuleRepository($this->db)),
+            new VisibilityBlockRepository($this->db),
+        );
+
+        $forViewer = $builder->build($viewerId, $ownerId, 21);
+        self::assertCount(1, $forViewer);
+        self::assertSame('Atlanta, GA', $forViewer[0]['destination']);
+
+        $forOwner = $builder->build($ownerId, $ownerId, 21);
+        self::assertCount(2, $forOwner);
     }
 }

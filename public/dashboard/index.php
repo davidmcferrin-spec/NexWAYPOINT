@@ -12,6 +12,7 @@ use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\TeamLocationResolver;
+use NexWaypoint\Users\TeamTravelPreviewBuilder;
 use NexWaypoint\Users\TeamUpcomingTripFinder;
 use NexWaypoint\Users\User;
 use NexWaypoint\Users\UserRepository;
@@ -38,6 +39,7 @@ $locationResolver = new TeamLocationResolver(
     new Geocoder($logger),
 );
 $upcomingFinder = new TeamUpcomingTripFinder($tripRepo, $visibilityEngine, $blockRepo);
+$travelPreview = new TeamTravelPreviewBuilder($tripRepo, $visibilityEngine, $blockRepo);
 
 $myUpcomingTrips = $tripRepo->findActiveOrUpcoming($user->id, 60);
 $unreadCount = $notifications->unreadCount($user->id);
@@ -230,6 +232,21 @@ foreach ($mapCandidates as $entry) {
 
 $mapLonelyNote = $selfOnMap && $othersOnMap === 0;
 
+$teamProfiles = [];
+foreach (array_merge([$selfEntry], $team) as $entry) {
+    $uid = (string) $entry['user']->id;
+    $teamProfiles[$uid] = [
+        'id' => $entry['user']->id,
+        'name' => $entry['is_self']
+            ? $entry['user']->displayName . ' (you)'
+            : $entry['user']->displayName,
+        'status_label' => $entry['label'],
+        'location' => $entry['location']['city_label'] ?? null,
+        'window_days' => $upcomingMapDays,
+        'trips' => $travelPreview->build($user->id, $entry['user']->id, $upcomingMapDays),
+    ];
+}
+
 $basemap = AppearanceCatalog::resolveMapBasemap(null);
 try {
     $settings = new SiteSettingsRepository($db, $logger);
@@ -279,7 +296,11 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                     <thead><tr><th>Teammate</th><th>Status</th><th>Location</th></tr></thead>
                     <tbody>
                         <?php foreach ($team as $entry): ?>
-                            <tr>
+                            <tr class="team-row-clickable"
+                                data-open-teammate="<?= (int) $entry['user']->id ?>"
+                                tabindex="0"
+                                role="button"
+                                title="View travel (next <?= (int) $upcomingMapDays ?> days)">
                                 <td>
                                     <span class="team-name-cell">
                                         <?php if ($entry['avatar_url']): ?>
@@ -319,7 +340,11 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
             <?php else: ?>
                 <div class="team-card-grid">
                     <?php foreach ($team as $entry): ?>
-                        <article class="team-card">
+                        <article class="team-card team-card-clickable"
+                            data-open-teammate="<?= (int) $entry['user']->id ?>"
+                            tabindex="0"
+                            role="button"
+                            title="View travel (next <?= (int) $upcomingMapDays ?> days)">
                             <?php if ($entry['avatar_url']): ?>
                                 <img class="avatar-circle avatar-lg"
                                     src="<?= htmlspecialchars($entry['avatar_url'], ENT_QUOTES) ?>"
@@ -330,10 +355,13 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                             <?php endif; ?>
                             <h3 class="team-card-name"><?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?></h3>
                             <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
+                            <?php if ($entry['location'] !== null): ?>
+                                <p class="team-card-location"><?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?></p>
+                            <?php else: ?>
+                                <p class="team-card-location hint">—</p>
+                            <?php endif; ?>
                             <?php if ($entry['upcoming'] !== null): ?>
                                 <p class="hint">Upcoming: <?= htmlspecialchars($entry['upcoming'], ENT_QUOTES) ?></p>
-                            <?php elseif ($entry['location'] !== null): ?>
-                                <p class="hint"><?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?></p>
                             <?php endif; ?>
                         </article>
                     <?php endforeach; ?>
@@ -398,6 +426,24 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
         <?php endforeach; ?>
     <?php endif; ?>
 </main>
+
+<div id="teammate-travel-modal" class="modal-backdrop" hidden>
+    <div class="modal-panel" role="dialog" aria-labelledby="teammate-travel-modal-title">
+        <h2 id="teammate-travel-modal-title">Teammate</h2>
+        <p id="teammate-travel-modal-meta" class="hint"></p>
+        <div id="teammate-travel-modal-body"></div>
+        <div class="modal-actions">
+            <button type="button" class="secondary" data-close-modal>Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+window.NEXWAYPOINT_TEAM_PROFILES = <?= json_encode(
+    $teamProfiles,
+    JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR
+) ?>;
+</script>
 <?php if ($mapPeople !== []): ?>
 <script>
 window.NEXWAYPOINT_TEAM_MAP = <?= json_encode([
@@ -413,6 +459,7 @@ window.NEXWAYPOINT_TEAM_MAP = <?= json_encode([
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/team-map.js'), ENT_QUOTES) ?>"></script>
 <?php endif; ?>
+<script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/team-travel-modal.js'), ENT_QUOTES) ?>"></script>
 <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/team-view.js'), ENT_QUOTES) ?>"></script>
 </body>
 </html>

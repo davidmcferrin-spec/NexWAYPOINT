@@ -125,13 +125,15 @@
                         var marker = L.marker([g.lat + off.dLat, g.lon + off.dLon], {
                             icon: faceIcon(p)
                         });
-                        marker.bindPopup(
-                            '<strong>' + escapeHtml(p.name) + '</strong><br>' +
-                            escapeHtml(p.label) +
-                            (p.upcoming
-                                ? '<br>Upcoming: ' + escapeHtml(p.upcoming)
-                                : (p.city_label ? '<br>' + escapeHtml(p.city_label) : ''))
-                        );
+                        marker.bindTooltip(escapeHtml(p.name) + ' — ' + escapeHtml(p.label), {
+                            direction: 'top',
+                            offset: [0, -18]
+                        });
+                        marker.on('click', function () {
+                            if (typeof window.NEXWAYPOINT_OPEN_TEAMMATE === 'function') {
+                                window.NEXWAYPOINT_OPEN_TEAMMATE(String(p.id));
+                            }
+                        });
                         faceLayer.addLayer(marker);
                     });
                 });
