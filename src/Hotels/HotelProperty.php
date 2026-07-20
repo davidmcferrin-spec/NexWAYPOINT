@@ -138,6 +138,18 @@ final class HotelProperty
         ];
     }
 
+    public function addressSummary(): ?string
+    {
+        $parts = array_filter([
+            $this->addressLine1,
+            $this->addressLine2,
+        ], static fn (?string $p) => $p !== null && trim($p) !== '');
+        if ($parts === []) {
+            return null;
+        }
+        return implode(', ', $parts);
+    }
+
     public function label(): string
     {
         $city = $this->city !== null && $this->city !== '' ? ", {$this->city}" : '';

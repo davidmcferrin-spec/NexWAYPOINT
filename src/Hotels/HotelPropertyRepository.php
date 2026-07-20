@@ -208,6 +208,8 @@ final class HotelPropertyRepository
      *   city?: string,
      *   state_region?: string,
      *   destination_fee?: string,
+     *   has_desk?: string,
+     *   brand?: string,
      *   blacklisted?: string,
      *   teammate_adverse?: string
      * } $filters
@@ -217,6 +219,7 @@ final class HotelPropertyRepository
     {
         $allowedSort = [
             'hotel_name' => 'hp.hotel_name ASC, hp.city ASC',
+            'brand' => 'hp.brand ASC, hp.hotel_name ASC',
             'city' => 'hp.city ASC, hp.hotel_name ASC',
             'overall_rating' => 'hp.overall_rating DESC, hp.hotel_name ASC',
             'updated' => 'hp.updated_at DESC',
@@ -230,6 +233,11 @@ final class HotelPropertyRepository
         if ($q !== '') {
             $sql .= ' AND (LOWER(hp.hotel_name) LIKE LOWER(:q) OR LOWER(COALESCE(hp.brand, \'\')) LIKE LOWER(:q))';
             $params['q'] = '%' . $q . '%';
+        }
+        $brand = trim((string) ($filters['brand'] ?? ''));
+        if ($brand !== '') {
+            $sql .= ' AND LOWER(TRIM(COALESCE(hp.brand, \'\'))) = LOWER(:brand)';
+            $params['brand'] = $brand;
         }
         $city = trim((string) ($filters['city'] ?? ''));
         if ($city !== '') {
@@ -246,6 +254,12 @@ final class HotelPropertyRepository
             $sql .= ' AND hp.has_destination_fee = 1';
         } elseif ($fee === '0') {
             $sql .= ' AND hp.has_destination_fee = 0';
+        }
+        $desk = (string) ($filters['has_desk'] ?? '');
+        if ($desk === '1') {
+            $sql .= ' AND hp.has_desk = 1';
+        } elseif ($desk === '0') {
+            $sql .= ' AND hp.has_desk = 0';
         }
 
         $bl = (string) ($filters['blacklisted'] ?? '');
@@ -516,6 +530,88 @@ final class HotelPropertyRepository
             'latitude' => $latitude,
             'longitude' => $longitude,
         ]);
+    }
+
+    /**
+     * Fill missing address / coordinates from a Nominatim search hit.
+     * Never overwrites a non-empty address_line1; may fill city/state/postal/country/coords.
+     *
+     * @param array{
+     *   display_name?: string,
+     *   lat: float,
+     *   lon: float,
+     *   hotel_name?: ?string,
+     *   address_line1?: ?string,
+     *   city?: ?string,
+     *   state_region?: ?string,
+     *   postal_code?: ?string,
+     *   country?: ?string
+     * } $hit
+     */
+    public function enrichFromLookup(HotelProperty $property, array $hit, ?int $actorUserId = null): HotelProperty
+    {
+        if ($property->id === null) {
+            throw new \InvalidArgumentException('Cannot enrich a property without an id.');
+        }
+
+        $needsAddress = $property->addressLine1 === null || trim($property->addressLine1) === '';
+        $needsCoords = $property->latitude === null || $property->longitude === null;
+        if (!$needsAddress && !$needsCoords) {
+            return $property;
+        }
+
+        $addressLine1 = $property->addressLine1;
+        if ($needsAddress && !empty($hit['address_line1'])) {
+            $addressLine1 = (string) $hit['address_line1'];
+        }
+
+        $updated = $this->update(new HotelProperty(
+            id: $property->id,
+            createdByUserId: $property->createdByUserId,
+            hotelName: $property->hotelName,
+            brand: $property->brand,
+            addressLine1: $addressLine1,
+            addressLine2: $property->addressLine2,
+            city: ($property->city === null || trim((string) $property->city) === '') && !empty($hit['city'])
+                ? (string) $hit['city'] : $property->city,
+            stateRegion: ($property->stateRegion === null || trim((string) $property->stateRegion) === '') && !empty($hit['state_region'])
+                ? (string) $hit['state_region'] : $property->stateRegion,
+            postalCode: ($property->postalCode === null || trim((string) $property->postalCode) === '') && !empty($hit['postal_code'])
+                ? (string) $hit['postal_code'] : $property->postalCode,
+            country: ($property->country === null || trim((string) $property->country) === '') && !empty($hit['country'])
+                ? (string) $hit['country'] : $property->country,
+            phone: $property->phone,
+            latitude: $needsCoords ? (float) $hit['lat'] : $property->latitude,
+            longitude: $needsCoords ? (float) $hit['lon'] : $property->longitude,
+            hasDesk: $property->hasDesk,
+            deskNotes: $property->deskNotes,
+            hasPool: $property->hasPool,
+            hasHotTub: $property->hasHotTub,
+            hasBreakfast: $property->hasBreakfast,
+            breakfastNotes: $property->breakfastNotes,
+            hasGym: $property->hasGym,
+            hasFreeParking: $property->hasFreeParking,
+            hasAirportShuttle: $property->hasAirportShuttle,
+            hasEvCharging: $property->hasEvCharging,
+            hasOnsiteRestaurant: $property->hasOnsiteRestaurant,
+            hasOffsiteGym: $property->hasOffsiteGym,
+            walkToOffice: $property->walkToOffice,
+            walkToOfficeNotes: $property->walkToOfficeNotes,
+            hasDestinationFee: $property->hasDestinationFee,
+            destinationFeeNotes: $property->destinationFeeNotes,
+            wifiQuality: $property->wifiQuality,
+            noiseLevel: $property->noiseLevel,
+            uniqueFeatures: $property->uniqueFeatures,
+            overallRating: $property->overallRating,
+        ), $actorUserId);
+
+        $this->logger->info('Hotel property enriched from address lookup', [
+            'id' => $property->id,
+            'filled_address' => $needsAddress,
+            'filled_coords' => $needsCoords,
+        ]);
+
+        return $updated;
     }
 
     public function countStays(int $propertyId): int

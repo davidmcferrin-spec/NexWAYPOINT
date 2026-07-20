@@ -169,6 +169,7 @@ $property = null; // for modal include
     <title>NexWAYPOINT &middot; Log a Hotel Stay</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
     <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/hotel-picker.js'), ENT_QUOTES) ?>" defer></script>
+    <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/address-search.js'), ENT_QUOTES) ?>" defer></script>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>

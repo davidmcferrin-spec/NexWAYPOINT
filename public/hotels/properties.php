@@ -23,14 +23,16 @@ $walkToOfficeVenues = array_values($walkToOfficeVenues);
 
 $filters = [
     'q' => trim((string) ($_GET['q'] ?? '')),
+    'brand' => trim((string) ($_GET['brand'] ?? '')),
     'city' => trim((string) ($_GET['city'] ?? '')),
     'state_region' => trim((string) ($_GET['state_region'] ?? '')),
     'destination_fee' => (string) ($_GET['destination_fee'] ?? ''),
+    'has_desk' => (string) ($_GET['has_desk'] ?? ''),
     'blacklisted' => (string) ($_GET['blacklisted'] ?? ''),
     'teammate_adverse' => (string) ($_GET['teammate_adverse'] ?? ''),
 ];
 $sort = (string) ($_GET['sort'] ?? 'hotel_name');
-$allowedSort = ['hotel_name', 'city', 'overall_rating', 'updated'];
+$allowedSort = ['hotel_name', 'brand', 'city', 'overall_rating', 'updated'];
 if (!in_array($sort, $allowedSort, true)) {
     $sort = 'hotel_name';
 }
@@ -58,10 +60,26 @@ foreach ($locations as $loc) {
     $cities[$loc['city']] = true;
 }
 
+// Brands for filter: catalog + any in-use brands not in the catalog.
+$brandOptions = [];
+foreach ($hotelBrandNames as $brandName) {
+    $brandOptions[$brandName] = true;
+}
+foreach ($propertyRepo->findAll() as $p) {
+    if ($p->brand !== null && trim($p->brand) !== '') {
+        $brandOptions[trim($p->brand)] = true;
+    }
+}
+$brandOptions = array_keys($brandOptions);
+natcasesort($brandOptions);
+$brandOptions = array_values($brandOptions);
+
 $hasActiveFilters = $filters['q'] !== ''
+    || $filters['brand'] !== ''
     || $filters['city'] !== ''
     || $filters['state_region'] !== ''
     || $filters['destination_fee'] !== ''
+    || $filters['has_desk'] !== ''
     || $filters['blacklisted'] !== ''
     || $filters['teammate_adverse'] !== '';
 
@@ -75,6 +93,7 @@ $property = null;
     <title>NexWAYPOINT &middot; Hotel Properties</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
     <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/property-modal.js'), ENT_QUOTES) ?>" defer></script>
+    <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/address-search.js'), ENT_QUOTES) ?>" defer></script>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
@@ -85,6 +104,7 @@ $property = null;
     </div>
     <p class="hint">
         Blacklist is yours to set; teammate adverse preferences for the same hotel/city are shown.
+        Use address lookup when adding/editing to fill street + map pins.
         <a href="/hotels/list.php">Stays</a>
         ·
         <a href="/hotels/map.php">Map</a>
@@ -100,7 +120,10 @@ $property = null;
             <thead>
                 <tr>
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'hotel_name']), ENT_QUOTES) ?>">Hotel</a></th>
+                    <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'brand']), ENT_QUOTES) ?>">Brand</a></th>
+                    <th>Address</th>
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'city']), ENT_QUOTES) ?>">Location</a></th>
+                    <th>Desk</th>
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'overall_rating']), ENT_QUOTES) ?>">Overall</a></th>
                     <th>Dest. charge</th>
                     <th>Flags</th>
@@ -108,8 +131,20 @@ $property = null;
                 </tr>
                 <tr class="table-filters">
                     <th>
-                        <input type="search" name="q" value="<?= htmlspecialchars($filters['q'], ENT_QUOTES) ?>" placeholder="Name / brand" aria-label="Filter by hotel name">
+                        <input type="search" name="q" value="<?= htmlspecialchars($filters['q'], ENT_QUOTES) ?>" placeholder="Name" aria-label="Filter by hotel name">
                     </th>
+                    <th>
+                        <select name="brand" aria-label="Filter by brand" onchange="this.form.submit()">
+                            <option value="">Any</option>
+                            <?php foreach ($brandOptions as $brandName): ?>
+                                <option value="<?= htmlspecialchars($brandName, ENT_QUOTES) ?>"
+                                    <?= strcasecmp($filters['brand'], $brandName) === 0 ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($brandName, ENT_QUOTES) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </th>
+                    <th></th>
                     <th>
                         <div class="table-filter-pair">
                             <input type="text" name="city" value="<?= htmlspecialchars($filters['city'], ENT_QUOTES) ?>" placeholder="City" list="city-suggestions" aria-label="Filter by city">
@@ -120,6 +155,13 @@ $property = null;
                                 <option value="<?= htmlspecialchars($c, ENT_QUOTES) ?>">
                             <?php endforeach; ?>
                         </datalist>
+                    </th>
+                    <th>
+                        <select name="has_desk" aria-label="Filter by desk" onchange="this.form.submit()">
+                            <option value="">Any</option>
+                            <option value="1" <?= $filters['has_desk'] === '1' ? 'selected' : '' ?>>Yes</option>
+                            <option value="0" <?= $filters['has_desk'] === '0' ? 'selected' : '' ?>>No</option>
+                        </select>
                     </th>
                     <th></th>
                     <th>
@@ -150,7 +192,7 @@ $property = null;
             <tbody>
                 <?php if ($properties === []): ?>
                     <tr>
-                        <td colspan="6" class="empty-state">
+                        <td colspan="9" class="empty-state">
                             No properties match.
                             <button type="button" class="primary" data-open-property-modal>Add hotel</button>
                             or <a href="/hotels/add.php">log a stay</a>.
@@ -160,13 +202,19 @@ $property = null;
                     <?php foreach ($properties as $property): ?>
                         <?php $adverse = $adverseByPropertyId[(int) $property->id] ?? []; ?>
                         <tr>
-                            <td>
-                                <?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?>
-                                <?php if ($property->brand): ?>
-                                    <span class="hint"><?= htmlspecialchars($property->brand, ENT_QUOTES) ?></span>
-                                <?php endif; ?>
+                            <td><?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?></td>
+                            <td><?= htmlspecialchars($property->brand ?? '—', ENT_QUOTES) ?></td>
+                            <td class="hint">
+                                <?= htmlspecialchars($property->addressSummary() ?? '—', ENT_QUOTES) ?>
                             </td>
                             <td><?= htmlspecialchars($property->locationLabel() ?? '—', ENT_QUOTES) ?></td>
+                            <td>
+                                <?php if ($property->hasDesk): ?>
+                                    Yes<?= $property->deskNotes ? ' <span class="hint" title="' . htmlspecialchars($property->deskNotes, ENT_QUOTES) . '">·</span>' : '' ?>
+                                <?php else: ?>
+                                    —
+                                <?php endif; ?>
+                            </td>
                             <td>
                                 <?= $property->overallRating !== null ? number_format($property->overallRating, 1) . '★' : '—' ?>
                             </td>
@@ -194,7 +242,7 @@ $property = null;
                         </tr>
                         <?php if ($adverse !== []): ?>
                             <tr>
-                                <td colspan="6" class="hint">
+                                <td colspan="9" class="hint">
                                     Teammate adverse preference<?= count($adverse) === 1 ? '' : 's' ?>:
                                     <?php foreach ($adverse as $i => $a): ?>
                                         <?= $i > 0 ? '; ' : '' ?>

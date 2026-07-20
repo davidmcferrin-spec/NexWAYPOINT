@@ -73,6 +73,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new InvalidArgumentException('City is required.');
             }
 
+            $lat = isset($_POST['latitude']) && $_POST['latitude'] !== '' && is_numeric($_POST['latitude'])
+                ? (float) $_POST['latitude'] : $property->latitude;
+            $lon = isset($_POST['longitude']) && $_POST['longitude'] !== '' && is_numeric($_POST['longitude'])
+                ? (float) $_POST['longitude'] : $property->longitude;
+
             $property = $repo->update(new HotelProperty(
                 id: $property->id,
                 createdByUserId: $property->createdByUserId,
@@ -85,8 +90,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 postalCode: $nullable($_POST['postal_code'] ?? null),
                 country: $nullable($_POST['country'] ?? null),
                 phone: $nullable($_POST['phone'] ?? null),
-                latitude: $property->latitude,
-                longitude: $property->longitude,
+                latitude: $lat,
+                longitude: $lon,
                 hasDesk: $checkbox('has_desk'),
                 deskNotes: $nullable($_POST['desk_notes'] ?? null),
                 hasPool: $checkbox('has_pool'),
@@ -138,6 +143,7 @@ $formBlacklistReason = $myBlacklistReason;
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NexWAYPOINT &middot; Edit property</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
+    <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/address-search.js'), ENT_QUOTES) ?>" defer></script>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>

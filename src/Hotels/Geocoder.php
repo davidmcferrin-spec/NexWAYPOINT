@@ -107,6 +107,134 @@ final class Geocoder
         return $this->geocode(null, $city, $stateRegion, null, $country, $forceRefresh);
     }
 
+    /**
+     * Free-text place / hotel / address search for the property form.
+     *
+     * @return list<array{
+     *   display_name: string,
+     *   lat: float,
+     *   lon: float,
+     *   hotel_name: ?string,
+     *   address_line1: ?string,
+     *   city: ?string,
+     *   state_region: ?string,
+     *   postal_code: ?string,
+     *   country: ?string
+     * }>
+     */
+    public function search(string $query, int $limit = 5): array
+    {
+        $query = trim($query);
+        if (mb_strlen($query) < 3) {
+            return [];
+        }
+        $limit = max(1, min(8, $limit));
+
+        $params = [
+            'q' => $query,
+            'format' => 'json',
+            'addressdetails' => 1,
+            'limit' => $limit,
+        ];
+        // Bias toward US unless another country is named in the query.
+        if (preg_match('/\b(Canada|Mexico|United Kingdom|\bUK\b|France|Germany|Australia)\b/i', $query) !== 1) {
+            $params['countrycodes'] = 'us';
+        }
+
+        $rows = $this->requestNominatimRows($params, $query);
+        $out = [];
+        foreach ($rows as $row) {
+            $parsed = $this->parseNominatimRow($row);
+            if ($parsed !== null) {
+                $out[] = $parsed;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{
+     *   display_name: string,
+     *   lat: float,
+     *   lon: float,
+     *   hotel_name: ?string,
+     *   address_line1: ?string,
+     *   city: ?string,
+     *   state_region: ?string,
+     *   postal_code: ?string,
+     *   country: ?string
+     * }|null
+     */
+    public function parseNominatimRow(array $row): ?array
+    {
+        if (!isset($row['lat'], $row['lon'])) {
+            return null;
+        }
+        $address = is_array($row['address'] ?? null) ? $row['address'] : [];
+        $house = trim((string) ($address['house_number'] ?? ''));
+        $road = trim((string) ($address['road'] ?? $address['pedestrian'] ?? $address['footway'] ?? ''));
+        $addressLine1 = null;
+        if ($road !== '') {
+            $addressLine1 = $house !== '' ? trim($house . ' ' . $road) : $road;
+        }
+
+        $city = $this->firstAddressValue($address, [
+            'city', 'town', 'village', 'municipality', 'hamlet', 'suburb',
+        ]);
+        $state = $this->firstAddressValue($address, ['state', 'region', 'state_district']);
+        if ($state !== null && strlen($state) > 2) {
+            // Prefer 2-letter when Nominatim gave full name and ISO3166-2-lvl4 exists.
+            $iso = trim((string) ($address['ISO3166-2-lvl4'] ?? ''));
+            if (preg_match('/^[A-Z]{2}-([A-Z]{2})$/', $iso, $m) === 1) {
+                $state = $m[1];
+            }
+        }
+        $postal = $this->firstAddressValue($address, ['postcode']);
+        $country = $this->firstAddressValue($address, ['country']);
+        if ($country !== null) {
+            $country = $this->normalizeCountry($country) === 'United States' ? 'USA' : $country;
+        }
+
+        $hotelName = $this->firstAddressValue($address, [
+            'hotel', 'tourism', 'amenity', 'building', 'railway',
+        ]);
+        $display = trim((string) ($row['display_name'] ?? ''));
+        if ($hotelName === null && $display !== '') {
+            $hotelName = trim(explode(',', $display, 2)[0]);
+        }
+
+        return [
+            'display_name' => $display !== '' ? $display : ($addressLine1 ?? 'Unknown place'),
+            'lat' => (float) $row['lat'],
+            'lon' => (float) $row['lon'],
+            'hotel_name' => $hotelName,
+            'address_line1' => $addressLine1,
+            'city' => $city,
+            'state_region' => $state,
+            'postal_code' => $postal,
+            'country' => $country,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $address
+     * @param list<string> $keys
+     */
+    private function firstAddressValue(array $address, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            if (!isset($address[$key])) {
+                continue;
+            }
+            $value = trim((string) $address[$key]);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return null;
+    }
+
     public function normalizeCountry(?string $country): string
     {
         $country = $this->trimOrNull($country) ?? 'USA';
@@ -272,6 +400,22 @@ final class Geocoder
      */
     private function requestNominatim(array $params, string $logLabel): ?array
     {
+        $rows = $this->requestNominatimRows($params, $logLabel);
+        if ($rows === [] || !isset($rows[0]['lat'], $rows[0]['lon'])) {
+            return null;
+        }
+        return [
+            'lat' => (float) $rows[0]['lat'],
+            'lon' => (float) $rows[0]['lon'],
+        ];
+    }
+
+    /**
+     * @param array<string, scalar> $params
+     * @return list<array<string, mixed>>
+     */
+    private function requestNominatimRows(array $params, string $logLabel): array
+    {
         $elapsed = microtime(true) - $this->lastRequestAt;
         if ($this->lastRequestAt > 0 && $elapsed < 1.05) {
             usleep((int) ((1.05 - $elapsed) * 1_000_000));
@@ -290,19 +434,17 @@ final class Geocoder
         $body = @file_get_contents($url, false, $context);
         if ($body === false) {
             $this->logger->warning('Nominatim geocode failed', ['query' => $logLabel]);
-            return null;
+            return [];
         }
 
         $decoded = json_decode($body, true);
-        if (!is_array($decoded) || $decoded === [] || !isset($decoded[0]['lat'], $decoded[0]['lon'])) {
+        if (!is_array($decoded) || $decoded === []) {
             $this->logger->info('Nominatim returned no match', ['query' => $logLabel]);
-            return null;
+            return [];
         }
 
-        return [
-            'lat' => (float) $decoded[0]['lat'],
-            'lon' => (float) $decoded[0]['lon'],
-        ];
+        /** @var list<array<string, mixed>> $decoded */
+        return $decoded;
     }
 
     private function trimOrNull(?string $value): ?string

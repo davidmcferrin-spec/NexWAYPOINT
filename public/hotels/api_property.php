@@ -77,6 +77,10 @@ try {
     if ($existing !== null) {
         $created = $existing;
     } else {
+        $lat = isset($data['latitude']) && $data['latitude'] !== '' && is_numeric($data['latitude'])
+            ? (float) $data['latitude'] : null;
+        $lon = isset($data['longitude']) && $data['longitude'] !== '' && is_numeric($data['longitude'])
+            ? (float) $data['longitude'] : null;
         $created = $repo->create(new HotelProperty(
             id: null,
             createdByUserId: $user->id,
@@ -89,8 +93,8 @@ try {
             postalCode: $nullable($data['postal_code'] ?? null),
             country: $nullable($data['country'] ?? null) ?? 'USA',
             phone: $nullable($data['phone'] ?? null),
-            latitude: null,
-            longitude: null,
+            latitude: $lat,
+            longitude: $lon,
             hasDesk: $bool('has_desk'),
             deskNotes: $nullable($data['desk_notes'] ?? null),
             hasPool: $bool('has_pool'),

@@ -6,6 +6,7 @@ namespace NexWaypoint\Mail;
 
 use NexWaypoint\Core\Env;
 use NexWaypoint\Core\Logger;
+use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStay;
 use NexWaypoint\Hotels\HotelStayRepository;
@@ -253,6 +254,28 @@ final class MailPoller
             isset($extracted['address']) && is_string($extracted['address']) ? $extracted['address'] : null,
             null,
         );
+
+        $needsLookup = ($property->addressLine1 === null || trim($property->addressLine1) === '')
+            || $property->latitude === null
+            || $property->longitude === null;
+        if ($needsLookup) {
+            try {
+                $parts = array_values(array_filter([
+                    $propertyName,
+                    $city,
+                    $state,
+                ], static fn ($p) => is_string($p) && trim($p) !== ''));
+                $hits = (new Geocoder($this->logger))->search(implode(', ', $parts), 3);
+                if ($hits !== []) {
+                    $property = $this->hotelProperties->enrichFromLookup($property, $hits[0], $userId);
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('Hotel import address lookup skipped', [
+                    'error' => $e->getMessage(),
+                    'property' => $propertyName,
+                ]);
+            }
+        }
 
         $result = $this->hotelStays->upsertFromImport(new HotelStay(
             id: null,

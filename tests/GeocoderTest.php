@@ -8,6 +8,34 @@ use NexWaypoint\Hotels\Geocoder;
 
 final class GeocoderTest extends NexWaypointTestCase
 {
+    public function testParseNominatimRowExtractsAddress(): void
+    {
+        $geocoder = new Geocoder($this->logger, sys_get_temp_dir());
+        $parsed = $geocoder->parseNominatimRow([
+            'lat' => '41.897',
+            'lon' => '-87.635',
+            'display_name' => 'Hotel Zachary, 3636 North Clark Street, Chicago, Illinois, 60613, United States',
+            'address' => [
+                'hotel' => 'Hotel Zachary',
+                'house_number' => '3636',
+                'road' => 'North Clark Street',
+                'city' => 'Chicago',
+                'state' => 'Illinois',
+                'ISO3166-2-lvl4' => 'US-IL',
+                'postcode' => '60613',
+                'country' => 'United States',
+            ],
+        ]);
+        self::assertNotNull($parsed);
+        self::assertSame('Hotel Zachary', $parsed['hotel_name']);
+        self::assertSame('3636 North Clark Street', $parsed['address_line1']);
+        self::assertSame('Chicago', $parsed['city']);
+        self::assertSame('IL', $parsed['state_region']);
+        self::assertSame('60613', $parsed['postal_code']);
+        self::assertSame('USA', $parsed['country']);
+        self::assertEqualsWithDelta(41.897, $parsed['lat'], 0.001);
+    }
+
     public function testCacheRoundTripWithoutNetwork(): void
     {
         $dir = sys_get_temp_dir() . '/nexwaypoint_geocode_' . uniqid('', true);

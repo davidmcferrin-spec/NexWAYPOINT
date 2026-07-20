@@ -302,6 +302,37 @@ label.radio-block .hint {
     background: var(--input-bg);
 }
 
+.address-search {
+    margin: 0.75rem 0 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+}
+.address-search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.4rem;
+    max-height: 14rem;
+    overflow: auto;
+}
+button.address-search-item {
+    text-align: left;
+    font: inherit;
+    font-size: 0.9rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--input-bg);
+    color: var(--text);
+    cursor: pointer;
+}
+button.address-search-item:hover {
+    border-color: var(--accent);
+    background: var(--badge-travel-bg);
+}
+
 .theme-toggle {
     margin-left: 0.5rem;
     padding: 0.35rem 0.65rem;

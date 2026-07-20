@@ -100,6 +100,19 @@ $currentBrand = $val($property, 'brand', 'brand');
         <?php endforeach; ?>
     </select>
 </label>
+
+<div class="address-search" data-address-search data-field-prefix="<?= htmlspecialchars($prefix, ENT_QUOTES) ?>">
+    <label>Look up address or hotel
+        <input type="search" data-address-search-input autocomplete="off"
+            placeholder="e.g. Hilton Midtown New York or 1335 Avenue of the Americas">
+    </label>
+    <div class="modal-actions" style="margin:0.35rem 0">
+        <button type="button" class="secondary" data-address-search-trigger>Search using hotel name + city</button>
+    </div>
+    <div class="address-search-results" data-address-search-results hidden></div>
+    <p class="hint" data-address-search-status></p>
+</div>
+
 <label>Address line 1<input type="text" name="<?= htmlspecialchars($name('address_line1'), ENT_QUOTES) ?>"
     value="<?= htmlspecialchars($val($property, 'addressLine1', 'address_line1'), ENT_QUOTES) ?>"></label>
 <label>Address line 2<input type="text" name="<?= htmlspecialchars($name('address_line2'), ENT_QUOTES) ?>"
@@ -115,9 +128,15 @@ $countryValue = $val($property, 'country', 'country');
 if ($countryValue === '' && $property === null && $_SERVER['REQUEST_METHOD'] !== 'POST') {
     $countryValue = 'USA';
 }
+$latValue = $val($property, 'latitude', 'latitude');
+$lonValue = $val($property, 'longitude', 'longitude');
 ?>
 <label>Country<input type="text" name="<?= htmlspecialchars($name('country'), ENT_QUOTES) ?>"
     value="<?= htmlspecialchars($countryValue, ENT_QUOTES) ?>"></label>
+<input type="hidden" name="<?= htmlspecialchars($name('latitude'), ENT_QUOTES) ?>"
+    value="<?= htmlspecialchars($latValue, ENT_QUOTES) ?>">
+<input type="hidden" name="<?= htmlspecialchars($name('longitude'), ENT_QUOTES) ?>"
+    value="<?= htmlspecialchars($lonValue, ENT_QUOTES) ?>">
 <label>Phone<input type="text" name="<?= htmlspecialchars($name('phone'), ENT_QUOTES) ?>"
     value="<?= htmlspecialchars($val($property, 'phone', 'phone'), ENT_QUOTES) ?>"></label>
 
