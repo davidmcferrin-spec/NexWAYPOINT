@@ -8,12 +8,14 @@ use NexWaypoint\Core\Logger;
 
 /**
  * OpenStreetMap Nominatim geocoder with on-disk cache.
- * Used by the hotel map view when properties lack latitude/longitude.
+ * Used by the hotel map and office/venue catalog.
  */
 final class Geocoder
 {
     private const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
     private const USER_AGENT = 'NexWAYPOINT/1.0 (self-hosted hotel map; https://nexwaypoint.area51consulting.com)';
+    private const CACHE_VERSION = 'v2';
+    private const MISS_TTL_SECONDS = 3600;
 
     private string $cacheDir;
     private float $lastRequestAt = 0.0;
@@ -37,59 +39,66 @@ final class Geocoder
         ?string $stateRegion,
         ?string $postalCode,
         ?string $country,
+        bool $forceRefresh = false,
     ): ?array {
-        $parts = [];
-        if ($addressLine1 !== null && trim($addressLine1) !== '') {
-            $parts[] = trim($addressLine1);
-        }
-        if ($city !== null && trim($city) !== '') {
-            $parts[] = trim($city);
-        }
-        if ($stateRegion !== null && trim($stateRegion) !== '') {
-            $parts[] = trim($stateRegion);
-        }
-        if ($postalCode !== null && trim($postalCode) !== '') {
-            $parts[] = trim($postalCode);
-        }
-        $country = ($country !== null && trim($country) !== '') ? trim($country) : 'USA';
-        $parts[] = $country;
+        $addressLine1 = $this->trimOrNull($addressLine1);
+        $city = $this->trimOrNull($city);
+        $stateRegion = $this->trimOrNull($stateRegion);
+        $postalCode = $this->trimOrNull($postalCode);
+        $country = $this->normalizeCountry($country);
 
-        $hasCity = $city !== null && trim($city) !== '';
-        $hasAddress = $addressLine1 !== null && trim($addressLine1) !== '';
-        if (!$hasCity && !$hasAddress) {
+        if ($city === null && $addressLine1 === null) {
             return null;
         }
 
-        $query = implode(', ', $parts);
-        $cached = $this->readCache($query);
-        if ($cached !== null) {
-            return $cached;
+        $cacheKey = $this->cacheKey($addressLine1, $city, $stateRegion, $postalCode, $country);
+        if (!$forceRefresh) {
+            $cached = $this->readCache($cacheKey);
+            if ($cached !== null) {
+                return $cached === [] ? null : $cached;
+            }
         }
 
-        $result = $this->fetchNominatim($query);
-        $this->writeCache($query, $result);
+        // Structured search is more reliable than a free-form q= string.
+        $result = $this->fetchNominatimStructured($addressLine1, $city, $stateRegion, $postalCode, $country);
+        if ($result === null) {
+            $parts = array_values(array_filter([$addressLine1, $city, $stateRegion, $postalCode, $country]));
+            $result = $this->fetchNominatimFreeform(implode(', ', $parts));
+        }
+
+        $this->writeCache($cacheKey, $result);
         return $result;
     }
 
     /**
-     * City-level lookup (faster shared cache across hotels in the same city).
-     *
      * @return array{lat: float, lon: float}|null
      */
-    public function geocodeCity(?string $city, ?string $stateRegion, ?string $country): ?array
+    public function geocodeCity(?string $city, ?string $stateRegion, ?string $country, bool $forceRefresh = false): ?array
     {
         if ($city === null || trim($city) === '') {
             return null;
         }
-        return $this->geocode(null, $city, $stateRegion, null, $country);
+        return $this->geocode(null, $city, $stateRegion, null, $country, $forceRefresh);
+    }
+
+    public function normalizeCountry(?string $country): string
+    {
+        $country = $this->trimOrNull($country) ?? 'USA';
+        $upper = strtoupper($country);
+        return match ($upper) {
+            'USA', 'US', 'U.S.', 'U.S.A.', 'UNITED STATES OF AMERICA' => 'United States',
+            'UK', 'GB', 'GREAT BRITAIN' => 'United Kingdom',
+            default => $country,
+        };
     }
 
     /**
-     * @return array{lat: float, lon: float}|null
+     * @return array{lat: float, lon: float}|list{}|null
+     *         Hit → coords; soft miss → []; missing/expired → null
      */
-    private function readCache(string $query): ?array
+    private function readCache(string $cacheKey): ?array
     {
-        $path = $this->cachePath($query);
+        $path = $this->cachePath($cacheKey);
         if (!is_file($path)) {
             return null;
         }
@@ -101,7 +110,12 @@ final class Geocoder
         if (!is_array($data)) {
             return null;
         }
-        if (array_key_exists('miss', $data) && $data['miss'] === true) {
+        if (!empty($data['miss'])) {
+            $missAt = (int) ($data['miss_at'] ?? 0);
+            if ($missAt > 0 && (time() - $missAt) < self::MISS_TTL_SECONDS) {
+                return []; // soft miss
+            }
+            @unlink($path);
             return null;
         }
         if (!isset($data['lat'], $data['lon'])) {
@@ -113,22 +127,86 @@ final class Geocoder
     /**
      * @param array{lat: float, lon: float}|null $result
      */
-    private function writeCache(string $query, ?array $result): void
+    private function writeCache(string $cacheKey, ?array $result): void
     {
-        $path = $this->cachePath($query);
-        $payload = $result ?? ['miss' => true];
+        $path = $this->cachePath($cacheKey);
+        $payload = $result ?? ['miss' => true, 'miss_at' => time()];
         @file_put_contents($path, json_encode($payload));
     }
 
-    private function cachePath(string $query): string
+    private function cachePath(string $cacheKey): string
     {
-        return $this->cacheDir . '/' . hash('sha256', strtolower(trim($query))) . '.json';
+        return $this->cacheDir . '/' . hash('sha256', $cacheKey) . '.json';
+    }
+
+    private function cacheKey(
+        ?string $addressLine1,
+        ?string $city,
+        ?string $stateRegion,
+        ?string $postalCode,
+        string $country,
+    ): string {
+        return strtolower(implode('|', [
+            self::CACHE_VERSION,
+            $addressLine1 ?? '',
+            $city ?? '',
+            $stateRegion ?? '',
+            $postalCode ?? '',
+            $country,
+        ]));
     }
 
     /**
      * @return array{lat: float, lon: float}|null
      */
-    private function fetchNominatim(string $query): ?array
+    private function fetchNominatimStructured(
+        ?string $addressLine1,
+        ?string $city,
+        ?string $stateRegion,
+        ?string $postalCode,
+        string $country,
+    ): ?array {
+        $params = [
+            'format' => 'json',
+            'limit' => 1,
+        ];
+        if ($addressLine1 !== null) {
+            $params['street'] = $addressLine1;
+        }
+        if ($city !== null) {
+            $params['city'] = $city;
+        }
+        if ($stateRegion !== null) {
+            $params['state'] = $stateRegion;
+        }
+        if ($postalCode !== null) {
+            $params['postalcode'] = $postalCode;
+        }
+        $params['country'] = $country;
+
+        return $this->requestNominatim($params, 'structured:' . ($addressLine1 ?? '') . ' / ' . ($city ?? ''));
+    }
+
+    /**
+     * @return array{lat: float, lon: float}|null
+     */
+    private function fetchNominatimFreeform(string $query): ?array
+    {
+        if (trim($query) === '') {
+            return null;
+        }
+        return $this->requestNominatim([
+            'q' => $query,
+            'format' => 'json',
+            'limit' => 1,
+        ], $query);
+    }
+
+    /**
+     * @param array<string, scalar> $params
+     * @return array{lat: float, lon: float}|null
+     */
+    private function requestNominatim(array $params, string $logLabel): ?array
     {
         // Nominatim asks for ≤1 request/second.
         $elapsed = microtime(true) - $this->lastRequestAt;
@@ -137,29 +215,24 @@ final class Geocoder
         }
         $this->lastRequestAt = microtime(true);
 
-        $url = self::NOMINATIM_URL . '?' . http_build_query([
-            'q' => $query,
-            'format' => 'json',
-            'limit' => 1,
-        ]);
-
+        $url = self::NOMINATIM_URL . '?' . http_build_query($params);
         $context = stream_context_create([
             'http' => [
                 'method' => 'GET',
                 'header' => "User-Agent: " . self::USER_AGENT . "\r\nAccept: application/json\r\n",
-                'timeout' => 8,
+                'timeout' => 10,
             ],
         ]);
 
         $body = @file_get_contents($url, false, $context);
         if ($body === false) {
-            $this->logger->warning('Nominatim geocode failed', ['query' => $query]);
+            $this->logger->warning('Nominatim geocode failed', ['query' => $logLabel]);
             return null;
         }
 
         $decoded = json_decode($body, true);
         if (!is_array($decoded) || $decoded === [] || !isset($decoded[0]['lat'], $decoded[0]['lon'])) {
-            $this->logger->info('Nominatim returned no match', ['query' => $query]);
+            $this->logger->info('Nominatim returned no match', ['query' => $logLabel]);
             return null;
         }
 
@@ -167,5 +240,14 @@ final class Geocoder
             'lat' => (float) $decoded[0]['lat'],
             'lon' => (float) $decoded[0]['lon'],
         ];
+    }
+
+    private function trimOrNull(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $value = trim($value);
+        return $value === '' ? null : $value;
     }
 }

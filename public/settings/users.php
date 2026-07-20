@@ -134,30 +134,53 @@ foreach ($children as &$list) {
 }
 unset($list);
 
-$renderTree = null;
-$renderTree = static function (int $parentId, int $depth) use (&$renderTree, $children, $repo): void {
-    foreach ($children[$parentId] ?? [] as $node) {
-        $pad = str_repeat(' ', $depth);
-        $dotted = [];
-        if ($repo->dottedManagerIds($node->id) !== []) {
-            foreach ($repo->dottedManagers($node->id) as $dm) {
-                $dotted[] = $dm->displayName;
-            }
+$renderOrgNode = null;
+$renderOrgNode = static function ($node, int $depth = 0) use (&$renderOrgNode, $children, $repo): void {
+    $dotted = [];
+    foreach ($repo->dottedManagers($node->id) as $dm) {
+        if ($dm->isSystem) {
+            continue;
         }
-        echo '<div class="org-row" style="padding-left:' . (0.75 * $depth) . 'rem">';
-        echo htmlspecialchars($pad . $node->displayName, ENT_QUOTES);
-        echo ' <span class="text-dim">(@' . htmlspecialchars($node->username, ENT_QUOTES) . ')</span>';
-        if ($dotted !== []) {
-            echo ' <span class="badge badge-status-delay" title="Dotted-line managers">⋯ '
-                . htmlspecialchars(implode(', ', $dotted), ENT_QUOTES) . '</span>';
-        }
-        if ($node->isAdmin) {
-            echo ' <span class="badge badge-status-home">admin</span>';
-        }
-        echo ' <a href="/settings/users.php?id=' . (int) $node->id . '">edit</a>';
-        echo '</div>';
-        $renderTree($node->id, $depth + 1);
+        $dotted[] = $dm->displayName;
     }
+    $parts = preg_split('/\s+/', trim($node->displayName)) ?: [];
+    $initials = '';
+    foreach (array_slice($parts, 0, 2) as $part) {
+        $initials .= mb_strtoupper(mb_substr($part, 0, 1));
+    }
+    if ($initials === '') {
+        $initials = '?';
+    }
+    $kids = $children[$node->id] ?? [];
+    ?>
+    <li class="org-node<?= $kids !== [] ? ' has-children' : '' ?>">
+        <div class="org-person">
+            <span class="org-avatar" aria-hidden="true"><?= htmlspecialchars($initials, ENT_QUOTES) ?></span>
+            <div class="org-person-body">
+                <div class="org-person-name">
+                    <?= htmlspecialchars($node->displayName, ENT_QUOTES) ?>
+                    <?php if ($node->isAdmin): ?>
+                        <span class="badge badge-status-home">admin</span>
+                    <?php endif; ?>
+                </div>
+                <div class="org-person-meta">@<?= htmlspecialchars($node->username, ENT_QUOTES) ?></div>
+                <?php if ($dotted !== []): ?>
+                    <div class="org-person-dotted" title="Dotted-line managers">
+                        Dotted: <?= htmlspecialchars(implode(', ', $dotted), ENT_QUOTES) ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <a class="org-person-edit" href="/settings/users.php?id=<?= (int) $node->id ?>">Manage</a>
+        </div>
+        <?php if ($kids !== []): ?>
+            <ul class="org-branch">
+                <?php foreach ($kids as $child): ?>
+                    <?php $renderOrgNode($child, $depth + 1); ?>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+    </li>
+    <?php
 };
 ?>
 <!DOCTYPE html>
@@ -186,8 +209,8 @@ $renderTree = static function (int $parentId, int $depth) use (&$renderTree, $ch
     <?php endif; ?>
 
     <div class="card">
-        <h3>Org chart (solid line)</h3>
-        <p class="hint">Indentation = reports to the person above. Dotted-line managers show as ⋯ badges.</p>
+        <h3>Org chart</h3>
+        <p class="hint">Solid-line reporting. Dotted-line managers appear under each person when set.</p>
         <?php
         // Roots: no manager, or manager missing/inactive (orphans still show).
         $roots = $children[0] ?? [];
@@ -208,27 +231,11 @@ $renderTree = static function (int $parentId, int $depth) use (&$renderTree, $ch
         if ($roots === []) {
             echo '<p class="empty-state">No org members yet (system admin is excluded).</p>';
         } else {
+            echo '<ul class="org-tree">';
             foreach ($roots as $root) {
-                echo '<div class="org-row">';
-                echo '<strong>' . htmlspecialchars($root->displayName, ENT_QUOTES) . '</strong>';
-                echo ' <span class="text-dim">(@' . htmlspecialchars($root->username, ENT_QUOTES) . ')</span>';
-                $dotted = [];
-                foreach ($repo->dottedManagers($root->id) as $dm) {
-                    if ($dm->isSystem) {
-                        continue;
-                    }
-                    $dotted[] = $dm->displayName;
-                }
-                if ($dotted !== []) {
-                    echo ' <span class="badge badge-status-delay">⋯ ' . htmlspecialchars(implode(', ', $dotted), ENT_QUOTES) . '</span>';
-                }
-                if ($root->isAdmin) {
-                    echo ' <span class="badge badge-status-home">admin</span>';
-                }
-                echo ' <a href="/settings/users.php?id=' . (int) $root->id . '">edit</a>';
-                echo '</div>';
-                $renderTree($root->id, 1);
+                $renderOrgNode($root);
             }
+            echo '</ul>';
         }
         ?>
     </div>

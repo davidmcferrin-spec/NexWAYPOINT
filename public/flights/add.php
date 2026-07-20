@@ -183,7 +183,7 @@ $selectedCarrierId = (int) ($_POST['carrier_id'] ?? 0);
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NexWAYPOINT &middot; Add a Flight</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
-    <script src="/assets/carrier-picker.js" defer></script>
+    <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/carrier-picker.js'), ENT_QUOTES) ?>" defer></script>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>

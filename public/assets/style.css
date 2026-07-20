@@ -266,8 +266,86 @@ form.stack textarea, form.stack select {
     background: var(--input-bg);
     color: var(--text);
 }
-.org-row { margin: 0.25rem 0; line-height: 1.5; }
-.org-row a { margin-left: 0.35rem; font-size: 0.9em; }
+.org-tree,
+.org-branch {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.org-tree {
+    margin-top: 0.75rem;
+}
+.org-branch {
+    margin-left: 1.35rem;
+    padding-left: 1.1rem;
+    border-left: 2px solid var(--border);
+}
+.org-node {
+    position: relative;
+    margin: 0.55rem 0;
+}
+.org-branch > .org-node::before {
+    content: "";
+    position: absolute;
+    left: -1.1rem;
+    top: 1.15rem;
+    width: 1rem;
+    height: 2px;
+    background: var(--border);
+}
+.org-person {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    max-width: 28rem;
+}
+.org-avatar {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 50%;
+    background: var(--badge-travel-bg);
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+.org-person-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.org-person-name {
+    font-weight: 600;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+}
+.org-person-meta {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+.org-person-dotted {
+    margin-top: 0.15rem;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    font-style: italic;
+}
+.org-person-edit {
+    flex: 0 0 auto;
+    font-size: 0.85rem;
+    opacity: 0.75;
+}
+.org-person:hover .org-person-edit {
+    opacity: 1;
+}
 .hint { font-size: 0.85rem; color: var(--text-dim); margin: 0.4rem 0; }
 .privacy-fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; }
 button.primary {

@@ -39,7 +39,7 @@ $carrierWarning = !$app['db']->tableExists('carriers')
     ? 'Database is missing carriers. On the server run: php scripts/migrate.php'
     : null;
 
-$editVenueId = isset($_GET['venue_id']) ? (int) $_GET['venue_id'] : 0;
+$editVenueId = isset($_GET['venue_id']) ? (int) $_GET['venue_id'] : (isset($_GET['edit_venue']) ? (int) $_GET['edit_venue'] : 0);
 $editingVenue = $editVenueId > 0 ? $venueRepo->find($editVenueId) : null;
 
 $nullable = static function (mixed $v): ?string {
@@ -54,12 +54,9 @@ $geocodeVenue = static function (
     ?string $postalCode,
     ?string $country,
 ) use ($geocoder): array {
-    $coords = null;
-    if ($addressLine1 !== null || $city !== null) {
-        $coords = $geocoder->geocode($addressLine1, $city, $stateRegion, $postalCode, $country);
-    }
+    $coords = $geocoder->geocode($addressLine1, $city, $stateRegion, $postalCode, $country, true);
     if ($coords === null && $city !== null) {
-        $coords = $geocoder->geocodeCity($city, $stateRegion, $country);
+        $coords = $geocoder->geocodeCity($city, $stateRegion, $country, true);
     }
     return [$coords['lat'] ?? null, $coords['lon'] ?? null];
 };
@@ -82,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $brandRepo->delete((int) ($_POST['brand_id'] ?? 0), $user->id);
                 $message = 'Brand removed from the dropdown (existing properties keep their stored brand).';
-            } elseif ($action === 'add_venue' || ($action === 'update_venue' && $editingVenue !== null)) {
+            } elseif ($action === 'add_venue' || $action === 'update_venue') {
                 if ($venueWarning !== null) {
                     throw new RuntimeException($venueWarning);
                 }
@@ -91,9 +88,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $state = $nullable($_POST['state_region'] ?? null);
                 $postal = $nullable($_POST['postal_code'] ?? null);
                 $country = $nullable($_POST['country'] ?? null) ?? 'USA';
+                [$lat, $lon] = $geocodeVenue($a1, $city, $state, $postal, $country);
 
                 if ($action === 'add_venue') {
-                    [$lat, $lon] = $geocodeVenue($a1, $city, $state, $postal, $country);
                     $created = $venueRepo->create(
                         (string) ($_POST['name'] ?? ''),
                         $a1,
@@ -106,23 +103,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $lon,
                         $user->id,
                     );
-                    $geoNote = ($lat !== null) ? ' Geocoded for the map.' : ' Add a city/address to place it on the map.';
+                    $geoNote = ($lat !== null)
+                        ? ' Plotted on the map.'
+                        : ' Could not geocode yet — check city/state/country, then save again.';
                     $message = "Added office/venue {$created->name}." . $geoNote;
                 } else {
-                    $addressChanged = $a1 !== $editingVenue->addressLine1
-                        || $city !== $editingVenue->city
-                        || $state !== $editingVenue->stateRegion
-                        || $postal !== $editingVenue->postalCode
-                        || $country !== $editingVenue->country;
-
-                    $lat = $editingVenue->latitude;
-                    $lon = $editingVenue->longitude;
-                    if ($addressChanged || $lat === null || $lon === null) {
-                        [$lat, $lon] = $geocodeVenue($a1, $city, $state, $postal, $country);
+                    $id = (int) ($_POST['id'] ?? 0);
+                    $existing = $venueRepo->find($id);
+                    if ($existing === null) {
+                        throw new InvalidArgumentException('Office / venue not found.');
                     }
-
-                    $editingVenue = $venueRepo->update(
-                        $editingVenue->id,
+                    $venueRepo->update(
+                        $id,
                         (string) ($_POST['name'] ?? ''),
                         $a1,
                         $city,
@@ -135,7 +127,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $lon,
                         $user->id,
                     );
-                    $message = 'Office / venue updated.';
+                    $geoNote = ($lat !== null)
+                        ? ' Map pin updated.'
+                        : ' Could not geocode — check city/state/country.';
+                    $message = 'Office / venue updated.' . $geoNote;
+                    $editingVenue = null;
+                    $editVenueId = 0;
                 }
             } elseif ($action === 'remove_venue') {
                 if ($venueWarning !== null) {
@@ -143,9 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $venueRepo->deactivate((int) ($_POST['venue_id'] ?? 0), $user->id);
                 $message = 'Office / venue deactivated.';
-                if ($editingVenue !== null && $editingVenue->id === (int) ($_POST['venue_id'] ?? 0)) {
-                    $editingVenue = null;
-                }
+                $editingVenue = null;
             } elseif ($action === 'save_carrier') {
                 if ($carrierWarning !== null) {
                     throw new RuntimeException($carrierWarning);
@@ -290,13 +285,14 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
     <div class="card" id="offices-venues">
         <div class="card-header-row">
             <h3>Offices &amp; venues</h3>
-            <?php if ($venueWarning === null && $editingVenue === null): ?>
-                <button type="button" class="primary" data-open-modal="venue-add-modal">Add venue</button>
+            <?php if ($venueWarning === null): ?>
+                <button type="button" class="primary" data-open-modal="venue-modal"
+                    data-title="Add office / venue">Add venue</button>
             <?php endif; ?>
         </div>
         <p class="hint">
             Work locations for the walk-to field and
-            <a href="/hotels/map.php">hotel map</a> pins. Edit opens a full form (address + geocode).
+            <a href="/hotels/map.php">hotel map</a> pins. Saving re-geocodes the address for the map.
         </p>
 
         <?php if ($venueWarning !== null): ?>
@@ -322,7 +318,17 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
                         <td><?= ($venue->latitude !== null && $venue->longitude !== null) ? 'yes' : 'no' ?></td>
                         <td><?= $venue->isActive ? 'yes' : 'no' ?></td>
                         <td>
-                            <a href="/settings/site.php?venue_id=<?= (int) $venue->id ?>">Edit</a>
+                            <button type="button" class="linkish" data-open-modal="venue-modal"
+                                data-title="Edit office / venue"
+                                data-id="<?= (int) $venue->id ?>"
+                                data-name="<?= htmlspecialchars($venue->name, ENT_QUOTES) ?>"
+                                data-address="<?= htmlspecialchars($venue->addressLine1 ?? '', ENT_QUOTES) ?>"
+                                data-city="<?= htmlspecialchars($venue->city ?? '', ENT_QUOTES) ?>"
+                                data-state="<?= htmlspecialchars($venue->stateRegion ?? '', ENT_QUOTES) ?>"
+                                data-postal="<?= htmlspecialchars($venue->postalCode ?? '', ENT_QUOTES) ?>"
+                                data-country="<?= htmlspecialchars($venue->country, ENT_QUOTES) ?>"
+                                data-notes="<?= htmlspecialchars($venue->notes ?? '', ENT_QUOTES) ?>"
+                                data-active="<?= $venue->isActive ? '1' : '0' ?>">Edit</button>
                             <?php if ($venue->isActive && $venue->id !== null): ?>
                                 <form method="post" style="display:inline">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
@@ -336,53 +342,6 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
                 <?php endforeach; ?>
                 </tbody>
             </table>
-        <?php endif; ?>
-
-        <?php if ($editingVenue !== null): ?>
-        <form method="post" class="stack" style="margin-top:1.25rem">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-            <input type="hidden" name="action" value="update_venue">
-            <h4>Edit <?= htmlspecialchars($editingVenue->name, ENT_QUOTES) ?></h4>
-            <label>Name
-                <input type="text" name="name" required maxlength="150"
-                    value="<?= htmlspecialchars($editingVenue->name, ENT_QUOTES) ?>">
-            </label>
-            <label>Street address
-                <input type="text" name="address_line1" maxlength="255"
-                    value="<?= htmlspecialchars($editingVenue->addressLine1 ?? '', ENT_QUOTES) ?>">
-            </label>
-            <div class="checkbox-grid">
-                <label>City
-                    <input type="text" name="city" maxlength="100"
-                        value="<?= htmlspecialchars($editingVenue->city ?? '', ENT_QUOTES) ?>">
-                </label>
-                <label>State / region
-                    <input type="text" name="state_region" maxlength="100"
-                        value="<?= htmlspecialchars($editingVenue->stateRegion ?? '', ENT_QUOTES) ?>">
-                </label>
-                <label>Postal code
-                    <input type="text" name="postal_code" maxlength="20"
-                        value="<?= htmlspecialchars($editingVenue->postalCode ?? '', ENT_QUOTES) ?>">
-                </label>
-                <label>Country
-                    <input type="text" name="country" maxlength="100"
-                        value="<?= htmlspecialchars($editingVenue->country, ENT_QUOTES) ?>">
-                </label>
-            </div>
-            <label>Notes
-                <input type="text" name="notes" maxlength="255"
-                    value="<?= htmlspecialchars($editingVenue->notes ?? '', ENT_QUOTES) ?>">
-            </label>
-            <label>
-                <input type="checkbox" name="is_active" value="1" <?= $editingVenue->isActive ? 'checked' : '' ?>>
-                Active (show in suggestions and on map)
-            </label>
-            <p class="hint">Saving re-geocodes when the address changes.</p>
-            <div class="modal-actions">
-                <button type="submit" class="primary">Save venue</button>
-                <a href="/settings/site.php#offices-venues">Cancel</a>
-            </div>
-        </form>
         <?php endif; ?>
     </div>
 
@@ -464,43 +423,59 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
     </div>
 </div>
 
-<div id="venue-add-modal" class="modal-backdrop" hidden>
-    <div class="modal-panel" role="dialog" aria-labelledby="venue-add-title">
-        <h2 id="venue-add-title">Add office / venue</h2>
-        <form method="post" class="stack">
+<div id="venue-modal" class="modal-backdrop" hidden
+    <?php if ($editingVenue !== null): ?>data-autoload="1"<?php endif; ?>>
+    <div class="modal-panel" role="dialog" aria-labelledby="venue-modal-title">
+        <h2 id="venue-modal-title">Add office / venue</h2>
+        <form method="post" class="stack" id="venue-modal-form">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-            <input type="hidden" name="action" value="add_venue">
+            <input type="hidden" name="action" id="venue-modal-action" value="<?= $editingVenue !== null ? 'update_venue' : 'add_venue' ?>">
+            <input type="hidden" name="id" id="venue-modal-id" value="<?= (int) ($editingVenue->id ?? 0) ?>">
             <label>Name
-                <input type="text" name="name" required maxlength="150" placeholder="e.g. NewsNation bureau — Chicago">
+                <input type="text" name="name" id="venue-modal-name" required maxlength="150"
+                    placeholder="e.g. NewsNation bureau — Chicago"
+                    value="<?= htmlspecialchars($editingVenue->name ?? '', ENT_QUOTES) ?>">
             </label>
             <label>Street address
-                <input type="text" name="address_line1" maxlength="255">
+                <input type="text" name="address_line1" id="venue-modal-address" maxlength="255"
+                    value="<?= htmlspecialchars($editingVenue->addressLine1 ?? '', ENT_QUOTES) ?>">
             </label>
             <div class="checkbox-grid">
                 <label>City
-                    <input type="text" name="city" maxlength="100">
+                    <input type="text" name="city" id="venue-modal-city" maxlength="100"
+                        value="<?= htmlspecialchars($editingVenue->city ?? '', ENT_QUOTES) ?>">
                 </label>
                 <label>State / region
-                    <input type="text" name="state_region" maxlength="100">
+                    <input type="text" name="state_region" id="venue-modal-state" maxlength="100"
+                        value="<?= htmlspecialchars($editingVenue->stateRegion ?? '', ENT_QUOTES) ?>">
                 </label>
                 <label>Postal code
-                    <input type="text" name="postal_code" maxlength="20">
+                    <input type="text" name="postal_code" id="venue-modal-postal" maxlength="20"
+                        value="<?= htmlspecialchars($editingVenue->postalCode ?? '', ENT_QUOTES) ?>">
                 </label>
                 <label>Country
-                    <input type="text" name="country" maxlength="100" value="USA">
+                    <input type="text" name="country" id="venue-modal-country" maxlength="100"
+                        value="<?= htmlspecialchars($editingVenue->country ?? 'USA', ENT_QUOTES) ?>">
                 </label>
             </div>
             <label>Notes
-                <input type="text" name="notes" maxlength="255" placeholder="Optional">
+                <input type="text" name="notes" id="venue-modal-notes" maxlength="255" placeholder="Optional"
+                    value="<?= htmlspecialchars($editingVenue->notes ?? '', ENT_QUOTES) ?>">
             </label>
+            <label id="venue-modal-active-wrap"<?= $editingVenue === null ? ' hidden' : '' ?>>
+                <input type="checkbox" name="is_active" id="venue-modal-active" value="1"
+                    <?= ($editingVenue === null || $editingVenue->isActive) ? 'checked' : '' ?>>
+                Active (show in suggestions and on map)
+            </label>
+            <p class="hint">Saving looks up coordinates for the map (needs at least a city).</p>
             <div class="modal-actions">
-                <button type="submit" class="primary">Add venue</button>
+                <button type="submit" class="primary" id="venue-modal-submit">Save venue</button>
                 <button type="button" data-close-modal>Cancel</button>
             </div>
         </form>
     </div>
 </div>
 
-<script src="/assets/site-settings.js" defer></script>
+<script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/site-settings.js'), ENT_QUOTES) ?>" defer></script>
 </body>
 </html>

@@ -20,11 +20,64 @@ $properties = $propertyRepo->findForUser($user->id);
 $venues = $venueRepo->findActive();
 
 /** Cap live Nominatim lookups per page load (cache hits are free). */
-$maxLiveLookups = 8;
+$maxLiveLookups = 12;
 $liveLookups = 0;
 
 $mapped = [];
 $unmapped = [];
+$mappedVenues = [];
+$unmappedVenues = [];
+
+// Resolve venues first so office pins are not starved by hotel lookups.
+foreach ($venues as $venue) {
+    $lat = $venue->latitude;
+    $lon = $venue->longitude;
+    $approx = false;
+
+    if (($lat === null || $lon === null) && $venue->id !== null) {
+        $coords = null;
+        $hasAddress = $venue->addressLine1 !== null && trim($venue->addressLine1) !== '';
+        $hasCity = $venue->city !== null && trim($venue->city) !== '';
+        if ($liveLookups < $maxLiveLookups && ($hasAddress || $hasCity)) {
+            $coords = $geocoder->geocode(
+                $venue->addressLine1,
+                $venue->city,
+                $venue->stateRegion,
+                $venue->postalCode,
+                $venue->country,
+                true
+            );
+            $liveLookups++;
+        }
+        if ($coords === null && $hasCity && $liveLookups < $maxLiveLookups) {
+            $coords = $geocoder->geocodeCity($venue->city, $venue->stateRegion, $venue->country, true);
+            $liveLookups++;
+            $approx = true;
+        }
+        if ($coords !== null) {
+            $lat = $coords['lat'];
+            $lon = $coords['lon'];
+            $venueRepo->updateCoordinates((int) $venue->id, $lat, $lon, $user->id);
+        }
+    }
+
+    $row = [
+        'id' => (int) $venue->id,
+        'name' => $venue->name,
+        'place' => $venue->placeLabel(),
+        'notes' => $venue->notes,
+        'lat' => $lat,
+        'lon' => $lon,
+        'approx' => $approx && $venue->latitude === null,
+        'url' => $canManageVenues ? '/settings/site.php?edit_venue=' . (int) $venue->id : null,
+    ];
+
+    if ($lat !== null && $lon !== null) {
+        $mappedVenues[] = $row;
+    } else {
+        $unmappedVenues[] = $row;
+    }
+}
 
 foreach ($properties as $property) {
     $lat = $property->latitude;
@@ -97,61 +150,6 @@ foreach ($properties as $property) {
     }
 }
 
-$mappedVenues = [];
-$unmappedVenues = [];
-
-foreach ($venues as $venue) {
-    $lat = $venue->latitude;
-    $lon = $venue->longitude;
-    $approx = false;
-
-    if (($lat === null || $lon === null) && $venue->id !== null) {
-        $coords = null;
-        if ($liveLookups < $maxLiveLookups
-            && $venue->addressLine1 !== null
-            && trim($venue->addressLine1) !== ''
-        ) {
-            $coords = $geocoder->geocode(
-                $venue->addressLine1,
-                $venue->city,
-                $venue->stateRegion,
-                $venue->postalCode,
-                $venue->country
-            );
-            $liveLookups++;
-        }
-        if ($coords === null && $venue->city !== null && trim($venue->city) !== '') {
-            $coords = $geocoder->geocodeCity($venue->city, $venue->stateRegion, $venue->country);
-            if ($liveLookups < $maxLiveLookups) {
-                $liveLookups++;
-            }
-            $approx = true;
-        }
-        if ($coords !== null) {
-            $lat = $coords['lat'];
-            $lon = $coords['lon'];
-            $venueRepo->updateCoordinates((int) $venue->id, $lat, $lon, $user->id);
-        }
-    }
-
-    $row = [
-        'id' => (int) $venue->id,
-        'name' => $venue->name,
-        'place' => $venue->placeLabel(),
-        'notes' => $venue->notes,
-        'lat' => $lat,
-        'lon' => $lon,
-        'approx' => $approx && $venue->latitude === null,
-        'url' => $canManageVenues ? '/settings/site.php?venue_id=' . (int) $venue->id : null,
-    ];
-
-    if ($lat !== null && $lon !== null) {
-        $mappedVenues[] = $row;
-    } else {
-        $unmappedVenues[] = $row;
-    }
-}
-
 $hasAnything = $properties !== [] || $venues !== [];
 ?>
 <!DOCTYPE html>
@@ -220,7 +218,7 @@ $hasAnything = $properties !== [] || $venues !== [];
                         <li>
                             Office/venue:
                             <?php if ($canManageVenues): ?>
-                            <a href="/settings/site.php?venue_id=<?= (int) $u['id'] ?>">
+                            <a href="/settings/site.php?edit_venue=<?= (int) $u['id'] ?>">
                                 <?= htmlspecialchars($u['name'], ENT_QUOTES) ?>
                             </a>
                             <?php else: ?>
@@ -242,6 +240,6 @@ window.NEXWAYPOINT_HOTEL_MAP = <?= json_encode([
     'venues' => $mappedVenues,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 </script>
-<script src="/assets/hotel-map.js" defer></script>
+<script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/hotel-map.js'), ENT_QUOTES) ?>" defer></script>
 </body>
 </html>
