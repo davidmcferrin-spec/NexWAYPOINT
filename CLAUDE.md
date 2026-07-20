@@ -69,10 +69,12 @@ All PHP files pass `php -l`.
 - **Rate limiting for FlightAware is a file-backed token bucket**, not
   in-memory, because each cron invocation is a fresh PHP process with no
   persistent state between runs.
-- **VPS setup is interactive and DB-driver-aware.** `setup.sh` supports both
-  apt-capable Debian/Ubuntu hosts and managed DreamHost environments without
-  root. It never overwrites an existing `.env`, skips an existing schema, and
-  only installs cron jobs for services whose credentials are configured.
+- **VPS setup is interactive, user-space, and DB-driver-aware.** Production
+  DreamHost has no sudo/apt. `setup.sh` defaults to skipping package installs
+  and Composer; it verifies the PHP DreamHost already provides, never
+  overwrites an existing `.env`, skips an existing schema, and only installs
+  cron jobs for services whose credentials are configured. Optional
+  `--install-packages` / `--with-dev` exist for non-DreamHost hosts.
 - **Production host layout is split clone vs web root.** Code lives at
   `/home/dh_w9tij7/NexWAYPOINT`; the public site is
   `https://nexwaypoint.area51consulting.com` with DreamHost document root

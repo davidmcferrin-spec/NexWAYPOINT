@@ -75,8 +75,9 @@ flagged here instead of silently guessed.
 - MySQL 8.0+/MariaDB 10.5+ for production, or SQLite for local/offline dev.
 - A DreamHost (or any IMAP) mailbox to receive forwarded confirmations.
 - A FlightAware AeroAPI key (personal tier is fine to start).
-- Composer is **only** needed for dev tooling (PHPUnit) -- the app itself
-  runs with zero Composer dependencies.
+- Composer is **only** needed for optional PHPUnit runs -- the app itself
+  runs with zero Composer dependencies. Production DreamHost has no sudo
+  and does not need apt or Composer.
 
 ## Setup
 
@@ -103,9 +104,13 @@ bash setup.sh
 
 The installer defaults the web-root prompt to
 `/home/dh_w9tij7/nexwaypoint.area51consulting.com` and links it to
-`public/`. It can install PHP/extensions when `apt-get` and root/`sudo`
-are available; on managed DreamHost without package privileges, it
-verifies the PHP environment DreamHost already provides. It then:
+`public/`.
+
+**No sudo, apt, or Composer is required for production.** DreamHost does
+not give this account package privileges. Use the DreamHost panel for
+PHP 8.1+ (with `pdo_mysql`, `imap`, `curl`, `mbstring`) and MySQL.
+Composer is only for optional local PHPUnit runs (`bash setup.sh --with-dev`
+on a machine that already has Composer). `setup.sh` then:
 
 - creates `.env` without overwriting an existing one;
 - generates the session secret and fills absolute storage paths under
@@ -117,7 +122,7 @@ verifies the PHP environment DreamHost already provides. It then:
 - optionally installs the configured mail/flight cron jobs.
 
 It is safe to rerun. Use `bash setup.sh --help` for options
-(`--skip-web-root`, `--skip-user`, `--skip-packages`). To add another
+(`--skip-web-root`, `--skip-user`, `--with-dev`). To add another
 local user later:
 
 ```bash

@@ -4,9 +4,10 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
-SKIP_PACKAGES=false
+SKIP_PACKAGES=true
 SKIP_USER=false
 SKIP_WEB_ROOT=false
+WITH_DEV=false
 
 # Production layout on DreamHost:
 #   code: /home/dh_w9tij7/NexWAYPOINT
@@ -19,15 +20,21 @@ WEB_ROOT=""
 
 usage() {
     cat <<'EOF'
-Install NexWAYPOINT on a Debian/Ubuntu or DreamHost VPS.
+Install NexWAYPOINT on DreamHost (no sudo) or a Debian/Ubuntu host.
 
 Usage: ./setup.sh [options]
 
 Options:
-  --skip-packages  Do not attempt to install system packages
-  --skip-user      Do not offer to create a local login
-  --skip-web-root  Do not offer to wire the DreamHost document root
-  --help           Show this help
+  --skip-user          Do not offer to create a local login
+  --skip-web-root      Do not offer to wire the DreamHost document root
+  --install-packages   Attempt apt package installs (requires root/sudo; not
+                       available on managed DreamHost)
+  --with-dev           Offer to run Composer for PHPUnit only (optional)
+  --help               Show this help
+
+DreamHost note: this app needs no sudo, no apt, and no Composer at runtime.
+Use the DreamHost panel for PHP version/extensions and MySQL. setup.sh only
+configures .env, storage, schema, the first user, the public/ symlink, and cron.
 
 The script is safe to rerun: it preserves an existing .env file, skips an
 installed database schema, and does not create users without confirmation.
@@ -133,13 +140,12 @@ env_value() {
 
 install_packages() {
     if [[ "${SKIP_PACKAGES}" == true ]]; then
+        echo "Skipping system package installs (DreamHost has no sudo/apt for this account)."
+        echo "Enable PHP 8.1+ with pdo_mysql, imap, curl, and mbstring in the DreamHost panel if needed."
         return
     fi
     if ! command -v apt-get >/dev/null 2>&1; then
-        echo "No apt-get found; assuming this managed VPS provides PHP." >&2
-        return
-    fi
-    if ! ask_yes_no "Install/update PHP, database clients, and Composer?" "y"; then
+        echo "No apt-get found; using the PHP already on PATH." >&2
         return
     fi
 
@@ -152,6 +158,10 @@ install_packages() {
         elevate=(sudo)
     fi
 
+    if ! ask_yes_no "Install/update PHP, database clients, and Composer via apt?" "n"; then
+        return
+    fi
+
     "${elevate[@]}" apt-get update
     "${elevate[@]}" apt-get install -y \
         php-cli php-mysql php-sqlite3 php-imap php-curl php-mbstring php-xml \
@@ -160,11 +170,13 @@ install_packages() {
 
 verify_php() {
     if ! command -v php >/dev/null 2>&1; then
-        echo "PHP was not found. Install PHP 8.1+ or rerun without --skip-packages." >&2
+        echo "PHP was not found on PATH." >&2
+        echo "On DreamHost: Domains → Manage Domains / PHP settings, select PHP 8.1+, then open a new SSH session." >&2
         exit 1
     fi
     if ! php -r 'exit(version_compare(PHP_VERSION, "8.1.0", ">=") ? 0 : 1);'; then
         echo "NexWAYPOINT requires PHP 8.1 or newer; found $(php -r 'echo PHP_VERSION;')." >&2
+        echo "Raise the domain PHP version in the DreamHost panel (no sudo required)." >&2
         exit 1
     fi
 
@@ -177,8 +189,11 @@ verify_php() {
     done
     if (( ${#missing[@]} > 0 )); then
         echo "Missing required PHP extensions: ${missing[*]}" >&2
+        echo "On DreamHost these come with the selected PHP build; switch PHP version in the panel or open a support ticket." >&2
         exit 1
     fi
+
+    echo "Using $(php -r 'echo PHP_VERSION;') ($(command -v php))"
 }
 
 configure_new_env() {
@@ -404,9 +419,14 @@ configure_web_root() {
 
 while (( $# > 0 )); do
     case "$1" in
-        --skip-packages) SKIP_PACKAGES=true ;;
         --skip-user) SKIP_USER=true ;;
         --skip-web-root) SKIP_WEB_ROOT=true ;;
+        --install-packages) SKIP_PACKAGES=false ;;
+        --with-dev) WITH_DEV=true ;;
+        --skip-packages)
+            # Kept for compatibility; package installs are already off by default.
+            SKIP_PACKAGES=true
+            ;;
         --help)
             usage
             exit 0
@@ -454,8 +474,12 @@ fi
 configure_web_root
 install_cron_jobs
 
-if command -v composer >/dev/null 2>&1 && ask_yes_no "Install development/test dependencies?" "n"; then
-    composer install --working-dir="${ROOT_DIR}" --no-interaction --prefer-dist
+if [[ "${WITH_DEV}" == true ]]; then
+    if ! command -v composer >/dev/null 2>&1; then
+        echo "Composer is not on PATH. Dev tests are optional; the app itself does not need Composer." >&2
+    elif ask_yes_no "Install development/test dependencies (PHPUnit)?" "n"; then
+        composer install --working-dir="${ROOT_DIR}" --no-interaction --prefer-dist
+    fi
 fi
 
 if [[ -z "${WEB_ROOT}" ]]; then
