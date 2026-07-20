@@ -14,7 +14,7 @@ final class Geocoder
 {
     private const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
     private const USER_AGENT = 'NexWAYPOINT/1.0 (self-hosted hotel map; https://nexwaypoint.area51consulting.com)';
-    private const CACHE_VERSION = 'v2';
+    private const CACHE_VERSION = 'v3';
     private const MISS_TTL_SECONDS = 3600;
 
     private string $cacheDir;
@@ -46,12 +46,14 @@ final class Geocoder
         $stateRegion = $this->trimOrNull($stateRegion);
         $postalCode = $this->trimOrNull($postalCode);
         $country = $this->normalizeCountry($country);
+        $normalizedStreet = $this->normalizeStreetAddress($addressLine1);
 
-        if ($city === null && $addressLine1 === null) {
+        if ($city === null && $normalizedStreet === null && $addressLine1 === null) {
             return null;
         }
 
-        $cacheKey = $this->cacheKey($addressLine1, $city, $stateRegion, $postalCode, $country);
+        $streetForLookup = $normalizedStreet ?? $addressLine1;
+        $cacheKey = $this->cacheKey($streetForLookup, $city, $stateRegion, $postalCode, $country);
         if (!$forceRefresh) {
             $cached = $this->readCache($cacheKey);
             if ($cached !== null) {
@@ -59,11 +61,35 @@ final class Geocoder
             }
         }
 
-        // Structured search is more reliable than a free-form q= string.
-        $result = $this->fetchNominatimStructured($addressLine1, $city, $stateRegion, $postalCode, $country);
-        if ($result === null) {
-            $parts = array_values(array_filter([$addressLine1, $city, $stateRegion, $postalCode, $country]));
+        $candidates = [];
+        if ($streetForLookup !== null) {
+            $candidates[] = $streetForLookup;
+        }
+        if ($addressLine1 !== null && strcasecmp($addressLine1, (string) $streetForLookup) !== 0) {
+            $candidates[] = $addressLine1;
+        }
+
+        $result = null;
+        foreach ($candidates as $street) {
+            $result = $this->fetchNominatimStructured($street, $city, $stateRegion, $postalCode, $country);
+            if ($result !== null) {
+                break;
+            }
+            $parts = array_values(array_filter([$street, $city, $stateRegion, $postalCode, $country]));
             $result = $this->fetchNominatimFreeform(implode(', ', $parts));
+            if ($result !== null) {
+                break;
+            }
+        }
+
+        // City-only centroid is a last resort and often wrong when a street was given
+        // (e.g. Washington, DC centroid sits on the White House). Skip it if we had a street.
+        if ($result === null && $streetForLookup === null && $city !== null) {
+            $result = $this->fetchNominatimStructured(null, $city, $stateRegion, $postalCode, $country);
+            if ($result === null) {
+                $parts = array_values(array_filter([$city, $stateRegion, $country]));
+                $result = $this->fetchNominatimFreeform(implode(', ', $parts));
+            }
         }
 
         $this->writeCache($cacheKey, $result);
@@ -93,6 +119,37 @@ final class Geocoder
     }
 
     /**
+     * Fix common US street typos/abbreviations that break Nominatim
+     * (notably "Capital" vs "Capitol" in DC).
+     */
+    public function normalizeStreetAddress(?string $address): ?string
+    {
+        $address = $this->trimOrNull($address);
+        if ($address === null) {
+            return null;
+        }
+
+        // Extremely common DC / government-area typo.
+        $address = preg_replace('/\bCapital\b/i', 'Capitol', $address) ?? $address;
+
+        // Directional abbreviations: "N." / "N " → North (not mid-word).
+        $address = preg_replace('/\bN\.?\s+(?=[A-Za-z])/i', 'North ', $address) ?? $address;
+        $address = preg_replace('/\bS\.?\s+(?=[A-Za-z])/i', 'South ', $address) ?? $address;
+        $address = preg_replace('/\bE\.?\s+(?=[A-Za-z])/i', 'East ', $address) ?? $address;
+        $address = preg_replace('/\bW\.?\s+(?=[A-Za-z])/i', 'West ', $address) ?? $address;
+
+        // Street type abbreviations (avoid matching inside "Street").
+        $address = preg_replace('/\bSt\.?(?=\s|,|$)/i', 'Street', $address) ?? $address;
+        $address = preg_replace('/\bAve\.?(?=\s|,|$)/i', 'Avenue', $address) ?? $address;
+        $address = preg_replace('/\bBlvd\.?(?=\s|,|$)/i', 'Boulevard', $address) ?? $address;
+        $address = preg_replace('/\bRd\.?(?=\s|,|$)/i', 'Road', $address) ?? $address;
+        $address = preg_replace('/\bDr\.?(?=\s|,|$)/i', 'Drive', $address) ?? $address;
+
+        $address = preg_replace('/\s+/', ' ', $address) ?? $address;
+        return trim($address);
+    }
+
+    /**
      * @return array{lat: float, lon: float}|list{}|null
      *         Hit → coords; soft miss → []; missing/expired → null
      */
@@ -113,7 +170,7 @@ final class Geocoder
         if (!empty($data['miss'])) {
             $missAt = (int) ($data['miss_at'] ?? 0);
             if ($missAt > 0 && (time() - $missAt) < self::MISS_TTL_SECONDS) {
-                return []; // soft miss
+                return [];
             }
             @unlink($path);
             return null;
@@ -183,6 +240,9 @@ final class Geocoder
             $params['postalcode'] = $postalCode;
         }
         $params['country'] = $country;
+        if ($country === 'United States') {
+            $params['countrycodes'] = 'us';
+        }
 
         return $this->requestNominatim($params, 'structured:' . ($addressLine1 ?? '') . ' / ' . ($city ?? ''));
     }
@@ -195,11 +255,15 @@ final class Geocoder
         if (trim($query) === '') {
             return null;
         }
-        return $this->requestNominatim([
+        $params = [
             'q' => $query,
             'format' => 'json',
             'limit' => 1,
-        ], $query);
+        ];
+        if (stripos($query, 'United States') !== false || preg_match('/\b(USA|US)\b/i', $query)) {
+            $params['countrycodes'] = 'us';
+        }
+        return $this->requestNominatim($params, $query);
     }
 
     /**
@@ -208,7 +272,6 @@ final class Geocoder
      */
     private function requestNominatim(array $params, string $logLabel): ?array
     {
-        // Nominatim asks for ≤1 request/second.
         $elapsed = microtime(true) - $this->lastRequestAt;
         if ($this->lastRequestAt > 0 && $elapsed < 1.05) {
             usleep((int) ((1.05 - $elapsed) * 1_000_000));

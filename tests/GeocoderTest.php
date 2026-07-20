@@ -14,8 +14,8 @@ final class GeocoderTest extends NexWaypointTestCase
         mkdir($dir);
         $geocoder = new Geocoder($this->logger, $dir);
 
-        // Mirror Geocoder cache key: v2|address|city|state|postal|normalizedCountry
-        $cacheKey = strtolower('v2||Chicago|IL||United States');
+        // Mirror Geocoder cache key: v3|address|city|state|postal|normalizedCountry
+        $cacheKey = strtolower('v3||Chicago|IL||United States');
         $path = $dir . '/' . hash('sha256', $cacheKey) . '.json';
         file_put_contents($path, json_encode(['lat' => 41.8781, 'lon' => -87.6298]));
 
@@ -35,6 +35,15 @@ final class GeocoderTest extends NexWaypointTestCase
         $geocoder = new Geocoder($this->logger, sys_get_temp_dir());
         self::assertSame('United States', $geocoder->normalizeCountry('USA'));
         self::assertSame('United States', $geocoder->normalizeCountry('us'));
+    }
+
+    public function testNormalizesCapitalStreetTypo(): void
+    {
+        $geocoder = new Geocoder($this->logger, sys_get_temp_dir());
+        self::assertSame(
+            '400 North Capitol Street NE',
+            $geocoder->normalizeStreetAddress('400 N. Capital St NE')
+        );
     }
 
     public function testRequiresCity(): void

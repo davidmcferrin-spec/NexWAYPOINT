@@ -54,11 +54,18 @@ $geocodeVenue = static function (
     ?string $postalCode,
     ?string $country,
 ) use ($geocoder): array {
-    $coords = $geocoder->geocode($addressLine1, $city, $stateRegion, $postalCode, $country, true);
-    if ($coords === null && $city !== null) {
+    $normalizedStreet = $geocoder->normalizeStreetAddress($addressLine1);
+    $coords = $geocoder->geocode($normalizedStreet ?? $addressLine1, $city, $stateRegion, $postalCode, $country, true);
+    // Never fall back to city centroid when a street was provided — that pinned
+    // Washington, DC at the White House for "Capital" vs "Capitol" typos.
+    if ($coords === null && ($normalizedStreet ?? $addressLine1) === null && $city !== null) {
         $coords = $geocoder->geocodeCity($city, $stateRegion, $country, true);
     }
-    return [$coords['lat'] ?? null, $coords['lon'] ?? null];
+    return [
+        $normalizedStreet ?? $addressLine1,
+        $coords['lat'] ?? null,
+        $coords['lon'] ?? null,
+    ];
 };
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -88,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $state = $nullable($_POST['state_region'] ?? null);
                 $postal = $nullable($_POST['postal_code'] ?? null);
                 $country = $nullable($_POST['country'] ?? null) ?? 'USA';
-                [$lat, $lon] = $geocodeVenue($a1, $city, $state, $postal, $country);
+                [$a1, $lat, $lon] = $geocodeVenue($a1, $city, $state, $postal, $country);
 
                 if ($action === 'add_venue') {
                     $created = $venueRepo->create(

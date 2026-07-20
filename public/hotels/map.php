@@ -34,13 +34,24 @@ foreach ($venues as $venue) {
     $lon = $venue->longitude;
     $approx = false;
 
-    if (($lat === null || $lon === null) && $venue->id !== null) {
+    if ($venue->id === null) {
+        continue;
+    }
+
+    $street = $geocoder->normalizeStreetAddress($venue->addressLine1);
+    $hasStreet = $street !== null;
+    $hasCity = $venue->city !== null && trim($venue->city) !== '';
+    $streetCorrected = $hasStreet && strcasecmp($street, (string) ($venue->addressLine1 ?? '')) !== 0;
+    // Re-resolve when missing, or when the stored street was a known bad spelling
+    // (old city-centroid pins, e.g. White House for "Capital" vs "Capitol").
+    $needsGeocode = $lat === null || $lon === null || $streetCorrected
+        || ($hasStreet && preg_match('/\bCapital\b/i', (string) $venue->addressLine1) === 1);
+
+    if ($needsGeocode && $liveLookups < $maxLiveLookups && ($hasStreet || $hasCity)) {
         $coords = null;
-        $hasAddress = $venue->addressLine1 !== null && trim($venue->addressLine1) !== '';
-        $hasCity = $venue->city !== null && trim($venue->city) !== '';
-        if ($liveLookups < $maxLiveLookups && ($hasAddress || $hasCity)) {
+        if ($hasStreet || $hasCity) {
             $coords = $geocoder->geocode(
-                $venue->addressLine1,
+                $street ?? $venue->addressLine1,
                 $venue->city,
                 $venue->stateRegion,
                 $venue->postalCode,
@@ -49,7 +60,7 @@ foreach ($venues as $venue) {
             );
             $liveLookups++;
         }
-        if ($coords === null && $hasCity && $liveLookups < $maxLiveLookups) {
+        if ($coords === null && !$hasStreet && $hasCity && $liveLookups < $maxLiveLookups) {
             $coords = $geocoder->geocodeCity($venue->city, $venue->stateRegion, $venue->country, true);
             $liveLookups++;
             $approx = true;
@@ -57,7 +68,24 @@ foreach ($venues as $venue) {
         if ($coords !== null) {
             $lat = $coords['lat'];
             $lon = $coords['lon'];
-            $venueRepo->updateCoordinates((int) $venue->id, $lat, $lon, $user->id);
+            if ($streetCorrected || preg_match('/\bCapital\b/i', (string) $venue->addressLine1) === 1) {
+                $venueRepo->update(
+                    (int) $venue->id,
+                    $venue->name,
+                    $street ?? $venue->addressLine1,
+                    $venue->city,
+                    $venue->stateRegion,
+                    $venue->postalCode,
+                    $venue->country,
+                    $venue->notes,
+                    $venue->isActive,
+                    $lat,
+                    $lon,
+                    $user->id,
+                );
+            } else {
+                $venueRepo->updateCoordinates((int) $venue->id, $lat, $lon, $user->id);
+            }
         }
     }
 
@@ -71,6 +99,17 @@ foreach ($venues as $venue) {
         'approx' => $approx && $venue->latitude === null,
         'url' => $canManageVenues ? '/settings/site.php?edit_venue=' . (int) $venue->id : null,
     ];
+
+    // Refresh place label if we corrected the street in-memory for display.
+    if ($streetCorrected && $street !== null) {
+        $row['place'] = trim(implode(', ', array_filter([
+            $street,
+            $venue->city,
+            $venue->stateRegion,
+            $venue->postalCode,
+            $venue->country !== 'USA' ? $venue->country : null,
+        ], static fn ($v) => $v !== null && trim((string) $v) !== '')));
+    }
 
     if ($lat !== null && $lon !== null) {
         $mappedVenues[] = $row;
