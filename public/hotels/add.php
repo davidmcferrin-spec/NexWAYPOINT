@@ -154,6 +154,7 @@ $propertiesJson = array_map(static function ($p) {
         'label' => $p->label(),
         'overall_rating' => $p->overallRating,
         'phone' => $p->phone,
+        'website' => $p->website,
     ];
 }, $existingProperties);
 

@@ -167,6 +167,7 @@ final class MailImportTest extends NexWaypointTestCase
             postalCode: null,
             country: null,
             phone: null,
+            website: null,
             latitude: null,
             longitude: null,
             hasDesk: false,

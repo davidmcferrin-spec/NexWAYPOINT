@@ -465,6 +465,7 @@ final class HotelPropertyRepository
             postalCode: null,
             country: null,
             phone: $phone,
+            website: null,
             latitude: null,
             longitude: null,
             hasDesk: false,
@@ -533,8 +534,8 @@ final class HotelPropertyRepository
     }
 
     /**
-     * Fill missing address / coordinates from a Nominatim search hit.
-     * Never overwrites a non-empty address_line1; may fill city/state/postal/country/coords.
+     * Fill missing address / coordinates / phone / website from a Nominatim search hit.
+     * Never overwrites a non-empty address_line1, phone, or website; may fill city/state/postal/country/coords.
      *
      * @param array{
      *   display_name?: string,
@@ -545,7 +546,9 @@ final class HotelPropertyRepository
      *   city?: ?string,
      *   state_region?: ?string,
      *   postal_code?: ?string,
-     *   country?: ?string
+     *   country?: ?string,
+     *   phone?: ?string,
+     *   website?: ?string
      * } $hit
      */
     public function enrichFromLookup(HotelProperty $property, array $hit, ?int $actorUserId = null): HotelProperty
@@ -556,13 +559,24 @@ final class HotelPropertyRepository
 
         $needsAddress = $property->addressLine1 === null || trim($property->addressLine1) === '';
         $needsCoords = $property->latitude === null || $property->longitude === null;
-        if (!$needsAddress && !$needsCoords) {
+        $needsPhone = $property->phone === null || trim($property->phone) === '';
+        $needsWebsite = $property->website === null || trim($property->website) === '';
+        if (!$needsAddress && !$needsCoords && !$needsPhone && !$needsWebsite) {
             return $property;
         }
 
         $addressLine1 = $property->addressLine1;
         if ($needsAddress && !empty($hit['address_line1'])) {
             $addressLine1 = (string) $hit['address_line1'];
+        }
+
+        $phone = $property->phone;
+        if ($needsPhone && !empty($hit['phone'])) {
+            $phone = (string) $hit['phone'];
+        }
+        $website = $property->website;
+        if ($needsWebsite && !empty($hit['website'])) {
+            $website = (string) $hit['website'];
         }
 
         $updated = $this->update(new HotelProperty(
@@ -580,7 +594,8 @@ final class HotelPropertyRepository
                 ? (string) $hit['postal_code'] : $property->postalCode,
             country: ($property->country === null || trim((string) $property->country) === '') && !empty($hit['country'])
                 ? (string) $hit['country'] : $property->country,
-            phone: $property->phone,
+            phone: $phone,
+            website: $website,
             latitude: $needsCoords ? (float) $hit['lat'] : $property->latitude,
             longitude: $needsCoords ? (float) $hit['lon'] : $property->longitude,
             hasDesk: $property->hasDesk,
@@ -609,6 +624,8 @@ final class HotelPropertyRepository
             'id' => $property->id,
             'filled_address' => $needsAddress,
             'filled_coords' => $needsCoords,
+            'filled_phone' => $needsPhone && $phone !== $property->phone,
+            'filled_website' => $needsWebsite && $website !== $property->website,
         ]);
 
         return $updated;

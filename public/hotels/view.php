@@ -178,6 +178,16 @@ $myBlacklistReason = $blacklistRepo->reason($user->id, (int) $property->id);
                     <tr><th><?= htmlspecialchars((string) $label, ENT_QUOTES) ?></th><td><?= htmlspecialchars((string) $value, ENT_QUOTES) ?></td></tr>
                 <?php endif; ?>
             <?php endforeach; ?>
+            <?php if ($property->website !== null && trim($property->website) !== ''): ?>
+                <tr>
+                    <th>Website</th>
+                    <td>
+                        <a href="<?= htmlspecialchars($property->website, ENT_QUOTES) ?>" target="_blank" rel="noopener noreferrer">
+                            <?= htmlspecialchars($property->website, ENT_QUOTES) ?>
+                        </a>
+                    </td>
+                </tr>
+            <?php endif; ?>
             <?php if ($amenities !== []): ?>
                 <tr><th>Amenities</th><td><?= htmlspecialchars(implode(', ', $amenities), ENT_QUOTES) ?></td></tr>
             <?php endif; ?>

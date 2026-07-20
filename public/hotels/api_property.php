@@ -93,6 +93,7 @@ try {
             postalCode: $nullable($data['postal_code'] ?? null),
             country: $nullable($data['country'] ?? null) ?? 'USA',
             phone: $nullable($data['phone'] ?? null),
+            website: $nullable($data['website'] ?? null),
             latitude: $lat,
             longitude: $lon,
             hasDesk: $bool('has_desk'),
@@ -140,6 +141,7 @@ try {
             'label' => $created->label(),
             'overall_rating' => $created->overallRating,
             'phone' => $created->phone,
+            'website' => $created->website,
         ],
         'locations' => $repo->locations(),
     ]);

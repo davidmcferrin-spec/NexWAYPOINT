@@ -119,5 +119,49 @@ final class TripStatusEngineTest extends NexWaypointTestCase
 
         self::assertSame('remote', $result['status']);
         self::assertSame('Working from hotel this week', $result['detail']['note']);
+        self::assertTrue($result['detail']['override']);
+    }
+
+    public function testManualOverrideHonorsExpiryDate(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $start = new \DateTimeImmutable('2026-07-20');
+        $mid = new \DateTimeImmutable('2026-07-22');
+        $after = new \DateTimeImmutable('2026-07-24');
+
+        $tripRepo->setStatusOverride(
+            $userId,
+            'unavailable',
+            'PTO',
+            '2026-07-23',
+            $userId,
+            '2026-07-20',
+        );
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        self::assertSame('unavailable', $engine->resolveForUser($userId, $start)['status']);
+        self::assertSame('unavailable', $engine->resolveForUser($userId, $mid)['status']);
+        self::assertSame('home', $engine->resolveForUser($userId, $after)['status']);
+    }
+
+    public function testClearStatusOverrideEndsEarly(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $today = new \DateTimeImmutable('today');
+
+        $tripRepo->setStatusOverride(
+            $userId,
+            'office',
+            null,
+            $today->modify('+5 days')->format('Y-m-d'),
+            $userId,
+        );
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        self::assertSame('office', $engine->resolveForUser($userId, $today)['status']);
+
+        $tripRepo->clearStatusOverride($userId, $userId, $today);
+        self::assertSame('home', $engine->resolveForUser($userId, $today)['status']);
     }
 }

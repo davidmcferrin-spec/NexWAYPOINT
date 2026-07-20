@@ -119,7 +119,9 @@ final class Geocoder
      *   city: ?string,
      *   state_region: ?string,
      *   postal_code: ?string,
-     *   country: ?string
+     *   country: ?string,
+     *   phone: ?string,
+     *   website: ?string
      * }>
      */
     public function search(string $query, int $limit = 5): array
@@ -134,6 +136,7 @@ final class Geocoder
             'q' => $query,
             'format' => 'json',
             'addressdetails' => 1,
+            'extratags' => 1,
             'limit' => $limit,
         ];
         // Bias toward US unless another country is named in the query.
@@ -163,7 +166,9 @@ final class Geocoder
      *   city: ?string,
      *   state_region: ?string,
      *   postal_code: ?string,
-     *   country: ?string
+     *   country: ?string,
+     *   phone: ?string,
+     *   website: ?string
      * }|null
      */
     public function parseNominatimRow(array $row): ?array
@@ -204,6 +209,8 @@ final class Geocoder
             $hotelName = trim(explode(',', $display, 2)[0]);
         }
 
+        $extras = is_array($row['extratags'] ?? null) ? $row['extratags'] : [];
+
         return [
             'display_name' => $display !== '' ? $display : ($addressLine1 ?? 'Unknown place'),
             'lat' => (float) $row['lat'],
@@ -214,7 +221,54 @@ final class Geocoder
             'state_region' => $state,
             'postal_code' => $postal,
             'country' => $country,
+            'phone' => $this->extractPhone($extras),
+            'website' => $this->extractWebsite($extras),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $extras
+     */
+    public function extractPhone(array $extras): ?string
+    {
+        foreach (['phone', 'contact:phone', 'contact:mobile', 'telephone'] as $key) {
+            if (!isset($extras[$key])) {
+                continue;
+            }
+            $value = trim((string) $extras[$key]);
+            // OSM sometimes lists multiple numbers separated by ; or /
+            if (preg_match('/^([^;\/]+)/', $value, $m) === 1) {
+                $value = trim($m[1]);
+            }
+            if ($value !== '') {
+                return $value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $extras
+     */
+    public function extractWebsite(array $extras): ?string
+    {
+        foreach (['website', 'contact:website', 'url', 'contact:url'] as $key) {
+            if (!isset($extras[$key])) {
+                continue;
+            }
+            $value = trim((string) $extras[$key]);
+            if (preg_match('/^([^;,\s]+)/', $value, $m) === 1) {
+                $value = trim($m[1]);
+            }
+            if ($value === '') {
+                continue;
+            }
+            if (!preg_match('#^https?://#i', $value)) {
+                $value = 'https://' . ltrim($value, '/');
+            }
+            return $value;
+        }
+        return null;
     }
 
     /**

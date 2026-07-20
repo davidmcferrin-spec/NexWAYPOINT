@@ -14,8 +14,8 @@ use NexWaypoint\Core\Logger;
  * Precedence: an active flight/train/car segment covering "now" wins over
  * everything else; a layover between two segments of the same trip wins
  * over a manual override; a manual user_status_overrides row (home/office/
- * remote) is used when there's no active travel; "Home" is the default
- * when nothing else applies.
+ * remote/unavailable) covering "now" through expires_on is used when there's
+ * no active travel; "Home" is the default when nothing else applies.
  */
 final class TripStatusEngine
 {
@@ -96,15 +96,22 @@ final class TripStatusEngine
             }
         }
 
-        // 4. No active travel -- fall back to the manual status override.
-        $override = $this->trips->latestUserStatusOverride($userId);
-        if ($override !== null && $override['effective_date'] === $now->format('Y-m-d')) {
+        // 4. No active travel -- fall back to the manual status override
+        // (covers today when effective_date <= today <= expires_on).
+        $override = $this->trips->activeStatusOverride($userId, $now);
+        if ($override !== null) {
             $labels = ['home' => 'Home', 'office' => 'Office', 'remote' => 'Working Remote', 'unavailable' => 'Unavailable'];
             $status = (string) $override['status'];
+            $expiresOn = $override['expires_on'] ?? $override['effective_date'] ?? null;
             return [
                 'status' => $status,
                 'label' => $labels[$status] ?? ucfirst($status),
-                'detail' => ['note' => $override['note'] ?? null],
+                'detail' => [
+                    'note' => $override['note'] ?? null,
+                    'override' => true,
+                    'effective_date' => $override['effective_date'] ?? null,
+                    'expires_on' => $expiresOn,
+                ],
             ];
         }
 

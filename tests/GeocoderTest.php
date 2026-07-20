@@ -34,6 +34,34 @@ final class GeocoderTest extends NexWaypointTestCase
         self::assertSame('60613', $parsed['postal_code']);
         self::assertSame('USA', $parsed['country']);
         self::assertEqualsWithDelta(41.897, $parsed['lat'], 0.001);
+        self::assertNull($parsed['phone']);
+        self::assertNull($parsed['website']);
+    }
+
+    public function testParseNominatimRowExtractsPhoneAndWebsite(): void
+    {
+        $geocoder = new Geocoder($this->logger, sys_get_temp_dir());
+        $parsed = $geocoder->parseNominatimRow([
+            'lat' => '41.897',
+            'lon' => '-87.635',
+            'display_name' => 'Hotel Zachary, Chicago',
+            'address' => [
+                'hotel' => 'Hotel Zachary',
+                'house_number' => '3636',
+                'road' => 'North Clark Street',
+                'city' => 'Chicago',
+                'state' => 'Illinois',
+                'ISO3166-2-lvl4' => 'US-IL',
+                'country' => 'United States',
+            ],
+            'extratags' => [
+                'phone' => '+1-312-555-0100; +1-312-555-0199',
+                'contact:website' => 'www.example-hotel.com/chicago',
+            ],
+        ]);
+        self::assertNotNull($parsed);
+        self::assertSame('+1-312-555-0100', $parsed['phone']);
+        self::assertSame('https://www.example-hotel.com/chicago', $parsed['website']);
     }
 
     public function testCacheRoundTripWithoutNetwork(): void

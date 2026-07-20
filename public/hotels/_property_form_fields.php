@@ -111,6 +111,7 @@ $currentBrand = $val($property, 'brand', 'brand');
     </div>
     <div class="address-search-results" data-address-search-results hidden></div>
     <p class="hint" data-address-search-status></p>
+    <p class="hint">Picking a match fills street, city, phone, and website when OpenStreetMap has them tagged.</p>
 </div>
 
 <label>Address line 1<input type="text" name="<?= htmlspecialchars($name('address_line1'), ENT_QUOTES) ?>"
@@ -137,8 +138,12 @@ $lonValue = $val($property, 'longitude', 'longitude');
     value="<?= htmlspecialchars($latValue, ENT_QUOTES) ?>">
 <input type="hidden" name="<?= htmlspecialchars($name('longitude'), ENT_QUOTES) ?>"
     value="<?= htmlspecialchars($lonValue, ENT_QUOTES) ?>">
-<label>Phone<input type="text" name="<?= htmlspecialchars($name('phone'), ENT_QUOTES) ?>"
-    value="<?= htmlspecialchars($val($property, 'phone', 'phone'), ENT_QUOTES) ?>"></label>
+<label>Phone<input type="tel" name="<?= htmlspecialchars($name('phone'), ENT_QUOTES) ?>"
+    value="<?= htmlspecialchars($val($property, 'phone', 'phone'), ENT_QUOTES) ?>"
+    placeholder="Filled from OpenStreetMap when available"></label>
+<label>Website<input type="url" name="<?= htmlspecialchars($name('website'), ENT_QUOTES) ?>"
+    value="<?= htmlspecialchars($val($property, 'website', 'website'), ENT_QUOTES) ?>"
+    placeholder="https://…"></label>
 
 <div class="checkbox-grid">
     <?php foreach ($amenities as $field => [$camel, $label]): ?>

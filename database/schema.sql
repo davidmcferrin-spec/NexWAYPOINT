@@ -65,7 +65,7 @@ CREATE TABLE user_emails (
 -- ----------------------------------------------------------------------------
 -- user_status_overrides: manual status (home/office/remote/unavailable) used
 -- by TripStatusEngine when there is no active travel segment covering "now".
--- One row per user per effective_date; latest wins if multiple.
+-- Active when effective_date <= today <= COALESCE(expires_on, effective_date).
 -- ----------------------------------------------------------------------------
 CREATE TABLE user_status_overrides (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -73,6 +73,7 @@ CREATE TABLE user_status_overrides (
     status          ENUM('home','office','remote','unavailable') NOT NULL,
     note            VARCHAR(255) NULL,
     effective_date  DATE NOT NULL,
+    expires_on      DATE NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_status_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY uq_user_status_date (user_id, effective_date),
@@ -97,6 +98,7 @@ CREATE TABLE hotel_properties (
     postal_code             VARCHAR(20) NULL,
     country                 VARCHAR(80) NULL,
     phone                   VARCHAR(40) NULL,
+    website                 VARCHAR(500) NULL,
     latitude                DECIMAL(10,7) NULL,
     longitude               DECIMAL(10,7) NULL,
     has_desk                TINYINT(1) NOT NULL DEFAULT 0,

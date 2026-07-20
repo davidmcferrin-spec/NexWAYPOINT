@@ -25,6 +25,10 @@ $settingsSection = 'hub';
     <p>Account preferences and, for site admins, shared catalogs and the org chart.</p>
 
     <div class="settings-grid">
+        <a class="settings-card" href="/settings/profile.php">
+            <h3>My profile</h3>
+            <p>Display name and password for your account.</p>
+        </a>
         <a class="settings-card" href="/settings/emails.php">
             <h3>My emails</h3>
             <p>Forward-from addresses used to match confirmation mail to your account.</p>

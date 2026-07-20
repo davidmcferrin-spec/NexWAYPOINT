@@ -17,6 +17,7 @@ $settingsLinkClass = static function (string $section) use ($settingsSection): s
 };
 ?>
 <nav class="settings-nav" aria-label="Settings">
+    <a class="<?= $settingsLinkClass('profile') ?>" href="/settings/profile.php">My profile</a>
     <a class="<?= $settingsLinkClass('hub') ?>" href="/settings/index.php">Overview</a>
     <a class="<?= $settingsLinkClass('emails') ?>" href="/settings/emails.php">My emails</a>
     <a class="<?= $settingsLinkClass('sharing') ?>" href="/settings/visibility.php">Sharing</a>

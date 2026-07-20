@@ -35,6 +35,7 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
             'postalCode' => '60601',
             'country' => 'USA',
             'phone' => null,
+            'website' => null,
             'latitude' => null,
             'longitude' => null,
             'hasDesk' => true,

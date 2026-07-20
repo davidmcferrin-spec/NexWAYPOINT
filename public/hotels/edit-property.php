@@ -90,6 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 postalCode: $nullable($_POST['postal_code'] ?? null),
                 country: $nullable($_POST['country'] ?? null),
                 phone: $nullable($_POST['phone'] ?? null),
+                website: $nullable($_POST['website'] ?? null),
                 latitude: $lat,
                 longitude: $lon,
                 hasDesk: $checkbox('has_desk'),

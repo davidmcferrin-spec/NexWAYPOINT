@@ -62,6 +62,18 @@ try {
         fwrite(STDOUT, "Added hotel_stays.is_private\n");
     }
 
+    if ($tableExists('user_status_overrides') && !$columnExists('user_status_overrides', 'expires_on')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE user_status_overrides ADD COLUMN expires_on TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE user_status_overrides ADD COLUMN expires_on DATE NULL');
+        }
+        // Legacy rows were one calendar day; treat missing expiry as that day.
+        $pdo->exec('UPDATE user_status_overrides SET expires_on = effective_date WHERE expires_on IS NULL');
+        $changes++;
+        fwrite(STDOUT, "Added user_status_overrides.expires_on\n");
+    }
+
     if (!$tableExists('visibility_blocks')) {
         if ($driver === 'sqlite') {
             $pdo->exec(
@@ -322,6 +334,16 @@ try {
         }
         $changes++;
         fwrite(STDOUT, "Added hotel_properties.phone\n");
+    }
+
+    if ($tableExists('hotel_properties') && !$columnExists('hotel_properties', 'website')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN website TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN website VARCHAR(500) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added hotel_properties.website\n");
     }
 
     if ($tableExists('hotel_properties') && !$columnExists('hotel_properties', 'has_destination_fee')) {
@@ -903,7 +925,7 @@ try {
                 if (is_array($keepProp) && is_array($loseProp)) {
                     $fill = [];
                     foreach ([
-                        'brand', 'address_line1', 'address_line2', 'postal_code', 'country', 'phone',
+                        'brand', 'address_line1', 'address_line2', 'postal_code', 'country', 'phone', 'website',
                         'desk_notes', 'breakfast_notes', 'walk_to_office_notes', 'destination_fee_notes',
                         'unique_features', 'wifi_quality', 'noise_level', 'latitude', 'longitude',
                     ] as $col) {

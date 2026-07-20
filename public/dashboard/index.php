@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use NexWaypoint\Core\Csrf;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
@@ -24,9 +25,53 @@ $visibilityEngine = new VisibilityEngine($userRepo, new VisibilityRuleRepository
 $blockRepo = new VisibilityBlockRepository($db);
 $notifications = new NotificationRepository($db);
 
+$statusErrors = [];
+$statusMessage = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string) ($_POST['form'] ?? '') === 'status_override') {
+    if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
+        $statusErrors[] = 'Your session expired. Please resubmit.';
+    } else {
+        $action = (string) ($_POST['action'] ?? '');
+        try {
+            if ($action === 'set') {
+                $status = (string) ($_POST['status'] ?? '');
+                $expiresOn = (string) ($_POST['expires_on'] ?? '');
+                $note = trim((string) ($_POST['note'] ?? ''));
+                $tripRepo->setStatusOverride(
+                    $user->id,
+                    $status,
+                    $note !== '' ? $note : null,
+                    $expiresOn,
+                    $user->id,
+                );
+                $statusMessage = 'Status override saved until ' . $expiresOn . '.';
+            } elseif ($action === 'clear') {
+                $tripRepo->clearStatusOverride($user->id, $user->id);
+                $statusMessage = 'Manual status override cleared.';
+            } else {
+                throw new InvalidArgumentException('Unknown action.');
+            }
+        } catch (Throwable $e) {
+            $statusErrors[] = $e->getMessage();
+        }
+    }
+}
+
 $myStatus = $statusEngine->resolveForUser($user->id);
+$myOverride = $tripRepo->activeStatusOverride($user->id);
 $myUpcomingTrips = $tripRepo->findActiveOrUpcoming($user->id, 60);
 $unreadCount = $notifications->unreadCount($user->id);
+
+$todayYmd = (new DateTimeImmutable('today'))->format('Y-m-d');
+$defaultExpires = $myOverride['expires_on']
+    ?? $myOverride['effective_date']
+    ?? $todayYmd;
+$formStatus = (string) ($myOverride['status'] ?? 'home');
+$formNote = (string) ($myOverride['note'] ?? '');
+$overrideActive = $myOverride !== null;
+$travelOverridesManual = $overrideActive
+    && !in_array($myStatus['status'], ['home', 'office', 'remote', 'unavailable'], true);
 
 /**
  * Manual work-state statuses (home/office/remote/unavailable) are always
@@ -107,7 +152,77 @@ function statusBadgeClass(string $status): string
 <main class="container">
     <div class="card">
         <h3>Your status</h3>
-        <p><span class="badge <?= statusBadgeClass($myStatus['status']) ?>"><?= htmlspecialchars($myStatus['label'], ENT_QUOTES) ?></span></p>
+        <p>
+            <span class="badge <?= statusBadgeClass($myStatus['status']) ?>"><?= htmlspecialchars($myStatus['label'], ENT_QUOTES) ?></span>
+            <?php if ($overrideActive && !$travelOverridesManual): ?>
+                <span class="hint">
+                    · Manual until <?= htmlspecialchars((string) ($myOverride['expires_on'] ?? $myOverride['effective_date']), ENT_QUOTES) ?>
+                </span>
+            <?php elseif ($travelOverridesManual): ?>
+                <span class="hint">
+                    · Travel is showing now; your manual override resumes after travel
+                    (through <?= htmlspecialchars((string) ($myOverride['expires_on'] ?? $myOverride['effective_date']), ENT_QUOTES) ?>)
+                </span>
+            <?php endif; ?>
+        </p>
+        <?php if (!empty($myStatus['detail']['note'])): ?>
+            <p class="hint"><?= htmlspecialchars((string) $myStatus['detail']['note'], ENT_QUOTES) ?></p>
+        <?php endif; ?>
+
+        <?php foreach ($statusErrors as $err): ?>
+            <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
+        <?php endforeach; ?>
+        <?php if ($statusMessage !== null): ?>
+            <p class="alert alert-success"><?= htmlspecialchars($statusMessage, ENT_QUOTES) ?></p>
+        <?php endif; ?>
+
+        <form method="post" class="stack status-override-form">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="form" value="status_override">
+            <div class="status-override-row">
+                <label>Set status
+                    <select name="status" required>
+                        <?php foreach ([
+                            'home' => 'Home',
+                            'office' => 'Office',
+                            'remote' => 'Working remote',
+                            'unavailable' => 'Unavailable',
+                        ] as $value => $label): ?>
+                            <option value="<?= $value ?>" <?= $formStatus === $value ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($label, ENT_QUOTES) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Until
+                    <input type="date" name="expires_on" required
+                        min="<?= htmlspecialchars($todayYmd, ENT_QUOTES) ?>"
+                        value="<?= htmlspecialchars((string) $defaultExpires, ENT_QUOTES) ?>">
+                </label>
+            </div>
+            <label>Note (optional)
+                <input type="text" name="note" maxlength="255"
+                    value="<?= htmlspecialchars($formNote, ENT_QUOTES) ?>"
+                    placeholder="e.g. WFH while waiting on parts">
+            </label>
+            <div class="modal-actions" style="margin:0">
+                <button type="submit" class="primary" name="action" value="set">Save override</button>
+                <?php if ($overrideActive): ?>
+                    <button type="submit" class="secondary" name="action" value="clear">Clear override</button>
+                <?php endif; ?>
+            </div>
+            <p class="hint">
+                Temporary override for the team board. Active travel (in flight, layover, hotel)
+                still takes priority while you are on the road.
+            </p>
+        </form>
+
+        <?php if ($unreadCount > 0): ?>
+            <p>
+                <a href="/alerts/index.php"><?= $unreadCount ?> unread alert<?= $unreadCount === 1 ? '' : 's' ?></a>
+                — email imports and flight status changes.
+            </p>
+        <?php endif; ?>
     </div>
 
     <h1>Who's traveling this week</h1>

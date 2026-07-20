@@ -74,9 +74,22 @@
             }
             setVal(field(root, 'latitude'), hit.lat != null ? hit.lat : '');
             setVal(field(root, 'longitude'), hit.lon != null ? hit.lon : '');
+            if (hit.phone) {
+                setVal(field(root, 'phone'), hit.phone);
+            }
+            if (hit.website) {
+                setVal(field(root, 'website'), hit.website);
+            }
             input.value = hit.display_name || '';
             clearResults();
-            setStatus('Address filled from OpenStreetMap.');
+            var filled = ['address'];
+            if (hit.phone) {
+                filled.push('phone');
+            }
+            if (hit.website) {
+                filled.push('website');
+            }
+            setStatus('Filled from OpenStreetMap: ' + filled.join(', ') + '.');
         }
 
         function render(results) {

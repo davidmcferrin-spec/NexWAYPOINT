@@ -454,32 +454,178 @@ final class TripRepository
     public function setLatestUserStatus(int $userId, string $status, ?string $note, ?int $actorUserId = null): void
     {
         $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
-        if ($this->db->driver() === 'sqlite') {
-            $this->db->execute(
-                'INSERT INTO user_status_overrides (user_id, status, note, effective_date)
-                 VALUES (:user_id, :status, :note, :date)
-                 ON CONFLICT(user_id, effective_date) DO UPDATE SET status = excluded.status, note = excluded.note',
-                ['user_id' => $userId, 'status' => $status, 'note' => $note, 'date' => $today]
+        $this->setStatusOverride($userId, $status, $note, $today, $actorUserId);
+    }
+
+    /**
+     * Set a manual work-status override from today through $expiresOn (inclusive).
+     * Travel segments still take precedence over this in TripStatusEngine.
+     */
+    public function setStatusOverride(
+        int $userId,
+        string $status,
+        ?string $note,
+        string $expiresOn,
+        ?int $actorUserId = null,
+        ?string $effectiveDate = null,
+    ): void {
+        $allowed = ['home', 'office', 'remote', 'unavailable'];
+        if (!in_array($status, $allowed, true)) {
+            throw new \InvalidArgumentException('Status must be home, office, remote, or unavailable.');
+        }
+
+        $effectiveDate = $effectiveDate ?? (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $expiresOn = trim($expiresOn);
+        if ($expiresOn === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiresOn)) {
+            throw new \InvalidArgumentException('Override expiry date is required (YYYY-MM-DD).');
+        }
+        if ($expiresOn < $effectiveDate) {
+            throw new \InvalidArgumentException('Expiry date must be on or after the start date.');
+        }
+
+        $note = $note !== null ? trim($note) : null;
+        if ($note === '') {
+            $note = null;
+        }
+
+        $hasExpires = $this->db->columnExists('user_status_overrides', 'expires_on');
+
+        if ($hasExpires) {
+            if ($this->db->driver() === 'sqlite') {
+                $this->db->execute(
+                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date, expires_on)
+                     VALUES (:user_id, :status, :note, :date, :expires)
+                     ON CONFLICT(user_id, effective_date) DO UPDATE SET
+                        status = excluded.status,
+                        note = excluded.note,
+                        expires_on = excluded.expires_on',
+                    [
+                        'user_id' => $userId,
+                        'status' => $status,
+                        'note' => $note,
+                        'date' => $effectiveDate,
+                        'expires' => $expiresOn,
+                    ]
+                );
+            } else {
+                $this->db->execute(
+                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date, expires_on)
+                     VALUES (:user_id, :status, :note, :date, :expires)
+                     ON DUPLICATE KEY UPDATE
+                        status = VALUES(status),
+                        note = VALUES(note),
+                        expires_on = VALUES(expires_on)',
+                    [
+                        'user_id' => $userId,
+                        'status' => $status,
+                        'note' => $note,
+                        'date' => $effectiveDate,
+                        'expires' => $expiresOn,
+                    ]
+                );
+            }
+        } else {
+            // Pre-migrate installs: one-day override only.
+            if ($this->db->driver() === 'sqlite') {
+                $this->db->execute(
+                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date)
+                     VALUES (:user_id, :status, :note, :date)
+                     ON CONFLICT(user_id, effective_date) DO UPDATE SET status = excluded.status, note = excluded.note',
+                    ['user_id' => $userId, 'status' => $status, 'note' => $note, 'date' => $effectiveDate]
+                );
+            } else {
+                $this->db->execute(
+                    'INSERT INTO user_status_overrides (user_id, status, note, effective_date)
+                     VALUES (:user_id, :status, :note, :date)
+                     ON DUPLICATE KEY UPDATE status = VALUES(status), note = VALUES(note)',
+                    ['user_id' => $userId, 'status' => $status, 'note' => $note, 'date' => $effectiveDate]
+                );
+            }
+        }
+
+        $this->db->audit($actorUserId, 'set_status_override', 'user_status_overrides', null, [
+            'user_id' => $userId,
+            'status' => $status,
+            'expires_on' => $expiresOn,
+        ]);
+    }
+
+    /**
+     * End any overrides covering $asOf (default today) so status falls back to travel/Home.
+     */
+    public function clearStatusOverride(int $userId, ?int $actorUserId = null, ?\DateTimeImmutable $asOf = null): int
+    {
+        $asOf = $asOf ?? new \DateTimeImmutable('today');
+        $today = $asOf->format('Y-m-d');
+        $yesterday = $asOf->modify('-1 day')->format('Y-m-d');
+        $hasExpires = $this->db->columnExists('user_status_overrides', 'expires_on');
+
+        if ($hasExpires) {
+            $rows = $this->db->fetchAll(
+                'SELECT id FROM user_status_overrides
+                 WHERE user_id = :user_id
+                   AND effective_date <= :today
+                   AND COALESCE(expires_on, effective_date) >= :today2',
+                ['user_id' => $userId, 'today' => $today, 'today2' => $today]
             );
+            foreach ($rows as $row) {
+                $this->db->execute(
+                    'UPDATE user_status_overrides SET expires_on = :exp WHERE id = :id',
+                    ['exp' => $yesterday, 'id' => (int) $row['id']]
+                );
+            }
+            $count = count($rows);
         } else {
             $this->db->execute(
-                'INSERT INTO user_status_overrides (user_id, status, note, effective_date)
-                 VALUES (:user_id, :status, :note, :date)
-                 ON DUPLICATE KEY UPDATE status = VALUES(status), note = VALUES(note)',
-                ['user_id' => $userId, 'status' => $status, 'note' => $note, 'date' => $today]
+                'DELETE FROM user_status_overrides WHERE user_id = :user_id AND effective_date = :today',
+                ['user_id' => $userId, 'today' => $today]
             );
+            $count = 1; // best-effort; delete doesn't return rowCount via our wrapper consistently
         }
-        $this->db->audit($actorUserId, 'set_status_override', 'user_status_overrides', null, ['user_id' => $userId, 'status' => $status]);
+
+        $this->db->audit($actorUserId, 'clear_status_override', 'user_status_overrides', null, [
+            'user_id' => $userId,
+            'as_of' => $today,
+        ]);
+        return $count;
     }
 
     /**
      * @return array<string, mixed>|null
      */
+    public function activeStatusOverride(int $userId, ?\DateTimeImmutable $asOf = null): ?array
+    {
+        $asOf = $asOf ?? new \DateTimeImmutable('today');
+        $today = $asOf->format('Y-m-d');
+        $hasExpires = $this->db->columnExists('user_status_overrides', 'expires_on');
+
+        if ($hasExpires) {
+            return $this->db->fetchOne(
+                'SELECT * FROM user_status_overrides
+                 WHERE user_id = :user_id
+                   AND effective_date <= :today
+                   AND COALESCE(expires_on, effective_date) >= :today2
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 1',
+                ['user_id' => $userId, 'today' => $today, 'today2' => $today]
+            );
+        }
+
+        return $this->db->fetchOne(
+            'SELECT * FROM user_status_overrides
+             WHERE user_id = :user_id AND effective_date = :today
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1',
+            ['user_id' => $userId, 'today' => $today]
+        );
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     * @deprecated Use activeStatusOverride()
+     */
     public function latestUserStatusOverride(int $userId): ?array
     {
-        return $this->db->fetchOne(
-            'SELECT * FROM user_status_overrides WHERE user_id = :user_id ORDER BY effective_date DESC LIMIT 1',
-            ['user_id' => $userId]
-        );
+        return $this->activeStatusOverride($userId);
     }
 }

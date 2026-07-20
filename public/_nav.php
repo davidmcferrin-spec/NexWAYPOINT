@@ -3,13 +3,22 @@
 declare(strict_types=1);
 
 /**
- * Shared top nav. Expects $user (User) in scope. Optional $unreadCount (int).
+ * Shared top nav. Expects $user (User) in scope. Optional $unreadCount (int);
+ * if omitted and $app is available, unread travel alerts are loaded.
  */
 
+use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Users\User;
 
 /** @var User $user */
-$unreadCount = $unreadCount ?? 0;
+if (!isset($unreadCount) && isset($app) && is_array($app) && isset($app['db'])) {
+    try {
+        $unreadCount = (new NotificationRepository($app['db']))->unreadCount($user->id);
+    } catch (Throwable) {
+        $unreadCount = 0;
+    }
+}
+$unreadCount = (int) ($unreadCount ?? 0);
 $navIsAdmin = $user->isAdmin || $user->role === 'manager';
 ?>
 <nav class="navbar">
@@ -27,6 +36,7 @@ $navIsAdmin = $user->isAdmin || $user->role === 'manager';
         <div class="nav-dropdown">
             <a href="/settings/index.php" class="nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">Settings</a>
             <div class="nav-dropdown-menu" role="menu">
+                <a role="menuitem" href="/settings/profile.php">My profile</a>
                 <a role="menuitem" href="/settings/index.php">Overview</a>
                 <a role="menuitem" href="/settings/emails.php">My emails</a>
                 <a role="menuitem" href="/settings/visibility.php">Sharing</a>
@@ -40,7 +50,21 @@ $navIsAdmin = $user->isAdmin || $user->role === 'manager';
                 <?php endif; ?>
             </div>
         </div>
-        <a class="navbar-signout" href="/logout.php"><?= htmlspecialchars($user->displayName, ENT_QUOTES) ?><?php if ($unreadCount > 0): ?> · <?= (int) $unreadCount ?> new<?php endif; ?> · Sign out</a>
+        <span class="navbar-account">
+            <a class="navbar-profile" href="/settings/profile.php" title="My profile"><?= htmlspecialchars($user->displayName, ENT_QUOTES) ?></a>
+            <span class="navbar-account-sep" aria-hidden="true">·</span>
+            <a class="navbar-alerts<?= $unreadCount > 0 ? ' has-unread' : '' ?>"
+                href="/alerts/index.php"
+                title="Travel alerts from email imports and flight status">
+                <?php if ($unreadCount > 0): ?>
+                    <?= $unreadCount ?> alert<?= $unreadCount === 1 ? '' : 's' ?>
+                <?php else: ?>
+                    Alerts
+                <?php endif; ?>
+            </a>
+            <span class="navbar-account-sep" aria-hidden="true">·</span>
+            <a class="navbar-signout" href="/logout.php">Sign out</a>
+        </span>
         <?php require __DIR__ . '/_theme_toggle.php'; ?>
     </div>
 </nav>

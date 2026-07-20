@@ -53,6 +53,7 @@ CREATE TABLE user_status_overrides (
     status          TEXT NOT NULL CHECK (status IN ('home','office','remote','unavailable')),
     note            TEXT NULL,
     effective_date  TEXT NOT NULL,
+    expires_on      TEXT NULL,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (user_id, effective_date)
 );
@@ -70,6 +71,7 @@ CREATE TABLE hotel_properties (
     postal_code             TEXT NULL,
     country                 TEXT NULL,
     phone                   TEXT NULL,
+    website                 TEXT NULL,
     latitude                REAL NULL,
     longitude               REAL NULL,
     has_desk                INTEGER NOT NULL DEFAULT 0,
