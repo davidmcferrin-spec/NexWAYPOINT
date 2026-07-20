@@ -7,7 +7,10 @@ declare(strict_types=1);
  * Expects optional $property (?HotelProperty) and optional $prefix (default '').
  */
 
+use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelProperty;
+use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\OfficeVenueRepository;
 
 /** @var ?HotelProperty $property */
 $property = $property ?? null;
@@ -50,7 +53,17 @@ $amenities = [
     value="<?= htmlspecialchars($val($property, 'hotelName', 'hotel_name'), ENT_QUOTES) ?>"></label>
 <?php
 /** @var list<string> $hotelBrandNames */
-$hotelBrandNames = $hotelBrandNames ?? [];
+if (!isset($hotelBrandNames) || !is_array($hotelBrandNames)) {
+    $hotelBrandNames = [];
+}
+if ($hotelBrandNames === [] && isset($app['db'], $app['logger'])) {
+    $extraBrand = ($property !== null) ? $property->brand : null;
+    $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect($extraBrand);
+}
+$hotelBrandNames = array_values(array_filter(
+    $hotelBrandNames,
+    static fn ($n) => is_string($n) && trim($n) !== ''
+));
 $currentBrand = $val($property, 'brand', 'brand');
 ?>
 <label>Brand
@@ -104,7 +117,21 @@ if ($countryValue === '' && $property === null && $_SERVER['REQUEST_METHOD'] !==
 </label>
 <?php
 /** @var list<string> $walkToOfficeVenues */
-$walkToOfficeVenues = $walkToOfficeVenues ?? [];
+if (!isset($walkToOfficeVenues) || !is_array($walkToOfficeVenues)) {
+    $walkToOfficeVenues = [];
+}
+if ($walkToOfficeVenues === [] && isset($app['db'], $app['logger'], $user)) {
+    $walkToOfficeVenues = array_values(array_unique(array_merge(
+        (new OfficeVenueRepository($app['db'], $app['logger']))->namesForSelect(),
+        (new HotelPropertyRepository($app['db'], $app['logger']))->walkToOfficeVenuesForUser((int) $user->id),
+    )));
+    natcasesort($walkToOfficeVenues);
+    $walkToOfficeVenues = array_values($walkToOfficeVenues);
+}
+$walkToOfficeVenues = array_values(array_filter(
+    $walkToOfficeVenues,
+    static fn ($n) => is_string($n) && trim($n) !== ''
+));
 ?>
 <datalist id="<?= htmlspecialchars($name('walk_to_office_venues'), ENT_QUOTES) ?>">
     <?php foreach ($walkToOfficeVenues as $venue): ?>

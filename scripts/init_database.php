@@ -28,6 +28,7 @@ try {
         'aeroapi_usage_log',
         'audit_log',
         'notifications',
+        'cron_job_runs',
     ];
 
     if ($db->driver() === 'sqlite') {

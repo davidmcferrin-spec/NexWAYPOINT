@@ -420,4 +420,20 @@ CREATE TABLE notifications (
     INDEX idx_notifications_segment (segment_id)
 ) ENGINE=InnoDB;
 
+-- ----------------------------------------------------------------------------
+-- cron_job_runs: last/history of scheduled jobs. Summaries are aggregates only
+-- (counts/status) — never store flight numbers, hotels, emails, or user travel.
+-- ----------------------------------------------------------------------------
+CREATE TABLE cron_job_runs (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_name        VARCHAR(60) NOT NULL,
+    started_at      DATETIME NOT NULL,
+    finished_at     DATETIME NULL,
+    status          ENUM('running','ok','warning','failed') NOT NULL DEFAULT 'running',
+    summary_json    JSON NULL,
+    error_class     VARCHAR(120) NULL,
+    INDEX idx_cron_runs_job_started (job_name, started_at),
+    INDEX idx_cron_runs_started (started_at)
+) ENGINE=InnoDB;
+
 SET FOREIGN_KEY_CHECKS = 1;

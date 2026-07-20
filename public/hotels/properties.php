@@ -3,12 +3,21 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\OfficeVenueRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 
 $propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
+$hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect();
+$walkToOfficeVenues = array_values(array_unique(array_merge(
+    (new OfficeVenueRepository($app['db'], $app['logger']))->namesForSelect(),
+    $propertyRepo->walkToOfficeVenuesForUser($user->id),
+)));
+natcasesort($walkToOfficeVenues);
+$walkToOfficeVenues = array_values($walkToOfficeVenues);
 
 $filters = [
     'q' => trim((string) ($_GET['q'] ?? '')),

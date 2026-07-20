@@ -38,6 +38,10 @@ $settingsSection = 'hub';
                 <h3>Site catalogs</h3>
                 <p>Airline carriers, rail operators, offices/venues, and hotel brands.</p>
             </a>
+            <a class="settings-card" href="/settings/jobs.php">
+                <h3>Cron / service status</h3>
+                <p>Last cron run status for mail polling and flight enrichment (counts only).</p>
+            </a>
             <a class="settings-card" href="/settings/users.php">
                 <h3>Users</h3>
                 <p>Accounts, org chart, solid- and dotted-line reporting.</p>

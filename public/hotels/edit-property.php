@@ -7,9 +7,12 @@ use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelProperty;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\OfficeVenueRepository;
+use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
+$userRepo = new UserRepository($app['db'], $app['logger']);
+$isAdmin = $userRepo->isAdmin($user);
 
 $repo = new HotelPropertyRepository($app['db'], $app['logger']);
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
@@ -31,6 +34,7 @@ $walkToOfficeVenues = array_values($walkToOfficeVenues);
 
 $errors = [];
 $message = null;
+$stayCount = $repo->countStays((int) $property->id);
 
 $nullable = static function (?string $value): ?string {
     if ($value === null) {
@@ -45,6 +49,14 @@ $checkbox = static fn (string $key): bool => isset($_POST[$key]) && $_POST[$key]
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $errors[] = 'Your session expired. Please resubmit the form.';
+    } elseif (($_POST['action'] ?? '') === 'delete') {
+        if (!$isAdmin) {
+            $errors[] = 'Only a site admin can delete a hotel.';
+        } else {
+            $repo->delete((int) $property->id, $user->id);
+            header('Location: /hotels/properties.php');
+            exit;
+        }
     } else {
         try {
             $hotelName = trim((string) ($_POST['hotel_name'] ?? ''));
@@ -128,6 +140,26 @@ $prefix = '';
         <?php require __DIR__ . '/_property_form_fields.php'; ?>
         <button type="submit" class="primary">Save property</button>
     </form>
+
+    <?php if ($isAdmin): ?>
+    <form class="stack" method="post" style="margin-top: 2rem"
+        onsubmit="return confirm(<?= htmlspecialchars(json_encode(
+            $stayCount === 0
+                ? 'Permanently delete this hotel? This cannot be undone.'
+                : "Permanently delete this hotel and its {$stayCount} stay" . ($stayCount === 1 ? '' : 's') . '? This cannot be undone.'
+        ), ENT_QUOTES) ?>);">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+        <input type="hidden" name="action" value="delete">
+        <p class="hint">
+            Delete removes the hotel from your directory
+            <?php if ($stayCount > 0): ?>
+                and permanently deletes <?= (int) $stayCount ?> linked stay<?= $stayCount === 1 ? '' : 's' ?>
+            <?php endif; ?>.
+            Blacklist only hides preference — use that if you want to keep history.
+        </p>
+        <button type="submit" class="danger">Delete hotel</button>
+    </form>
+    <?php endif; ?>
 </main>
 </body>
 </html>

@@ -11,6 +11,7 @@ declare(strict_types=1);
  * window), and fires alerts for anything that changed materially.
  */
 
+use NexWaypoint\Core\CronRunRepository;
 use NexWaypoint\Trips\AlertEvaluator;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\FlightAwareClient;
@@ -23,67 +24,107 @@ $app = require dirname(__DIR__) . '/config/bootstrap.php';
 $logger = $app['logger'];
 $db = $app['db'];
 
-$tripRepo = new TripRepository($db, $logger);
-$carrierRepo = new CarrierRepository($db, $logger);
-$flightStatusRepo = new FlightStatusRepository($db);
-$notificationRepo = new NotificationRepository($db);
-$alertEvaluator = new AlertEvaluator($notificationRepo, $logger);
-$flightAware = new FlightAwareClient($logger, $flightStatusRepo);
+$runs = $db->tableExists('cron_job_runs') ? new CronRunRepository($db) : null;
+$runId = $runs?->begin(CronRunRepository::JOB_ENRICH_FLIGHTS);
 
-$segments = $tripRepo->findSegmentsNeedingEnrichment(48);
-$logger->info('Flight enrichment sweep starting', ['segment_count' => count($segments)]);
+$exitCode = 0;
 
-$enriched = 0;
-$skipped = 0;
-$failed = 0;
+try {
+    $tripRepo = new TripRepository($db, $logger);
+    $carrierRepo = new CarrierRepository($db, $logger);
+    $flightStatusRepo = new FlightStatusRepository($db);
+    $notificationRepo = new NotificationRepository($db);
+    $alertEvaluator = new AlertEvaluator($notificationRepo, $logger);
+    $flightAware = new FlightAwareClient($logger, $flightStatusRepo);
 
-foreach ($segments as $segment) {
-    if ($segment->flightNumber === null || $segment->flightNumber === '') {
-        $logger->warning('Segment has no flight_number, cannot enrich', ['segment_id' => $segment->id]);
-        $skipped++;
-        continue;
-    }
+    $segments = $tripRepo->findSegmentsNeedingEnrichment(48);
+    $segmentCount = count($segments);
+    $logger->info('Flight enrichment sweep starting', ['segment_count' => $segmentCount]);
 
-    $ident = $segment->flightNumber;
-    if ($segment->carrierId !== null) {
-        $carrier = $carrierRepo->find($segment->carrierId);
-        if ($carrier !== null) {
-            $built = $carrier->flightIdent($segment->flightNumber);
-            if ($built !== null) {
-                $ident = $built;
-            }
-        }
-    }
+    $enriched = 0;
+    $skipped = 0;
+    $failed = 0;
 
-    try {
-        $before = $segment->id !== null ? $flightStatusRepo->findBySegment($segment->id) : null;
-        $after = $flightAware->enrichSegment($segment, $ident);
-
-        if ($after === null) {
+    foreach ($segments as $segment) {
+        if ($segment->flightNumber === null || $segment->flightNumber === '') {
+            $logger->warning('Segment has no flight_number, cannot enrich', ['segment_id' => $segment->id]);
             $skipped++;
             continue;
         }
 
-        $ownerRow = $db->fetchOne('SELECT owner_id FROM trips WHERE id = :id', ['id' => $segment->tripId]);
-        if ($ownerRow !== null) {
-            $alertEvaluator->evaluate((int) $ownerRow['owner_id'], $segment, $before, $after);
+        $ident = $segment->flightNumber;
+        if ($segment->carrierId !== null) {
+            $carrier = $carrierRepo->find($segment->carrierId);
+            if ($carrier !== null) {
+                $built = $carrier->flightIdent($segment->flightNumber);
+                if ($built !== null) {
+                    $ident = $built;
+                }
+            }
         }
 
-        if (isset($after['status']) && $after['status'] === 'Landed' && $segment->id !== null) {
-            $tripRepo->updateSegmentStatus($segment->id, 'landed');
-        }
+        try {
+            $before = $segment->id !== null ? $flightStatusRepo->findBySegment($segment->id) : null;
+            $after = $flightAware->enrichSegment($segment, $ident);
 
-        $enriched++;
-    } catch (\Throwable $e) {
-        $logger->error('Enrichment failed for segment', ['segment_id' => $segment->id, 'error' => $e->getMessage()]);
-        $failed++;
+            if ($after === null) {
+                $skipped++;
+                continue;
+            }
+
+            $ownerRow = $db->fetchOne('SELECT owner_id FROM trips WHERE id = :id', ['id' => $segment->tripId]);
+            if ($ownerRow !== null) {
+                $alertEvaluator->evaluate((int) $ownerRow['owner_id'], $segment, $before, $after);
+            }
+
+            if (isset($after['status']) && $after['status'] === 'Landed' && $segment->id !== null) {
+                $tripRepo->updateSegmentStatus($segment->id, 'landed');
+            }
+
+            $enriched++;
+        } catch (\Throwable $e) {
+            $logger->error('Enrichment failed for segment', ['segment_id' => $segment->id, 'error' => $e->getMessage()]);
+            $failed++;
+        }
     }
+
+    $logger->info('Flight enrichment sweep complete', [
+        'enriched' => $enriched,
+        'skipped' => $skipped,
+        'failed' => $failed,
+    ]);
+
+    if ($failed > 0 && $enriched === 0 && $segmentCount > 0) {
+        $status = CronRunRepository::STATUS_FAILED;
+        $exitCode = 1;
+    } elseif ($failed > 0) {
+        $status = CronRunRepository::STATUS_WARNING;
+        $exitCode = 1;
+    } else {
+        $status = CronRunRepository::STATUS_OK;
+    }
+
+    if ($runId !== null && $runs !== null) {
+        $runs->finish($runId, $status, [
+            'candidates' => $segmentCount,
+            'enriched' => $enriched,
+            'skipped' => $skipped,
+            'failed' => $failed,
+        ]);
+    }
+
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDOUT, "Enriched: {$enriched}, Skipped: {$skipped}, Failed: {$failed}\n");
+    }
+} catch (\Throwable $e) {
+    $logger->error('Flight enrichment job aborted', ['error' => $e->getMessage()]);
+    if ($runId !== null && $runs !== null) {
+        $runs->finish($runId, CronRunRepository::STATUS_FAILED, [], $e::class);
+    }
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, 'Flight enrichment aborted: ' . $e->getMessage() . "\n");
+    }
+    $exitCode = 1;
 }
 
-$logger->info('Flight enrichment sweep complete', ['enriched' => $enriched, 'skipped' => $skipped, 'failed' => $failed]);
-
-if (PHP_SAPI === 'cli') {
-    fwrite(STDOUT, "Enriched: {$enriched}, Skipped: {$skipped}, Failed: {$failed}\n");
-}
-
-exit($failed > 0 ? 1 : 0);
+exit($exitCode);

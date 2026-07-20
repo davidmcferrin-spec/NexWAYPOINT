@@ -340,4 +340,20 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
         self::assertNotNull($propertyAfter);
         self::assertNull($propertyAfter->overallRating);
     }
+
+    public function testDeletePropertyRemovesStays(): void
+    {
+        $userId = $this->insertUser('dave');
+        $property = $this->properties->create($this->makeProperty($userId));
+        $stay = $this->stays->create($this->makeStay($userId, (int) $property->id));
+        $this->stays->addPhoto((int) $stay->id, '/tmp/test.jpg', 'room');
+
+        self::assertSame(1, $this->properties->countStays((int) $property->id));
+
+        $this->properties->delete((int) $property->id, $userId);
+
+        self::assertNull($this->properties->find((int) $property->id));
+        self::assertNull($this->stays->find((int) $stay->id));
+        self::assertSame([], $this->stays->photosFor((int) $stay->id));
+    }
 }

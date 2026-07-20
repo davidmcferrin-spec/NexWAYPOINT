@@ -744,6 +744,40 @@ try {
         fwrite(STDOUT, "Created office_venues\n");
     }
 
+    if (!$tableExists('cron_job_runs')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE cron_job_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_name TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NULL,
+                    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','ok','warning','failed')),
+                    summary_json TEXT NULL,
+                    error_class TEXT NULL
+                )"
+            );
+            $pdo->exec('CREATE INDEX idx_cron_runs_job_started ON cron_job_runs(job_name, started_at)');
+            $pdo->exec('CREATE INDEX idx_cron_runs_started ON cron_job_runs(started_at)');
+        } else {
+            $pdo->exec(
+                "CREATE TABLE cron_job_runs (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    job_name VARCHAR(60) NOT NULL,
+                    started_at DATETIME NOT NULL,
+                    finished_at DATETIME NULL,
+                    status ENUM('running','ok','warning','failed') NOT NULL DEFAULT 'running',
+                    summary_json JSON NULL,
+                    error_class VARCHAR(120) NULL,
+                    INDEX idx_cron_runs_job_started (job_name, started_at),
+                    INDEX idx_cron_runs_started (started_at)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created cron_job_runs\n");
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {

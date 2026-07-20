@@ -360,6 +360,66 @@ final class HotelPropertyRepository
         ]);
     }
 
+    public function countStays(int $propertyId): int
+    {
+        $row = $this->db->fetchOne(
+            'SELECT COUNT(*) AS cnt FROM hotel_stays WHERE hotel_property_id = :id',
+            ['id' => $propertyId]
+        );
+        return (int) ($row['cnt'] ?? 0);
+    }
+
+    /**
+     * Permanently delete a property and its stays (photos + stay rows).
+     * Trip segments that pointed at those stays get hotel_stay_id cleared.
+     */
+    public function delete(int $id, ?int $actorUserId = null): void
+    {
+        $existing = $this->find($id);
+        if ($existing === null) {
+            return;
+        }
+
+        $stayIds = $this->db->fetchAll(
+            'SELECT id FROM hotel_stays WHERE hotel_property_id = :id',
+            ['id' => $id]
+        );
+        $ids = array_map(static fn (array $row) => (int) $row['id'], $stayIds);
+
+        if ($ids !== []) {
+            $placeholders = implode(', ', array_map(static fn (int $i) => ':s' . $i, array_keys($ids)));
+            $params = [];
+            foreach ($ids as $i => $stayId) {
+                $params['s' . $i] = $stayId;
+            }
+
+            // Clear trip links before stay delete (FK may be SET NULL or missing on older DBs).
+            $this->db->execute(
+                "UPDATE trip_segments SET hotel_stay_id = NULL WHERE hotel_stay_id IN ({$placeholders})",
+                $params
+            );
+            $this->db->execute(
+                "DELETE FROM hotel_photos WHERE hotel_stay_id IN ({$placeholders})",
+                $params
+            );
+            $this->db->execute(
+                'DELETE FROM hotel_stays WHERE hotel_property_id = :id',
+                ['id' => $id]
+            );
+        }
+
+        $this->db->execute('DELETE FROM hotel_properties WHERE id = :id', ['id' => $id]);
+        $this->db->audit($actorUserId, 'delete', 'hotel_properties', $id, [
+            'hotel_name' => $existing->hotelName,
+            'stays_deleted' => count($ids),
+        ]);
+        $this->logger->info('Hotel property deleted', [
+            'id' => $id,
+            'hotel_name' => $existing->hotelName,
+            'stays_deleted' => count($ids),
+        ]);
+    }
+
     public function recomputeOverallRating(int $propertyId): void
     {
         $row = $this->db->fetchOne(

@@ -318,3 +318,15 @@ CREATE TABLE notifications (
 );
 CREATE INDEX idx_notifications_user ON notifications(user_id, is_read);
 CREATE INDEX idx_notifications_segment ON notifications(segment_id);
+
+CREATE TABLE cron_job_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name        TEXT NOT NULL,
+    started_at      TEXT NOT NULL,
+    finished_at     TEXT NULL,
+    status          TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','ok','warning','failed')),
+    summary_json    TEXT NULL,
+    error_class     TEXT NULL
+);
+CREATE INDEX idx_cron_runs_job_started ON cron_job_runs(job_name, started_at);
+CREATE INDEX idx_cron_runs_started ON cron_job_runs(started_at);
