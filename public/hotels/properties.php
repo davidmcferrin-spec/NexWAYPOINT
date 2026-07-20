@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use NexWaypoint\Core\Csrf;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
@@ -40,6 +41,8 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
     $params = array_filter($params, static fn ($v) => $v !== null && $v !== '');
     return '/hotels/properties.php?' . http_build_query($params);
 };
+
+$property = null;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -48,11 +51,15 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>NexWAYPOINT &middot; Hotel Properties</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
+    <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/property-modal.js'), ENT_QUOTES) ?>" defer></script>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
-    <h1>Hotel properties</h1>
+    <div class="modal-actions" style="justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+        <h1 style="margin:0">Hotel properties</h1>
+        <button type="button" class="primary" data-open-property-modal>Add hotel</button>
+    </div>
     <p class="hint">
         Your properties — filter and sort below.
         Blacklist is yours alone to set; teammate adverse preferences for the same hotel name/city are shown so you can avoid problem locations.
@@ -119,7 +126,7 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
     </form>
 
     <?php if ($properties === []): ?>
-        <p class="empty-state">No properties match. <a href="/hotels/add.php">Log a stay</a> to add one.</p>
+        <p class="empty-state">No properties match. <button type="button" class="primary" data-open-property-modal>Add hotel</button> or <a href="/hotels/add.php">log a stay</a>.</p>
     <?php else: ?>
         <p class="hint"><?= count($properties) ?> propert<?= count($properties) === 1 ? 'y' : 'ies' ?></p>
         <table>
@@ -190,5 +197,22 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
         </table>
     <?php endif; ?>
 </main>
+
+<div id="property-modal" class="modal-backdrop" hidden data-csrf="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+    <div class="modal-panel" role="dialog" aria-labelledby="property-modal-title">
+        <h2 id="property-modal-title">Add hotel</h2>
+        <p id="property-modal-error" class="alert alert-error" hidden></p>
+        <form id="property-modal-form" class="stack">
+            <?php
+            $property = null;
+            require __DIR__ . '/_property_form_fields.php';
+            ?>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Save hotel</button>
+                <button type="button" class="secondary" data-close-modal>Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
 </body>
 </html>

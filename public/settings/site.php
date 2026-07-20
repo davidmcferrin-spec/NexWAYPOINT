@@ -63,8 +63,8 @@ $geocodeVenue = static function (
     }
     return [
         $normalizedStreet ?? $addressLine1,
-        $coords['lat'] ?? null,
-        $coords['lon'] ?? null,
+        ($coords ?? [])['lat'] ?? null,
+        ($coords ?? [])['lon'] ?? null,
     ];
 };
 
