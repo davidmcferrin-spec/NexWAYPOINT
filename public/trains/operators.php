@@ -13,7 +13,7 @@ $repo = new CarrierRepository($app['db'], $app['logger']);
 $errors = [];
 $message = null;
 $schemaWarning = null;
-$type = Carrier::TYPE_AIRLINE;
+$type = Carrier::TYPE_RAIL;
 
 if (!$app['db']->tableExists('carriers')) {
     $schemaWarning = 'Database is missing the carriers table. On the server run: php scripts/migrate.php';
@@ -25,7 +25,7 @@ if ($schemaWarning === null && $editId > 0) {
     try {
         $editing = $repo->find($editId);
     } catch (Throwable $e) {
-        $schemaWarning = 'Could not load carriers. Run: php scripts/migrate.php';
+        $schemaWarning = 'Could not load operators. Run: php scripts/migrate.php';
     }
     if ($editing !== null && ($editing->userId !== $user->id || $editing->carrierType !== $type)) {
         $editing = null;
@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($id > 0) {
                 $existing = $repo->find($id);
                 if ($existing === null || $existing->userId !== $user->id || $existing->carrierType !== $type) {
-                    throw new InvalidArgumentException('Carrier not found.');
+                    throw new InvalidArgumentException('Operator not found.');
                 }
                 $editing = $repo->update(new Carrier(
                     id: $id,
@@ -56,17 +56,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     iataCode: $iata !== '' ? $iata : null,
                     carrierType: $type,
                 ), $user->id);
-                $message = 'Carrier updated.';
+                $message = 'Operator updated.';
                 $editId = (int) $editing->id;
             } else {
-                $created = $repo->create(new Carrier(
+                $repo->create(new Carrier(
                     id: null,
                     userId: $user->id,
                     name: $name,
                     iataCode: $iata !== '' ? $iata : null,
                     carrierType: $type,
                 ), $user->id);
-                $message = 'Carrier created.';
+                $message = 'Operator created.';
                 $editing = null;
                 $editId = 0;
             }
@@ -78,12 +78,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$carriers = [];
+$operators = [];
 if ($schemaWarning === null) {
     try {
-        $carriers = $repo->findForUser($user->id, $type);
+        $operators = $repo->findForUser($user->id, $type);
     } catch (Throwable $e) {
-        $schemaWarning = 'Could not load carriers. Run: php scripts/migrate.php';
+        $schemaWarning = 'Could not load operators. Run: php scripts/migrate.php';
         $errors[] = $e->getMessage();
     }
 }
@@ -93,14 +93,14 @@ if ($schemaWarning === null) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>NexWAYPOINT &middot; Carriers</title>
+    <title>NexWAYPOINT &middot; Rail operators</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
-    <h1>Airline carriers</h1>
-    <p class="hint">Each carrier stores an IATA code so flight entry only needs the flight number. Rail operators are managed under <a href="/trains/operators.php">Trains</a>.</p>
+    <h1>Rail operators</h1>
+    <p class="hint">Operators used when logging train segments (e.g. Amtrak). Airline carriers stay under <a href="/flights/carriers.php">Flights</a>.</p>
 
     <?php if ($schemaWarning !== null): ?>
         <p class="alert alert-error"><?= htmlspecialchars($schemaWarning, ENT_QUOTES) ?></p>
@@ -114,41 +114,42 @@ if ($schemaWarning === null) {
     <?php endif; ?>
 
     <div class="card">
-        <h3><?= $editing !== null ? 'Edit carrier' : 'Add carrier' ?></h3>
+        <h3><?= $editing !== null ? 'Edit operator' : 'Add operator' ?></h3>
         <form class="stack" method="post">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
             <input type="hidden" name="id" value="<?= (int) $editId ?>">
-            <label>Airline name
+            <label>Operator name
                 <input type="text" name="name" required <?= $schemaWarning !== null ? 'disabled' : '' ?>
-                    value="<?= htmlspecialchars($editing->name ?? (string) ($_POST['name'] ?? ''), ENT_QUOTES) ?>">
+                    value="<?= htmlspecialchars($editing->name ?? (string) ($_POST['name'] ?? ''), ENT_QUOTES) ?>"
+                    placeholder="Amtrak">
             </label>
-            <label>IATA code
-                <input type="text" name="iata_code" required maxlength="3" <?= $schemaWarning !== null ? 'disabled' : '' ?>
+            <label>IATA / code (optional)
+                <input type="text" name="iata_code" maxlength="3" <?= $schemaWarning !== null ? 'disabled' : '' ?>
                     value="<?= htmlspecialchars($editing->iataCode ?? (string) ($_POST['iata_code'] ?? ''), ENT_QUOTES) ?>"
-                    style="text-transform:uppercase">
+                    style="text-transform:uppercase" placeholder="2V">
             </label>
             <div class="modal-actions">
-                <button type="submit" class="primary" <?= $schemaWarning !== null ? 'disabled' : '' ?>><?= $editing !== null ? 'Save changes' : 'Add carrier' ?></button>
+                <button type="submit" class="primary" <?= $schemaWarning !== null ? 'disabled' : '' ?>><?= $editing !== null ? 'Save changes' : 'Add operator' ?></button>
                 <?php if ($editing !== null): ?>
-                    <a class="secondary" href="/flights/carriers.php" style="display:inline-block;padding:0.6rem 1.2rem;text-decoration:none;border:1px solid var(--border);border-radius:4px;">Cancel</a>
+                    <a class="secondary" href="/trains/operators.php" style="display:inline-block;padding:0.6rem 1.2rem;text-decoration:none;border:1px solid var(--border);border-radius:4px;">Cancel</a>
                 <?php endif; ?>
             </div>
         </form>
     </div>
 
-    <?php if ($carriers === []): ?>
-        <p class="empty-state">No carriers yet. Add one above or from the flight form.</p>
+    <?php if ($operators === []): ?>
+        <p class="empty-state">No rail operators yet. Add Amtrak above or from the train form.</p>
     <?php else: ?>
         <table>
             <thead>
-                <tr><th>Name</th><th>IATA</th><th></th></tr>
+                <tr><th>Name</th><th>Code</th><th></th></tr>
             </thead>
             <tbody>
-                <?php foreach ($carriers as $c): ?>
+                <?php foreach ($operators as $c): ?>
                     <tr>
                         <td><?= htmlspecialchars($c->name, ENT_QUOTES) ?></td>
                         <td><?= htmlspecialchars($c->iataCode ?? '—', ENT_QUOTES) ?></td>
-                        <td><a href="/flights/carriers.php?id=<?= (int) $c->id ?>">Edit</a></td>
+                        <td><a href="/trains/operators.php?id=<?= (int) $c->id ?>">Edit</a></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

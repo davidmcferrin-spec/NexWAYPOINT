@@ -224,7 +224,9 @@ final class MailPoller
                 city: $city,
                 stateRegion: isset($extracted['state_region']) && is_string($extracted['state_region']) ? $extracted['state_region'] : null,
                 postalCode: null,
-                country: null,
+                country: isset($extracted['country']) && is_string($extracted['country']) && trim($extracted['country']) !== ''
+                    ? trim($extracted['country'])
+                    : 'USA',
                 phone: null,
                 latitude: null,
                 longitude: null,
@@ -352,6 +354,7 @@ final class MailPoller
                     $iata,
                     $carrierName ?? (self::CARRIER_NAMES[$iata] ?? $iata),
                     $userId,
+                    $kind === 'train' ? \NexWaypoint\Trips\Carrier::TYPE_RAIL : \NexWaypoint\Trips\Carrier::TYPE_AIRLINE,
                 );
                 $carrierId = $carrier->id;
                 $displayName = $carrier->name;

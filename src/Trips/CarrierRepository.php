@@ -24,21 +24,40 @@ final class CarrierRepository
     /**
      * @return Carrier[]
      */
-    public function findForUser(int $userId): array
+    public function findForUser(int $userId, string $carrierType = Carrier::TYPE_AIRLINE): array
     {
-        $rows = $this->db->fetchAll(
-            'SELECT * FROM carriers WHERE user_id = :user_id ORDER BY name ASC',
-            ['user_id' => $userId]
-        );
+        if ($this->hasCarrierTypeColumn()) {
+            $rows = $this->db->fetchAll(
+                'SELECT * FROM carriers WHERE user_id = :user_id AND carrier_type = :type ORDER BY name ASC',
+                ['user_id' => $userId, 'type' => $carrierType]
+            );
+        } else {
+            // Pre-migration DBs: everything is treated as airline.
+            if ($carrierType !== Carrier::TYPE_AIRLINE) {
+                return [];
+            }
+            $rows = $this->db->fetchAll(
+                'SELECT * FROM carriers WHERE user_id = :user_id ORDER BY name ASC',
+                ['user_id' => $userId]
+            );
+        }
         return array_map(static fn (array $row) => Carrier::fromRow($row), $rows);
     }
 
-    public function findByName(int $userId, string $name): ?Carrier
+    public function findByName(int $userId, string $name, ?string $carrierType = null): ?Carrier
     {
-        $row = $this->db->fetchOne(
-            'SELECT * FROM carriers WHERE user_id = :user_id AND LOWER(name) = LOWER(:name) LIMIT 1',
-            ['user_id' => $userId, 'name' => trim($name)]
-        );
+        if ($carrierType !== null && $this->hasCarrierTypeColumn()) {
+            $row = $this->db->fetchOne(
+                'SELECT * FROM carriers WHERE user_id = :user_id AND LOWER(name) = LOWER(:name)
+                 AND carrier_type = :type LIMIT 1',
+                ['user_id' => $userId, 'name' => trim($name), 'type' => $carrierType]
+            );
+        } else {
+            $row = $this->db->fetchOne(
+                'SELECT * FROM carriers WHERE user_id = :user_id AND LOWER(name) = LOWER(:name) LIMIT 1',
+                ['user_id' => $userId, 'name' => trim($name)]
+            );
+        }
         return $row === null ? null : Carrier::fromRow($row);
     }
 
@@ -54,8 +73,13 @@ final class CarrierRepository
     /**
      * Find existing carrier by IATA or create one. Used by mail import.
      */
-    public function findOrCreateByIata(int $userId, string $iata, string $name, ?int $actorUserId = null): Carrier
-    {
+    public function findOrCreateByIata(
+        int $userId,
+        string $iata,
+        string $name,
+        ?int $actorUserId = null,
+        string $carrierType = Carrier::TYPE_AIRLINE,
+    ): Carrier {
         $iata = strtoupper(trim($iata));
         $existing = $this->findByIata($userId, $iata);
         if ($existing !== null) {
@@ -66,25 +90,47 @@ final class CarrierRepository
             userId: $userId,
             name: trim($name) !== '' ? trim($name) : $iata,
             iataCode: $iata,
+            carrierType: $carrierType,
         ), $actorUserId);
     }
 
     public function create(Carrier $carrier, ?int $actorUserId = null): Carrier
     {
-        $this->validate($carrier, requireIata: true);
+        $requireIata = $carrier->carrierType === Carrier::TYPE_AIRLINE;
+        $this->validate($carrier, requireIata: $requireIata);
         $this->assertUniqueIata($carrier);
 
-        $this->db->execute(
-            'INSERT INTO carriers (user_id, name, iata_code) VALUES (:user_id, :name, :iata_code)',
-            [
-                'user_id' => $carrier->userId,
-                'name' => trim($carrier->name),
-                'iata_code' => $carrier->iataCode !== null ? strtoupper($carrier->iataCode) : null,
-            ]
-        );
+        if ($this->hasCarrierTypeColumn()) {
+            $this->db->execute(
+                'INSERT INTO carriers (user_id, name, iata_code, carrier_type)
+                 VALUES (:user_id, :name, :iata_code, :carrier_type)',
+                [
+                    'user_id' => $carrier->userId,
+                    'name' => trim($carrier->name),
+                    'iata_code' => $carrier->iataCode !== null ? strtoupper($carrier->iataCode) : null,
+                    'carrier_type' => $carrier->carrierType,
+                ]
+            );
+        } else {
+            $this->db->execute(
+                'INSERT INTO carriers (user_id, name, iata_code) VALUES (:user_id, :name, :iata_code)',
+                [
+                    'user_id' => $carrier->userId,
+                    'name' => trim($carrier->name),
+                    'iata_code' => $carrier->iataCode !== null ? strtoupper($carrier->iataCode) : null,
+                ]
+            );
+        }
         $id = $this->db->lastInsertId();
-        $this->db->audit($actorUserId, 'create', 'carriers', $id, ['name' => $carrier->name]);
-        $this->logger->info('Carrier created', ['id' => $id, 'user_id' => $carrier->userId]);
+        $this->db->audit($actorUserId, 'create', 'carriers', $id, [
+            'name' => $carrier->name,
+            'carrier_type' => $carrier->carrierType,
+        ]);
+        $this->logger->info('Carrier created', [
+            'id' => $id,
+            'user_id' => $carrier->userId,
+            'carrier_type' => $carrier->carrierType,
+        ]);
 
         $created = $this->find($id);
         if ($created === null) {
@@ -98,17 +144,31 @@ final class CarrierRepository
         if ($carrier->id === null) {
             throw new \InvalidArgumentException('Cannot update a Carrier without an id.');
         }
-        $this->validate($carrier, requireIata: true);
+        $requireIata = $carrier->carrierType === Carrier::TYPE_AIRLINE;
+        $this->validate($carrier, requireIata: $requireIata);
         $this->assertUniqueIata($carrier);
 
-        $this->db->execute(
-            'UPDATE carriers SET name = :name, iata_code = :iata_code, updated_at = CURRENT_TIMESTAMP WHERE id = :id',
-            [
-                'name' => trim($carrier->name),
-                'iata_code' => $carrier->iataCode !== null ? strtoupper($carrier->iataCode) : null,
-                'id' => $carrier->id,
-            ]
-        );
+        if ($this->hasCarrierTypeColumn()) {
+            $this->db->execute(
+                'UPDATE carriers SET name = :name, iata_code = :iata_code, carrier_type = :carrier_type,
+                 updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+                [
+                    'name' => trim($carrier->name),
+                    'iata_code' => $carrier->iataCode !== null ? strtoupper($carrier->iataCode) : null,
+                    'carrier_type' => $carrier->carrierType,
+                    'id' => $carrier->id,
+                ]
+            );
+        } else {
+            $this->db->execute(
+                'UPDATE carriers SET name = :name, iata_code = :iata_code, updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+                [
+                    'name' => trim($carrier->name),
+                    'iata_code' => $carrier->iataCode !== null ? strtoupper($carrier->iataCode) : null,
+                    'id' => $carrier->id,
+                ]
+            );
+        }
         $this->db->audit($actorUserId, 'update', 'carriers', $carrier->id, ['name' => $carrier->name]);
 
         $updated = $this->find($carrier->id);
@@ -118,11 +178,19 @@ final class CarrierRepository
         return $updated;
     }
 
+    private function hasCarrierTypeColumn(): bool
+    {
+        return $this->db->tableExists('carriers') && $this->db->columnExists('carriers', 'carrier_type');
+    }
+
     private function validate(Carrier $carrier, bool $requireIata): void
     {
         $errors = [];
         if (trim($carrier->name) === '') {
-            $errors[] = 'Carrier name is required.';
+            $errors[] = 'Name is required.';
+        }
+        if (!in_array($carrier->carrierType, [Carrier::TYPE_AIRLINE, Carrier::TYPE_RAIL], true)) {
+            $errors[] = 'Carrier type must be airline or rail.';
         }
         $iata = $carrier->iataCode !== null ? strtoupper(trim($carrier->iataCode)) : '';
         if ($requireIata && $iata === '') {

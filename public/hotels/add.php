@@ -19,6 +19,7 @@ $stayRepo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
 $userRepo = new UserRepository($app['db'], $app['logger']);
 $blockRepo = new VisibilityBlockRepository($app['db']);
 $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect();
+$walkToOfficeVenues = $propertyRepo->walkToOfficeVenuesForUser($user->id);
 
 $existingProperties = $propertyRepo->findForUser($user->id);
 $otherUsers = array_values(array_filter(
@@ -164,18 +165,7 @@ $property = null; // for modal include
     <script src="/assets/hotel-picker.js" defer></script>
 </head>
 <body>
-<nav class="navbar">
-    <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
-    <div class="navbar-links">
-        <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/properties.php">Hotels</a>
-        <a href="/hotels/list.php">Stays</a>
-        <a href="/hotels/add.php">+ Log a stay</a>
-        <a href="/flights/add.php">+ Add a flight</a>
-        <a href="/logout.php">Sign out</a>
-        <?php require dirname(__DIR__) . '/_theme_toggle.php'; ?>
-    </div>
-</nav>
+<?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
     <h1>Log a Hotel Stay</h1>
 

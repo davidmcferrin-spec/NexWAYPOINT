@@ -70,8 +70,10 @@ try {
         $email,
         $password,
         $displayName,
-        'manager',
+        'subordinate', // legacy column; site access is is_admin
         null,
+        null,
+        true, // is_admin
     );
 
     $credentialsPath = dirname(__DIR__) . '/storage/admin-credentials.txt';

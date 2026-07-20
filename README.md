@@ -67,10 +67,13 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
 
 ## A note on the visibility defaults
 
-Managers default to **full exposure** of subordinate travel (TOP_DOWN =
-all fields). Subordinates default to **limited exposure** of manager travel
-(BOTTOM_UP = city + dates only). Lateral/peer sharing defaults to full
-fields. Unrelated users get city+dates only.
+Managers (solid or dotted line) default to **full exposure** of a report's
+travel (TOP_DOWN = all fields). Reports default to **limited exposure** of
+manager travel (BOTTOM_UP = city + dates only). Lateral/peer sharing
+defaults to full fields. Unrelated users get city+dates only.
+
+Org chart is who reports to whom (`manager_id` + dotted-line managers), not
+RBAC roles; site admin is a separate `is_admin` flag.
 
 Separately, any hotel stay or trip/flight can be marked **Private** (hidden
 from everyone) or hidden from **selected users** via `visibility_blocks`,
@@ -139,8 +142,8 @@ users:
 php scripts/create_user.php
 ```
 
-Managers can also manage users in the UI at `/admin/users.php` (create,
-role/manager, deactivate, reset password, attach forward-from emails).
+Site admins manage users at `/admin/users.php` (create, solid-line
+reports-to, dotted-line managers, deactivate, reset password, emails).
 Everyone manages their own forward addresses at `/settings/emails.php`.
 
 Reset a password (prints a new random value once):

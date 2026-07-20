@@ -50,24 +50,15 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
 </head>
 <body>
-<nav class="navbar">
-    <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
-    <div class="navbar-links">
-        <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/properties.php">Hotels</a>
-        <a href="/hotels/list.php">Stays</a>
-        <a href="/hotels/add.php">+ Log a stay</a>
-        <a href="/flights/add.php">+ Add a flight</a>
-        <a href="/logout.php">Sign out (<?= htmlspecialchars($user->displayName, ENT_QUOTES) ?>)</a>
-        <?php require dirname(__DIR__) . '/_theme_toggle.php'; ?>
-    </div>
-</nav>
+<?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
     <h1>Hotel properties</h1>
     <p class="hint">
         Your properties — filter and sort below.
         Blacklist is yours alone to set; teammate adverse preferences for the same hotel name/city are shown so you can avoid problem locations.
         <a href="/hotels/list.php">View stays</a>
+        ·
+        <a href="/hotels/map.php">Map view</a>
     </p>
 
     <form class="card stack" method="get" action="/hotels/properties.php" style="max-width:none">
@@ -137,7 +128,7 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'hotel_name']), ENT_QUOTES) ?>">Hotel</a></th>
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'city']), ENT_QUOTES) ?>">Location</a></th>
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'overall_rating']), ENT_QUOTES) ?>">Overall</a></th>
-                    <th>Charge</th>
+                    <th>Destination Charge</th>
                     <th>Flags</th>
                     <th></th>
                 </tr>

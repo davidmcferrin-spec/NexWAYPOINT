@@ -9,9 +9,9 @@ $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 $repo = new UserRepository($app['db'], $app['logger']);
 
-if ($user->role !== 'manager') {
+if (!$repo->isAdmin($user)) {
     http_response_code(403);
-    echo 'Managers only.';
+    echo 'Site admins only.';
     exit;
 }
 
@@ -19,6 +19,22 @@ $errors = [];
 $message = null;
 $editId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $editing = $editId > 0 ? $repo->find($editId) : null;
+
+$parseManagerId = static function (): ?int {
+    $raw = $_POST['manager_id'] ?? '';
+    if ($raw === '' || $raw === null) {
+        return null;
+    }
+    return (int) $raw;
+};
+
+$parseDotted = static function (): array {
+    $ids = $_POST['dotted_manager_ids'] ?? [];
+    if (!is_array($ids)) {
+        return [];
+    }
+    return array_values(array_unique(array_map('intval', $ids)));
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
@@ -31,27 +47,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (strlen($plain) < 12) {
                     throw new InvalidArgumentException('Password must be at least 12 characters.');
                 }
-                $managerId = ($_POST['manager_id'] ?? '') !== '' ? (int) $_POST['manager_id'] : null;
+                $managerId = $parseManagerId();
                 $created = $repo->create(
                     trim((string) ($_POST['username'] ?? '')),
                     (string) ($_POST['email'] ?? ''),
                     $plain,
                     trim((string) ($_POST['display_name'] ?? '')),
-                    (string) ($_POST['role'] ?? 'subordinate'),
+                    'subordinate',
                     $managerId,
                     $user->id,
+                    isset($_POST['is_admin']),
                 );
+                if ($app['db']->tableExists('user_dotted_managers')) {
+                    $repo->setDottedManagers((int) $created->id, $parseDotted(), $user->id);
+                }
                 $message = "Created user {$created->username} (ID {$created->id}).";
             } elseif ($action === 'update' && $editing !== null) {
-                $managerId = ($_POST['manager_id'] ?? '') !== '' ? (int) $_POST['manager_id'] : null;
                 $repo->updateProfile(
                     $editing->id,
                     trim((string) ($_POST['display_name'] ?? '')),
-                    (string) ($_POST['role'] ?? $editing->role),
-                    $managerId,
+                    $parseManagerId(),
                     isset($_POST['is_active']),
+                    isset($_POST['is_admin']),
                     $user->id,
                 );
+                if ($app['db']->tableExists('user_dotted_managers')) {
+                    $repo->setDottedManagers($editing->id, $parseDotted(), $user->id);
+                }
                 $message = 'User updated.';
                 $editing = $repo->find($editing->id);
             } elseif ($action === 'reset_password' && $editing !== null) {
@@ -78,9 +100,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $allUsers = $repo->findAll();
+$usersById = [];
+foreach ($allUsers as $u) {
+    $usersById[$u->id] = $u;
+}
+
 $editEmails = ($editing !== null && $app['db']->tableExists('user_emails'))
     ? $repo->emailsForUser($editing->id)
     : [];
+$editDottedIds = ($editing !== null && $app['db']->tableExists('user_dotted_managers'))
+    ? $repo->dottedManagerIds($editing->id)
+    : [];
+
+/** Build a simple solid-line org tree for display. */
+$children = [];
+foreach ($allUsers as $u) {
+    if (!$u->isActive) {
+        continue;
+    }
+    $parent = $u->managerId ?? 0;
+    $children[$parent][] = $u;
+}
+foreach ($children as &$list) {
+    usort($list, static fn ($a, $b) => strcasecmp($a->displayName, $b->displayName));
+}
+unset($list);
+
+$renderTree = null;
+$renderTree = static function (int $parentId, int $depth) use (&$renderTree, $children, $repo): void {
+    foreach ($children[$parentId] ?? [] as $node) {
+        $pad = str_repeat(' ', $depth);
+        $dotted = [];
+        if ($repo->dottedManagerIds($node->id) !== []) {
+            foreach ($repo->dottedManagers($node->id) as $dm) {
+                $dotted[] = $dm->displayName;
+            }
+        }
+        echo '<div class="org-row" style="padding-left:' . (0.75 * $depth) . 'rem">';
+        echo htmlspecialchars($pad . $node->displayName, ENT_QUOTES);
+        echo ' <span class="text-dim">(@' . htmlspecialchars($node->username, ENT_QUOTES) . ')</span>';
+        if ($dotted !== []) {
+            echo ' <span class="badge badge-status-delay" title="Dotted-line managers">⋯ '
+                . htmlspecialchars(implode(', ', $dotted), ENT_QUOTES) . '</span>';
+        }
+        if ($node->isAdmin) {
+            echo ' <span class="badge badge-status-home">admin</span>';
+        }
+        echo ' <a href="/admin/users.php?id=' . (int) $node->id . '">edit</a>';
+        echo '</div>';
+        $renderTree($node->id, $depth + 1);
+    }
+};
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -93,8 +163,11 @@ $editEmails = ($editing !== null && $app['db']->tableExists('user_emails'))
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
-    <h1>Users</h1>
-    <p>Managers can create accounts, set roles, and attach forward-from email aliases used by mail import.</p>
+    <h1>Users &amp; org chart</h1>
+    <p>
+        Org structure is who reports to whom (solid line), plus optional dotted-line managers.
+        Site admins can manage accounts — that is separate from the reporting chart.
+    </p>
 
     <?php foreach ($errors as $err): ?>
         <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
@@ -104,25 +177,80 @@ $editEmails = ($editing !== null && $app['db']->tableExists('user_emails'))
     <?php endif; ?>
 
     <div class="card">
+        <h3>Org chart (solid line)</h3>
+        <p class="hint">Indentation = reports to the person above. Dotted-line managers show as ⋯ badges.</p>
+        <?php
+        // Roots: no manager, or manager missing/inactive (orphans still show).
+        $roots = $children[0] ?? [];
+        $rootIds = [];
+        foreach ($roots as $r) {
+            $rootIds[$r->id] = true;
+        }
+        foreach ($allUsers as $u) {
+            if (!$u->isActive || $u->managerId === null || isset($rootIds[$u->id])) {
+                continue;
+            }
+            $mgr = $usersById[$u->managerId] ?? null;
+            if ($mgr === null || !$mgr->isActive) {
+                $roots[] = $u;
+                $rootIds[$u->id] = true;
+            }
+        }
+        if ($roots === []) {
+            echo '<p class="empty-state">No active users yet.</p>';
+        } else {
+            foreach ($roots as $root) {
+                echo '<div class="org-row">';
+                echo '<strong>' . htmlspecialchars($root->displayName, ENT_QUOTES) . '</strong>';
+                echo ' <span class="text-dim">(@' . htmlspecialchars($root->username, ENT_QUOTES) . ')</span>';
+                $dotted = [];
+                foreach ($repo->dottedManagers($root->id) as $dm) {
+                    $dotted[] = $dm->displayName;
+                }
+                if ($dotted !== []) {
+                    echo ' <span class="badge badge-status-delay">⋯ ' . htmlspecialchars(implode(', ', $dotted), ENT_QUOTES) . '</span>';
+                }
+                if ($root->isAdmin) {
+                    echo ' <span class="badge badge-status-home">admin</span>';
+                }
+                echo ' <a href="/admin/users.php?id=' . (int) $root->id . '">edit</a>';
+                echo '</div>';
+                $renderTree($root->id, 1);
+            }
+        }
+        ?>
+    </div>
+
+    <div class="card">
         <h3>Directory</h3>
         <table>
             <thead>
                 <tr>
                     <th>Name</th>
                     <th>Username</th>
-                    <th>Primary email</th>
-                    <th>Role</th>
+                    <th>Reports to</th>
+                    <th>Dotted line</th>
                     <th>Active</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
             <?php foreach ($allUsers as $u): ?>
+                <?php
+                $mgr = $u->managerId !== null ? ($usersById[$u->managerId] ?? null) : null;
+                $dottedNames = array_map(
+                    static fn ($d) => $d->displayName,
+                    $repo->dottedManagers($u->id)
+                );
+                ?>
                 <tr>
-                    <td><?= htmlspecialchars($u->displayName, ENT_QUOTES) ?></td>
+                    <td>
+                        <?= htmlspecialchars($u->displayName, ENT_QUOTES) ?>
+                        <?php if ($u->isAdmin): ?><span class="badge badge-status-home">admin</span><?php endif; ?>
+                    </td>
                     <td><?= htmlspecialchars($u->username, ENT_QUOTES) ?></td>
-                    <td><?= htmlspecialchars($u->email, ENT_QUOTES) ?></td>
-                    <td><?= htmlspecialchars($u->role, ENT_QUOTES) ?></td>
+                    <td><?= $mgr !== null ? htmlspecialchars($mgr->displayName, ENT_QUOTES) : '—' ?></td>
+                    <td><?= $dottedNames !== [] ? htmlspecialchars(implode(', ', $dottedNames), ENT_QUOTES) : '—' ?></td>
                     <td><?= $u->isActive ? 'yes' : 'no' ?></td>
                     <td><a href="/admin/users.php?id=<?= (int) $u->id ?>">Manage</a></td>
                 </tr>
@@ -140,29 +268,46 @@ $editEmails = ($editing !== null && $app['db']->tableExists('user_emails'))
             <label>Display name
                 <input type="text" name="display_name" required value="<?= htmlspecialchars($editing->displayName, ENT_QUOTES) ?>">
             </label>
-            <label>Role
-                <select name="role">
-                    <?php foreach (['manager', 'peer', 'subordinate'] as $role): ?>
-                        <option value="<?= $role ?>" <?= $editing->role === $role ? 'selected' : '' ?>><?= $role ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Manager
+            <label>Reports to (solid line)
                 <select name="manager_id">
-                    <option value="">— none —</option>
+                    <option value="">— none (org root) —</option>
                     <?php foreach ($allUsers as $u): ?>
                         <?php if ($u->id === $editing->id) {
                             continue;
                         } ?>
                         <option value="<?= (int) $u->id ?>" <?= $editing->managerId === $u->id ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($u->displayName . ' (' . $u->username . ')', ENT_QUOTES) ?>
+                            <?= htmlspecialchars($u->displayName . ' (@' . $u->username . ')', ENT_QUOTES) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
             </label>
+            <fieldset>
+                <legend>Dotted-line managers</legend>
+                <p class="hint">Matrix / secondary reporting. Does not replace the solid-line manager above.</p>
+                <div class="checkbox-grid">
+                    <?php foreach ($allUsers as $u): ?>
+                        <?php if ($u->id === $editing->id || !$u->isActive) {
+                            continue;
+                        } ?>
+                        <label>
+                            <input type="checkbox" name="dotted_manager_ids[]" value="<?= (int) $u->id ?>"
+                                <?= in_array($u->id, $editDottedIds, true) ? 'checked' : '' ?>
+                                <?= $editing->managerId === $u->id ? 'disabled' : '' ?>>
+                            <?= htmlspecialchars($u->displayName, ENT_QUOTES) ?>
+                            <?php if ($editing->managerId === $u->id): ?>
+                                <span class="text-dim">(solid line)</span>
+                            <?php endif; ?>
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+            </fieldset>
             <label>
                 <input type="checkbox" name="is_active" value="1" <?= $editing->isActive ? 'checked' : '' ?>>
                 Active
+            </label>
+            <label>
+                <input type="checkbox" name="is_admin" value="1" <?= $editing->isAdmin ? 'checked' : '' ?>>
+                Site admin (Users / Site settings)
             </label>
             <button type="submit" class="primary">Save user</button>
             <a href="/admin/users.php">Close</a>
@@ -242,20 +387,31 @@ $editEmails = ($editing !== null && $app['db']->tableExists('user_emails'))
             <label>Password (min 12)
                 <input type="password" name="password" required minlength="12" autocomplete="new-password">
             </label>
-            <label>Role
-                <select name="role">
-                    <option value="subordinate">subordinate</option>
-                    <option value="peer">peer</option>
-                    <option value="manager">manager</option>
-                </select>
-            </label>
-            <label>Manager
+            <label>Reports to (solid line)
                 <select name="manager_id">
-                    <option value="">— none —</option>
+                    <option value="">— none (org root) —</option>
                     <?php foreach ($allUsers as $u): ?>
                         <option value="<?= (int) $u->id ?>"><?= htmlspecialchars($u->displayName, ENT_QUOTES) ?></option>
                     <?php endforeach; ?>
                 </select>
+            </label>
+            <fieldset>
+                <legend>Dotted-line managers (optional)</legend>
+                <div class="checkbox-grid">
+                    <?php foreach ($allUsers as $u): ?>
+                        <?php if (!$u->isActive) {
+                            continue;
+                        } ?>
+                        <label>
+                            <input type="checkbox" name="dotted_manager_ids[]" value="<?= (int) $u->id ?>">
+                            <?= htmlspecialchars($u->displayName, ENT_QUOTES) ?>
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+            </fieldset>
+            <label>
+                <input type="checkbox" name="is_admin" value="1">
+                Site admin
             </label>
             <button type="submit" class="primary">Create user</button>
         </form>

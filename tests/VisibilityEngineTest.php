@@ -127,4 +127,35 @@ final class VisibilityEngineTest extends NexWaypointTestCase
 
         self::assertContains('trip_purpose', $result['visible_fields']);
     }
+
+    public function testDottedLineManagerSeesTopDownDefaults(): void
+    {
+        $solidBoss = $this->insertUser('solidBoss');
+        $matrixBoss = $this->insertUser('matrixBoss');
+        $worker = $this->insertUser('worker', $solidBoss);
+        $users = new UserRepository($this->db, $this->logger);
+        $users->setDottedManagers($worker, [$matrixBoss]);
+        $engine = $this->makeEngine();
+
+        $result = $engine->getVisibleFields($matrixBoss, $worker);
+
+        self::assertSame(VisibilityEngine::DIRECTION_TOP_DOWN, $result['direction']);
+        self::assertEqualsCanonicalizing(VisibilityEngine::ALL_FIELDS, $result['visible_fields']);
+    }
+
+    public function testDottedLineReportSeesBottomUpDefaults(): void
+    {
+        $solidBoss = $this->insertUser('solidBoss');
+        $matrixBoss = $this->insertUser('matrixBoss');
+        $worker = $this->insertUser('worker', $solidBoss);
+        $users = new UserRepository($this->db, $this->logger);
+        $users->setDottedManagers($worker, [$matrixBoss]);
+        $engine = $this->makeEngine();
+
+        $result = $engine->getVisibleFields($worker, $matrixBoss);
+
+        self::assertSame(VisibilityEngine::DIRECTION_BOTTOM_UP, $result['direction']);
+        sort($result['visible_fields']);
+        self::assertSame(['destination_city', 'travel_dates'], $result['visible_fields']);
+    }
 }

@@ -344,6 +344,7 @@ try {
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     name TEXT NOT NULL,
                     iata_code TEXT NULL,
+                    carrier_type TEXT NOT NULL DEFAULT 'airline' CHECK (carrier_type IN ('airline','rail')),
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     UNIQUE (user_id, iata_code)
@@ -351,6 +352,7 @@ try {
             );
             $pdo->exec('CREATE INDEX idx_carriers_user ON carriers(user_id)');
             $pdo->exec('CREATE INDEX idx_carriers_name ON carriers(name)');
+            $pdo->exec('CREATE INDEX idx_carriers_type ON carriers(carrier_type)');
         } else {
             $pdo->exec(
                 "CREATE TABLE carriers (
@@ -358,17 +360,38 @@ try {
                     user_id INT UNSIGNED NOT NULL,
                     name VARCHAR(100) NOT NULL,
                     iata_code VARCHAR(3) NULL,
+                    carrier_type ENUM('airline','rail') NOT NULL DEFAULT 'airline',
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_carriers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                     UNIQUE KEY uq_carrier_user_iata (user_id, iata_code),
                     INDEX idx_carriers_user (user_id),
-                    INDEX idx_carriers_name (name)
+                    INDEX idx_carriers_name (name),
+                    INDEX idx_carriers_type (carrier_type)
                 ) ENGINE=InnoDB"
             );
         }
         $changes++;
         fwrite(STDOUT, "Created carriers\n");
+    }
+
+    if ($tableExists('carriers') && !$columnExists('carriers', 'carrier_type')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec("ALTER TABLE carriers ADD COLUMN carrier_type TEXT NOT NULL DEFAULT 'airline'");
+        } else {
+            $pdo->exec(
+                "ALTER TABLE carriers ADD COLUMN carrier_type ENUM('airline','rail') NOT NULL DEFAULT 'airline'"
+            );
+            $pdo->exec('CREATE INDEX idx_carriers_type ON carriers (carrier_type)');
+        }
+        // Amtrak / 2V rows from mail import should be rail operators.
+        $pdo->exec(
+            "UPDATE carriers SET carrier_type = 'rail'
+             WHERE UPPER(COALESCE(iata_code, '')) = '2V'
+                OR LOWER(name) LIKE '%amtrak%'"
+        );
+        $changes++;
+        fwrite(STDOUT, "Added carriers.carrier_type\n");
     }
 
     if ($tableExists('trip_segments') && !$columnExists('trip_segments', 'carrier_id')) {
@@ -484,6 +507,50 @@ try {
             $changes++;
             fwrite(STDOUT, 'Backfilled ' . count($missing) . " primary addresses into user_emails\n");
         }
+    }
+
+    if ($tableExists('users') && !$columnExists('users', 'is_admin')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0');
+        }
+        // Prior installs used role=manager for admin screens.
+        $pdo->exec("UPDATE users SET is_admin = 1 WHERE role = 'manager' OR LOWER(username) = 'admin'");
+        $changes++;
+        fwrite(STDOUT, "Added users.is_admin (seeded from legacy manager role)\n");
+    }
+
+    if (!$tableExists('user_dotted_managers')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE user_dotted_managers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    manager_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (user_id, manager_id)
+                )"
+            );
+            $pdo->exec('CREATE INDEX idx_dotted_user ON user_dotted_managers(user_id)');
+            $pdo->exec('CREATE INDEX idx_dotted_manager ON user_dotted_managers(manager_id)');
+        } else {
+            $pdo->exec(
+                "CREATE TABLE user_dotted_managers (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    manager_id INT UNSIGNED NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_dotted_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_dotted_manager FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE CASCADE,
+                    UNIQUE KEY uq_dotted (user_id, manager_id),
+                    INDEX idx_dotted_user (user_id),
+                    INDEX idx_dotted_manager (manager_id)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created user_dotted_managers\n");
     }
 
     if (!$tableExists('hotel_brands')) {

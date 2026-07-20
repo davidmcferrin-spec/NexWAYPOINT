@@ -48,18 +48,36 @@ abstract class NexWaypointTestCase extends TestCase
 
     protected function insertUser(string $username, ?int $managerId = null, string $role = 'subordinate'): int
     {
-        $this->db->execute(
-            'INSERT INTO users (username, email, password_hash, display_name, role, manager_id)
-             VALUES (:u, :e, :p, :d, :r, :m)',
-            [
-                'u' => $username,
-                'e' => "{$username}@example.com",
-                'p' => password_hash('test-password', PASSWORD_DEFAULT),
-                'd' => ucfirst($username),
-                'r' => $role,
-                'm' => $managerId,
-            ]
-        );
+        // Legacy tests still pass role=manager; map that to is_admin when the column exists.
+        $isAdmin = $role === 'manager' ? 1 : 0;
+        if ($this->db->columnExists('users', 'is_admin')) {
+            $this->db->execute(
+                'INSERT INTO users (username, email, password_hash, display_name, role, manager_id, is_admin)
+                 VALUES (:u, :e, :p, :d, :r, :m, :a)',
+                [
+                    'u' => $username,
+                    'e' => "{$username}@example.com",
+                    'p' => password_hash('test-password', PASSWORD_DEFAULT),
+                    'd' => ucfirst($username),
+                    'r' => $role,
+                    'm' => $managerId,
+                    'a' => $isAdmin,
+                ]
+            );
+        } else {
+            $this->db->execute(
+                'INSERT INTO users (username, email, password_hash, display_name, role, manager_id)
+                 VALUES (:u, :e, :p, :d, :r, :m)',
+                [
+                    'u' => $username,
+                    'e' => "{$username}@example.com",
+                    'p' => password_hash('test-password', PASSWORD_DEFAULT),
+                    'd' => ucfirst($username),
+                    'r' => $role,
+                    'm' => $managerId,
+                ]
+            );
+        }
         $id = $this->db->lastInsertId();
         if ($this->db->tableExists('user_emails')) {
             $this->db->execute(

@@ -17,12 +17,23 @@ CREATE TABLE users (
     display_name    TEXT NOT NULL,
     role            TEXT NOT NULL DEFAULT 'subordinate' CHECK (role IN ('manager','peer','subordinate')),
     manager_id      INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+    is_admin        INTEGER NOT NULL DEFAULT 0,
     timezone        TEXT NOT NULL DEFAULT 'America/Chicago',
     is_active       INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_users_manager ON users(manager_id);
+
+CREATE TABLE user_dotted_managers (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    manager_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, manager_id)
+);
+CREATE INDEX idx_dotted_user ON user_dotted_managers(user_id);
+CREATE INDEX idx_dotted_manager ON user_dotted_managers(manager_id);
 
 -- Addresses that claim inbound confirmation mail for a user.
 CREATE TABLE user_emails (
@@ -162,12 +173,14 @@ CREATE TABLE carriers (
     user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     iata_code       TEXT NULL,
+    carrier_type    TEXT NOT NULL DEFAULT 'airline' CHECK (carrier_type IN ('airline','rail')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (user_id, iata_code)
 );
 CREATE INDEX idx_carriers_user ON carriers(user_id);
 CREATE INDEX idx_carriers_name ON carriers(name);
+CREATE INDEX idx_carriers_type ON carriers(carrier_type);
 
 CREATE TABLE trip_segments (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,

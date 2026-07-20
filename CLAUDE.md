@@ -26,11 +26,12 @@ notifications, and the visibility/sharing engine covering all five
 directions with override precedence. Basic server-rendered PHP UI exists
 for login, hotel list/add/view, dashboard, and sharing settings. VPS
 deployment is bootstrapped by an idempotent `setup.sh`. Additional users
-via `scripts/create_user.php`. Install auto-seeds `admin` with a random
-password; `setup.sh reset-password` regenerates. Existing DBs need
-`php scripts/migrate.php` after pull.
+via `scripts/create_user.php` or `/admin/users.php` (org chart =
+reports-to + dotted line; `is_admin` for site admin). Install auto-seeds
+`admin` with a random password; `setup.sh reset-password` regenerates.
+Existing DBs need `php scripts/migrate.php` after pull.
 
-**Not started:** car/rideshare email parsers, Azure AD SSO, map view,
+**Not started:** car/rideshare email parsers, Azure AD SSO,
 PWA/offline, push notifications, hotel-stay edit page, approval UI for
 auto-imported stays (currently auto-creates + notifies instead of a
 pending-confirmation flow).
@@ -55,13 +56,15 @@ pending-confirmation flow).
 - **Local username/password auth in v1**, not Azure AD. The user's brief
   said M365/Graph integration "would be cool in the future," implying it
   isn't a v1 blocker. Local auth unblocks everything else without an
-  enterprise app registration in the loop. Managers (`role = manager`) get
-  `/admin/users.php`. Mail ownership is correlated via `user_emails`
-  (many addresses per user), not a single `users.email`.
-- **Visibility defaults:** TOP_DOWN (manager viewing subordinate) defaults
-  to full visibility; BOTTOM_UP (subordinate viewing manager) defaults to
-  city+date only. Managers get total exposure of team travel; subordinates
-  have limited exposure of managers. Per-hotel / per-trip `is_private` and
+  enterprise app registration in the loop. Org structure is who reports to
+  whom (`manager_id` solid line + `user_dotted_managers` dotted line), not
+  a coarse role dropdown. Site-admin (`is_admin`) gates `/admin/users.php`
+  and Site settings — separate from the reporting chart. Mail ownership is
+  correlated via `user_emails` (many addresses per user), not a single
+  `users.email`.
+- **Visibility defaults:** TOP_DOWN (manager viewing report, solid or
+  dotted) defaults to full visibility; BOTTOM_UP (report viewing manager)
+  defaults to city+date only. Per-hotel / per-trip `is_private` and
   `visibility_blocks` can hide an item from everyone or from selected users.
 - **Hotels are properties vs stays.** Property identity/amenities/blacklist/
   phone live on `hotel_properties`; visit-specific room/bed/bath/`stay_rating`

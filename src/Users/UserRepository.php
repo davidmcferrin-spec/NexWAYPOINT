@@ -215,31 +215,50 @@ final class UserRepository
         string $displayName,
         string $role,
         ?int $managerId,
-        ?int $actorUserId = null
+        ?int $actorUserId = null,
+        bool $isAdmin = false,
     ): User {
+        // role is legacy; UI no longer sets it. Keep column filled for older code paths.
         if (!in_array($role, ['manager', 'peer', 'subordinate'], true)) {
-            throw new \InvalidArgumentException("Invalid role '{$role}'.");
+            $role = 'subordinate';
         }
 
         $email = strtolower(trim($email));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             throw new \InvalidArgumentException('A valid email address is required.');
         }
+        $this->assertValidManager(null, $managerId);
 
         $hash = password_hash($plainPassword, PASSWORD_DEFAULT);
 
-        $this->db->execute(
-            'INSERT INTO users (username, email, password_hash, display_name, role, manager_id)
-             VALUES (:username, :email, :hash, :display_name, :role, :manager_id)',
-            [
-                'username' => $username,
-                'email' => $email,
-                'hash' => $hash,
-                'display_name' => $displayName,
-                'role' => $role,
-                'manager_id' => $managerId,
-            ]
-        );
+        if ($this->db->columnExists('users', 'is_admin')) {
+            $this->db->execute(
+                'INSERT INTO users (username, email, password_hash, display_name, role, manager_id, is_admin)
+                 VALUES (:username, :email, :hash, :display_name, :role, :manager_id, :is_admin)',
+                [
+                    'username' => $username,
+                    'email' => $email,
+                    'hash' => $hash,
+                    'display_name' => $displayName,
+                    'role' => $role,
+                    'manager_id' => $managerId,
+                    'is_admin' => $isAdmin ? 1 : 0,
+                ]
+            );
+        } else {
+            $this->db->execute(
+                'INSERT INTO users (username, email, password_hash, display_name, role, manager_id)
+                 VALUES (:username, :email, :hash, :display_name, :role, :manager_id)',
+                [
+                    'username' => $username,
+                    'email' => $email,
+                    'hash' => $hash,
+                    'display_name' => $displayName,
+                    'role' => $role,
+                    'manager_id' => $managerId,
+                ]
+            );
+        }
 
         $id = $this->db->lastInsertId();
         $this->db->audit($actorUserId, 'create', 'users', $id, ['username' => $username]);
@@ -262,33 +281,42 @@ final class UserRepository
     public function updateProfile(
         int $userId,
         string $displayName,
-        string $role,
         ?int $managerId,
         bool $isActive,
+        bool $isAdmin,
         ?int $actorUserId = null,
     ): User {
-        if (!in_array($role, ['manager', 'peer', 'subordinate'], true)) {
-            throw new \InvalidArgumentException("Invalid role '{$role}'.");
-        }
-        if ($managerId === $userId) {
-            throw new \InvalidArgumentException('A user cannot be their own manager.');
-        }
+        $this->assertValidManager($userId, $managerId);
 
-        $this->db->execute(
-            'UPDATE users SET display_name = :d, role = :r, manager_id = :m, is_active = :a,
-             updated_at = CURRENT_TIMESTAMP WHERE id = :id',
-            [
-                'd' => trim($displayName),
-                'r' => $role,
-                'm' => $managerId,
-                'a' => $isActive ? 1 : 0,
-                'id' => $userId,
-            ]
-        );
+        if ($this->db->columnExists('users', 'is_admin')) {
+            $this->db->execute(
+                'UPDATE users SET display_name = :d, manager_id = :m, is_active = :a, is_admin = :admin,
+                 updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+                [
+                    'd' => trim($displayName),
+                    'm' => $managerId,
+                    'a' => $isActive ? 1 : 0,
+                    'admin' => $isAdmin ? 1 : 0,
+                    'id' => $userId,
+                ]
+            );
+        } else {
+            $this->db->execute(
+                'UPDATE users SET display_name = :d, manager_id = :m, is_active = :a,
+                 updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+                [
+                    'd' => trim($displayName),
+                    'm' => $managerId,
+                    'a' => $isActive ? 1 : 0,
+                    'id' => $userId,
+                ]
+            );
+        }
         $this->db->audit($actorUserId, 'update', 'users', $userId, [
             'display_name' => $displayName,
-            'role' => $role,
+            'manager_id' => $managerId,
             'is_active' => $isActive,
+            'is_admin' => $isAdmin,
         ]);
 
         $user = $this->find($userId);
@@ -313,8 +341,136 @@ final class UserRepository
         $this->logger->info('User password updated', ['id' => $userId]);
     }
 
+    /**
+     * @return list<int>
+     */
+    public function dottedManagerIds(int $userId): array
+    {
+        if (!$this->db->tableExists('user_dotted_managers')) {
+            return [];
+        }
+        $rows = $this->db->fetchAll(
+            'SELECT manager_id FROM user_dotted_managers WHERE user_id = :uid ORDER BY manager_id',
+            ['uid' => $userId]
+        );
+        return array_map(static fn (array $r) => (int) $r['manager_id'], $rows);
+    }
+
+    /**
+     * @return User[]
+     */
+    public function dottedManagers(int $userId): array
+    {
+        $ids = $this->dottedManagerIds($userId);
+        if ($ids === []) {
+            return [];
+        }
+        $out = [];
+        foreach ($ids as $id) {
+            $u = $this->find($id);
+            if ($u !== null) {
+                $out[] = $u;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Replace dotted-line managers for a user.
+     *
+     * @param list<int> $managerIds
+     */
+    public function setDottedManagers(int $userId, array $managerIds, ?int $actorUserId = null): void
+    {
+        if (!$this->db->tableExists('user_dotted_managers')) {
+            throw new \RuntimeException('user_dotted_managers table missing; run php scripts/migrate.php');
+        }
+
+        $clean = [];
+        foreach ($managerIds as $mid) {
+            $mid = (int) $mid;
+            if ($mid < 1 || $mid === $userId) {
+                continue;
+            }
+            if ($this->find($mid) === null) {
+                throw new \InvalidArgumentException("Dotted-line manager #{$mid} not found.");
+            }
+            $clean[$mid] = $mid;
+        }
+
+        $user = $this->find($userId);
+        if ($user === null) {
+            throw new \InvalidArgumentException('User not found.');
+        }
+        if ($user->managerId !== null && isset($clean[$user->managerId])) {
+            unset($clean[$user->managerId]); // solid line already covers this
+        }
+
+        $this->db->execute('DELETE FROM user_dotted_managers WHERE user_id = :uid', ['uid' => $userId]);
+        foreach ($clean as $mid) {
+            $this->db->execute(
+                'INSERT INTO user_dotted_managers (user_id, manager_id) VALUES (:uid, :mid)',
+                ['uid' => $userId, 'mid' => $mid]
+            );
+        }
+        $this->db->audit($actorUserId, 'set_dotted_managers', 'user_dotted_managers', $userId, [
+            'manager_ids' => array_values($clean),
+        ]);
+    }
+
+    public function hasDottedReport(int $managerId, int $userId): bool
+    {
+        if (!$this->db->tableExists('user_dotted_managers')) {
+            return false;
+        }
+        $row = $this->db->fetchOne(
+            'SELECT 1 AS ok FROM user_dotted_managers WHERE user_id = :uid AND manager_id = :mid LIMIT 1',
+            ['uid' => $userId, 'mid' => $managerId]
+        );
+        return $row !== null;
+    }
+
+    public function isAdmin(User $user): bool
+    {
+        if ($this->db->columnExists('users', 'is_admin')) {
+            return $user->isAdmin;
+        }
+        // Pre-migration fallback
+        return $user->role === 'manager';
+    }
+
+    /** @deprecated Use isAdmin() — org title is manager_id, not role. */
     public function isManager(User $user): bool
     {
-        return $user->role === 'manager';
+        return $this->isAdmin($user);
+    }
+
+    private function assertValidManager(?int $userId, ?int $managerId): void
+    {
+        if ($managerId === null) {
+            return;
+        }
+        if ($userId !== null && $managerId === $userId) {
+            throw new \InvalidArgumentException('A user cannot report to themselves.');
+        }
+        $manager = $this->find($managerId);
+        if ($manager === null || !$manager->isActive) {
+            throw new \InvalidArgumentException('Selected manager was not found (or is inactive).');
+        }
+        // Prevent cycles: walk up from proposed manager; must not hit userId.
+        if ($userId !== null) {
+            $seen = [];
+            $cursor = $manager;
+            while ($cursor !== null && $cursor->managerId !== null) {
+                if ($cursor->managerId === $userId) {
+                    throw new \InvalidArgumentException('That reporting line would create a cycle in the org chart.');
+                }
+                if (isset($seen[$cursor->managerId])) {
+                    break;
+                }
+                $seen[$cursor->managerId] = true;
+                $cursor = $this->find($cursor->managerId);
+            }
+        }
     }
 }

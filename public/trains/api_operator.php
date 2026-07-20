@@ -49,16 +49,12 @@ if (!$app['db']->tableExists('carriers')) {
 try {
     $name = trim((string) ($data['name'] ?? ''));
     $iata = strtoupper(trim((string) ($data['iata_code'] ?? '')));
-    $type = (string) ($data['carrier_type'] ?? Carrier::TYPE_AIRLINE);
-    if (!in_array($type, [Carrier::TYPE_AIRLINE, Carrier::TYPE_RAIL], true)) {
-        $type = Carrier::TYPE_AIRLINE;
-    }
     $created = $repo->create(new Carrier(
         id: null,
         userId: $user->id,
         name: $name,
         iataCode: $iata !== '' ? $iata : null,
-        carrierType: $type,
+        carrierType: Carrier::TYPE_RAIL,
     ), $user->id);
 
     echo json_encode([

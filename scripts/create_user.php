@@ -50,8 +50,9 @@ $options = getopt('', [
     'username:',
     'email:',
     'name:',
-    'role:',
     'manager-id:',
+    'admin',
+    'role:', // deprecated; ignored except for help note
     'password-env:',
     'help',
 ]);
@@ -67,13 +68,14 @@ Options:
   --username=NAME       Login username
   --email=ADDRESS       User email address
   --name="Full Name"    Display name
-  --role=ROLE           manager, peer, or subordinate (default: manager)
-  --manager-id=ID       Existing manager's numeric user ID
+  --manager-id=ID       Solid-line manager's numeric user ID (reports to)
+  --admin               Grant site-admin flag (Users / Site settings)
   --password-env=NAME   Read the password from this environment variable
   --help                Show this help
 
-Missing values are prompted for interactively. Passwords are never accepted
-as command-line arguments because command lines can be visible to other users.
+Org structure is who reports to whom (--manager-id), not a role dropdown.
+--role is deprecated and ignored. Missing values are prompted interactively.
+Passwords are never accepted as command-line arguments.
 
 HELP);
     exit(0);
@@ -82,7 +84,7 @@ HELP);
 $username = trim((string) ($options['username'] ?? prompt('Username')));
 $email = trim((string) ($options['email'] ?? prompt('Email address')));
 $displayName = trim((string) ($options['name'] ?? prompt('Display name')));
-$role = strtolower(trim((string) ($options['role'] ?? 'manager')));
+$isAdmin = isset($options['admin']);
 $managerId = isset($options['manager-id']) ? filter_var($options['manager-id'], FILTER_VALIDATE_INT) : null;
 
 if (!preg_match('/^[A-Za-z0-9._-]{3,100}$/', $username)) {
@@ -93,13 +95,12 @@ if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
     fwrite(STDERR, "A valid email address is required.\n");
     exit(2);
 }
-if (!in_array($role, ['manager', 'peer', 'subordinate'], true)) {
-    fwrite(STDERR, "Role must be manager, peer, or subordinate.\n");
-    exit(2);
-}
 if (isset($options['manager-id']) && ($managerId === false || $managerId < 1)) {
     fwrite(STDERR, "Manager ID must be a positive integer.\n");
     exit(2);
+}
+if (isset($options['role'])) {
+    fwrite(STDERR, "Note: --role is deprecated; use --manager-id for reporting line and --admin for site admin.\n");
 }
 
 $passwordEnvironmentName = (string) ($options['password-env'] ?? '');
@@ -136,10 +137,14 @@ try {
         $email,
         $password,
         $displayName,
-        $role,
+        'subordinate',
         $managerId === false ? null : $managerId,
+        null,
+        $isAdmin,
     );
-    fwrite(STDOUT, "Created {$user->username} (user ID {$user->id}, role {$user->role}).\n");
+    $adminNote = $user->isAdmin ? ', site admin' : '';
+    $mgrNote = $user->managerId !== null ? ", reports to #{$user->managerId}" : '';
+    fwrite(STDOUT, "Created {$user->username} (user ID {$user->id}{$mgrNote}{$adminNote}).\n");
 } catch (Throwable $exception) {
     fwrite(STDERR, "User creation failed: {$exception->getMessage()}\n");
     exit(1);

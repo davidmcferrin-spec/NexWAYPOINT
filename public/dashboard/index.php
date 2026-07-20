@@ -131,7 +131,7 @@ function statusBadgeClass(string $status): string
 
     <h2>Your upcoming trips</h2>
     <?php if ($myUpcomingTrips === []): ?>
-        <p class="empty-state">Nothing on the books. <a href="/flights/add.php">Add a flight</a> or <a href="/hotels/add.php">log a hotel stay</a>.</p>
+        <p class="empty-state">Nothing on the books. <a href="/flights/add.php">Add a flight</a>, <a href="/trains/add.php">add a train</a>, or <a href="/hotels/add.php">log a hotel stay</a>.</p>
     <?php else: ?>
         <?php foreach ($myUpcomingTrips as $trip): ?>
             <div class="card">

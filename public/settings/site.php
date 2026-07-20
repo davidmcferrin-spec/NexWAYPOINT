@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
 use NexWaypoint\Hotels\HotelBrandRepository;
+use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
+$userRepo = new UserRepository($app['db'], $app['logger']);
 
-if ($user->role !== 'manager') {
+if (!$userRepo->isAdmin($user)) {
     http_response_code(403);
-    echo 'Managers only.';
+    echo 'Site admins only.';
     exit;
 }
 

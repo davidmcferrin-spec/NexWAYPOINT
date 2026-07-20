@@ -109,6 +109,33 @@ final class HotelPropertyRepository
     }
 
     /**
+     * Distinct prior "walk to office/venue" labels for combobox suggestions.
+     *
+     * @return list<string>
+     */
+    public function walkToOfficeVenuesForUser(int $userId): array
+    {
+        $rows = $this->db->fetchAll(
+            "SELECT DISTINCT TRIM(walk_to_office_notes) AS venue
+             FROM hotel_properties
+             WHERE user_id = :user_id
+               AND walk_to_office_notes IS NOT NULL
+               AND TRIM(walk_to_office_notes) != ''
+             ORDER BY venue ASC",
+            ['user_id' => $userId]
+        );
+        $venues = [];
+        foreach ($rows as $row) {
+            $venue = trim((string) ($row['venue'] ?? ''));
+            if ($venue === '') {
+                continue;
+            }
+            $venues[] = $venue;
+        }
+        return $venues;
+    }
+
+    /**
      * @return HotelProperty[]
      */
     public function findForUserAtLocation(int $userId, string $city, ?string $stateRegion): array
@@ -319,6 +346,18 @@ final class HotelPropertyRepository
             throw new \RuntimeException('Hotel property update succeeded but row could not be re-read.');
         }
         return $updated;
+    }
+
+    public function updateCoordinates(int $propertyId, float $latitude, float $longitude, ?int $actorUserId = null): void
+    {
+        $this->db->execute(
+            'UPDATE hotel_properties SET latitude = :lat, longitude = :lon, updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+            ['lat' => $latitude, 'lon' => $longitude, 'id' => $propertyId]
+        );
+        $this->db->audit($actorUserId, 'update_coordinates', 'hotel_properties', $propertyId, [
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+        ]);
     }
 
     public function recomputeOverallRating(int $propertyId): void

@@ -15,6 +15,7 @@ final class User
         public readonly ?int $managerId,
         public readonly string $timezone,
         public readonly bool $isActive,
+        public readonly bool $isAdmin = false,
     ) {
     }
 
@@ -32,6 +33,7 @@ final class User
             managerId: isset($row['manager_id']) ? (int) $row['manager_id'] : null,
             timezone: (string) ($row['timezone'] ?? 'America/Chicago'),
             isActive: (bool) $row['is_active'],
+            isAdmin: (bool) ($row['is_admin'] ?? false),
         );
     }
 }

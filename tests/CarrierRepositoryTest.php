@@ -82,4 +82,21 @@ final class CarrierRepositoryTest extends NexWaypointTestCase
         $updated = $repo->update(new Carrier($created->id, $userId, 'Southwest Airlines', 'WN'), $userId);
         self::assertSame('Southwest Airlines', $updated->name);
     }
+
+    public function testRailOperatorWithoutIata(): void
+    {
+        $userId = $this->insertUser('dave');
+        $repo = new CarrierRepository($this->db, $this->logger);
+
+        $amtrak = $repo->create(new Carrier(null, $userId, 'Amtrak', '2V', Carrier::TYPE_RAIL));
+        self::assertTrue($amtrak->isRail());
+
+        $via = $repo->create(new Carrier(null, $userId, 'VIA Rail', null, Carrier::TYPE_RAIL));
+        self::assertNull($via->iataCode);
+
+        $airlines = $repo->findForUser($userId, Carrier::TYPE_AIRLINE);
+        $rails = $repo->findForUser($userId, Carrier::TYPE_RAIL);
+        self::assertCount(0, $airlines);
+        self::assertCount(2, $rails);
+    }
 }

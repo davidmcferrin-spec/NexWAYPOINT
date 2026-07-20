@@ -21,6 +21,7 @@ if ($property === null || $property->userId !== $user->id) {
 }
 
 $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect($property->brand);
+$walkToOfficeVenues = $repo->walkToOfficeVenuesForUser($user->id);
 
 $errors = [];
 $message = null;
@@ -75,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 hasEvCharging: $checkbox('has_ev_charging'),
                 hasOnsiteRestaurant: $checkbox('has_onsite_restaurant'),
                 hasOffsiteGym: $checkbox('has_offsite_gym'),
-                walkToOffice: $checkbox('walk_to_office'),
+                walkToOffice: $checkbox('walk_to_office') || $nullable($_POST['walk_to_office_notes'] ?? null) !== null,
                 walkToOfficeNotes: $nullable($_POST['walk_to_office_notes'] ?? null),
                 hasDestinationFee: $checkbox('has_destination_fee'),
                 destinationFeeNotes: null,
@@ -104,17 +105,7 @@ $prefix = '';
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
 </head>
 <body>
-<nav class="navbar">
-    <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
-    <div class="navbar-links">
-        <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/properties.php">Hotels</a>
-        <a href="/hotels/list.php">Stays</a>
-        <a href="/hotels/add.php">+ Log a stay</a>
-        <a href="/logout.php">Sign out</a>
-        <?php require dirname(__DIR__) . '/_theme_toggle.php'; ?>
-    </div>
-</nav>
+<?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
     <p><a href="/hotels/properties.php">&larr; Back to hotels</a></p>
     <h1>Edit property</h1>

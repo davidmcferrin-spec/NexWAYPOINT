@@ -249,6 +249,9 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
         self::assertTrue($found->walkToOffice);
         self::assertSame('NewsNation bureau', $found->walkToOfficeNotes);
         self::assertSame('312-555-0100', $found->phone);
+
+        $venues = $this->properties->walkToOfficeVenuesForUser($userId);
+        self::assertSame(['NewsNation bureau'], $venues);
     }
 
     public function testLocationsForUserAndFindAtLocation(): void

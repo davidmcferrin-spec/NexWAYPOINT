@@ -1,5 +1,8 @@
 /**
- * Carrier dropdown + Add New modal for flight entry.
+ * Carrier / rail-operator dropdown + Add New modal.
+ * Configure via data attributes on #carrier_id:
+ *   data-api="/flights/api_carrier.php")
+ *   data-carrier-type="airline" | "rail"
  */
 (function () {
     function ready(fn) {
@@ -19,6 +22,8 @@
             return;
         }
 
+        var apiUrl = select.getAttribute('data-api') || '/flights/api_carrier.php';
+        var carrierType = select.getAttribute('data-carrier-type') || 'airline';
         var csrfInput = document.querySelector('input[name="csrf_token"]');
         var csrf = csrfInput ? csrfInput.value : '';
 
@@ -56,10 +61,11 @@
             var payload = {
                 csrf_token: csrf,
                 name: fd.get('name'),
-                iata_code: fd.get('iata_code')
+                iata_code: fd.get('iata_code') || '',
+                carrier_type: carrierType
             };
 
-            fetch('/flights/api_carrier.php', {
+            fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify(payload),
@@ -70,13 +76,12 @@
                 });
             }).then(function (result) {
                 if (!result.body || !result.body.ok) {
-                    throw new Error((result.body && result.body.error) || 'Could not create carrier');
+                    throw new Error((result.body && result.body.error) || 'Could not create operator');
                 }
                 var c = result.body.carrier;
                 var opt = document.createElement('option');
                 opt.value = String(c.id);
                 opt.textContent = c.label;
-                // Insert before Add New
                 var addNew = select.querySelector('option[value="__new__"]');
                 select.insertBefore(opt, addNew);
                 select.value = String(c.id);

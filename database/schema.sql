@@ -8,10 +8,9 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------------------------------------------------------
--- users: org hierarchy is a self-referential manager_id chain.
--- role is coarse (RBAC on admin screens); actual visibility direction between
--- two users is resolved dynamically from the manager_id chain, see
--- src/Visibility/VisibilityEngine.php
+-- users: org hierarchy via manager_id (solid line). is_admin gates site-admin
+-- screens. Legacy `role` is unused by the UI; visibility uses manager_id +
+-- dotted lines (user_dotted_managers).
 -- ----------------------------------------------------------------------------
 CREATE TABLE users (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -21,12 +20,26 @@ CREATE TABLE users (
     display_name    VARCHAR(150) NOT NULL,
     role            ENUM('manager','peer','subordinate') NOT NULL DEFAULT 'subordinate',
     manager_id      INT UNSIGNED NULL,
+    is_admin        TINYINT(1) NOT NULL DEFAULT 0,
     timezone        VARCHAR(64) NOT NULL DEFAULT 'America/Chicago',
     is_active       TINYINT(1) NOT NULL DEFAULT 1,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_users_manager FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_users_manager (manager_id)
+) ENGINE=InnoDB;
+
+-- Dotted-line (matrix) managers.
+CREATE TABLE user_dotted_managers (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT UNSIGNED NOT NULL,
+    manager_id      INT UNSIGNED NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_dotted_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_dotted_manager FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_dotted (user_id, manager_id),
+    INDEX idx_dotted_user (user_id),
+    INDEX idx_dotted_manager (manager_id)
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
@@ -203,19 +216,22 @@ CREATE TABLE trips (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
--- carriers: reusable airlines per user (name + IATA for FlightAware idents).
+-- carriers: reusable airlines / rail operators per user.
+-- Airlines require IATA for FlightAware; rail operators may omit it (Amtrak often uses 2V).
 -- ----------------------------------------------------------------------------
 CREATE TABLE carriers (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id         INT UNSIGNED NOT NULL,
     name            VARCHAR(100) NOT NULL,
     iata_code       VARCHAR(3) NULL,
+    carrier_type    ENUM('airline','rail') NOT NULL DEFAULT 'airline',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_carriers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY uq_carrier_user_iata (user_id, iata_code),
     INDEX idx_carriers_user (user_id),
-    INDEX idx_carriers_name (name)
+    INDEX idx_carriers_name (name),
+    INDEX idx_carriers_type (carrier_type)
 ) ENGINE=InnoDB;
 
 CREATE TABLE trip_segments (

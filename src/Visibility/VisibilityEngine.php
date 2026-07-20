@@ -74,15 +74,23 @@ final class VisibilityEngine
         }
 
         if ($subject->managerId === $requesterId) {
-            return self::DIRECTION_TOP_DOWN; // requester manages subject
+            return self::DIRECTION_TOP_DOWN; // requester manages subject (solid)
         }
 
         if ($requester->managerId === $subjectUserId) {
-            return self::DIRECTION_BOTTOM_UP; // requester reports to subject
+            return self::DIRECTION_BOTTOM_UP; // requester reports to subject (solid)
+        }
+
+        // Dotted-line (matrix) relationships use the same visibility defaults.
+        if ($this->users->hasDottedReport($requesterId, $subjectUserId)) {
+            return self::DIRECTION_TOP_DOWN;
+        }
+        if ($this->users->hasDottedReport($subjectUserId, $requesterId)) {
+            return self::DIRECTION_BOTTOM_UP;
         }
 
         if ($requester->managerId !== null && $requester->managerId === $subject->managerId) {
-            return self::DIRECTION_LATERAL; // peers, same manager
+            return self::DIRECTION_LATERAL; // peers, same solid-line manager
         }
 
         return self::DIRECTION_UNRELATED;
