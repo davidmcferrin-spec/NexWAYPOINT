@@ -453,8 +453,13 @@ $attachedHotels = nx_builder_hotel_rows($userStays, $propertyRepo, $attachedStay
 
 $attachableStays = [];
 $attachedSet = array_fill_keys($attachedStayIds, true);
+$todayYmd = (new DateTimeImmutable('today'))->format('Y-m-d');
 foreach ($userStays as $stay) {
     if ($stay->id === null || isset($attachedSet[(int) $stay->id])) {
+        continue;
+    }
+    // Past stays clutter the picker; only current/upcoming (checkout today or later).
+    if ($stay->stayEnd < $todayYmd) {
         continue;
     }
     $prop = $propertyRepo->find($stay->hotelPropertyId);
@@ -575,7 +580,7 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
             <div class="trip-hotels-controls">
                 <label class="trip-hotel-attach">Attach existing stay
                     <select id="trip-hotel-attach-select" <?= $schemaWarning !== null ? 'disabled' : '' ?>>
-                        <option value="">— Select stay —</option>
+                        <option value="">— Select upcoming stay —</option>
                         <?php foreach ($attachableStays as $opt): ?>
                             <option value="<?= (int) $opt['stay_id'] ?>"><?= htmlspecialchars($opt['label'], ENT_QUOTES) ?></option>
                         <?php endforeach; ?>

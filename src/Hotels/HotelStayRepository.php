@@ -145,6 +145,9 @@ final class HotelStayRepository
 
     /**
      * Insert or update a stay keyed by confirmation_code when present.
+     * If no confirmation match, soft-match same user + property + check-in
+     * (and check-out when provided) so a manual stay absorbs the email import
+     * instead of creating a duplicate.
      *
      * @return array{stay: HotelStay, created: bool}
      */
@@ -153,29 +156,202 @@ final class HotelStayRepository
         if ($stay->confirmationCode !== null && trim($stay->confirmationCode) !== '') {
             $existing = $this->findByConfirmationCode($stay->userId, $stay->confirmationCode);
             if ($existing !== null) {
-                $updated = $this->update(new HotelStay(
-                    id: $existing->id,
-                    userId: $existing->userId,
-                    hotelPropertyId: $stay->hotelPropertyId,
-                    roomNumber: $existing->roomNumber,
-                    bedType: $existing->bedType,
-                    bathroomType: $existing->bathroomType,
-                    stayStart: $stay->stayStart,
-                    stayEnd: $stay->stayEnd,
-                    stayRating: $existing->stayRating,
-                    lastStayPrice: $existing->lastStayPrice,
-                    currency: $existing->currency,
-                    bookingSource: $existing->bookingSource ?? $stay->bookingSource,
-                    confirmationCode: $stay->confirmationCode,
-                    wouldReturn: $existing->wouldReturn,
-                    notes: $this->mergeImportNotes($existing->notes, $stay->notes),
-                    isPrivate: $existing->isPrivate,
-                ), $actorUserId);
-                return ['stay' => $updated, 'created' => false];
+                return [
+                    'stay' => $this->applyImportOntoExisting($existing, $stay, $actorUserId),
+                    'created' => false,
+                ];
             }
         }
 
+        $soft = $this->findForImportDateMatch(
+            $stay->userId,
+            $stay->hotelPropertyId,
+            $stay->stayStart,
+            $stay->stayEnd,
+        );
+        if ($soft !== null) {
+            return [
+                'stay' => $this->applyImportOntoExisting($soft, $stay, $actorUserId),
+                'created' => false,
+            ];
+        }
+
         return ['stay' => $this->create($stay, $actorUserId), 'created' => true];
+    }
+
+    /**
+     * Same property + check-in date for this user (optional exact check-out).
+     * Used when email import has no confirmation match against a manual stay.
+     */
+    public function findForImportDateMatch(
+        int $userId,
+        int $hotelPropertyId,
+        string $checkIn,
+        ?string $checkOut = null,
+    ): ?HotelStay {
+        $rows = $this->db->fetchAll(
+            'SELECT * FROM hotel_stays
+             WHERE user_id = :user_id
+               AND hotel_property_id = :pid
+               AND stay_start = :start
+             ORDER BY id DESC LIMIT 10',
+            [
+                'user_id' => $userId,
+                'pid' => $hotelPropertyId,
+                'start' => $checkIn,
+            ]
+        );
+        if ($rows === []) {
+            return null;
+        }
+        if ($checkOut !== null && $checkOut !== '') {
+            foreach ($rows as $row) {
+                if (($row['stay_end'] ?? null) === $checkOut) {
+                    return HotelStay::fromRow($row);
+                }
+            }
+        }
+        return HotelStay::fromRow($rows[0]);
+    }
+
+    /**
+     * Merge $absorbId into $keepId (same owner). Keeps user-entered fields on
+     * the survivor when set; fills gaps from the absorbed stay (confirmation,
+     * price, dates from import, etc.). Re-points trip segments, photos, and
+     * visibility blocks, then deletes the absorbed stay.
+     */
+    public function mergeStays(int $keepId, int $absorbId, ?int $actorUserId = null): HotelStay
+    {
+        if ($keepId === $absorbId) {
+            throw new \InvalidArgumentException('Cannot merge a stay into itself.');
+        }
+
+        $keep = $this->find($keepId);
+        $absorb = $this->find($absorbId);
+        if ($keep === null || $absorb === null) {
+            throw new \InvalidArgumentException('One or both stays were not found.');
+        }
+        if ($keep->userId !== $absorb->userId) {
+            throw new \InvalidArgumentException('Stays must belong to the same user.');
+        }
+
+        $prefer = static function (mixed $primary, mixed $fallback): mixed {
+            if ($primary === null) {
+                return $fallback;
+            }
+            if (is_string($primary) && trim($primary) === '') {
+                return $fallback;
+            }
+            return $primary;
+        };
+
+        // Email confirmation usually has the authoritative booking window.
+        $absorbHasConf = $absorb->confirmationCode !== null && trim($absorb->confirmationCode) !== '';
+        $stayStart = $absorbHasConf ? $absorb->stayStart : $keep->stayStart;
+        $stayEnd = $absorbHasConf ? $absorb->stayEnd : $keep->stayEnd;
+
+        $merged = $this->update(new HotelStay(
+            id: $keep->id,
+            userId: $keep->userId,
+            hotelPropertyId: $keep->hotelPropertyId > 0
+                ? $keep->hotelPropertyId
+                : $absorb->hotelPropertyId,
+            roomNumber: $prefer($keep->roomNumber, $absorb->roomNumber),
+            bedType: $prefer($keep->bedType, $absorb->bedType),
+            bathroomType: $prefer($keep->bathroomType, $absorb->bathroomType),
+            stayStart: $stayStart,
+            stayEnd: $stayEnd,
+            stayRating: $prefer($keep->stayRating, $absorb->stayRating),
+            lastStayPrice: $prefer($keep->lastStayPrice, $absorb->lastStayPrice),
+            currency: $keep->currency !== '' ? $keep->currency : $absorb->currency,
+            bookingSource: $prefer($keep->bookingSource, $absorb->bookingSource),
+            confirmationCode: $prefer($keep->confirmationCode, $absorb->confirmationCode),
+            wouldReturn: $prefer($keep->wouldReturn, $absorb->wouldReturn),
+            notes: $this->mergeImportNotes($keep->notes, $absorb->notes),
+            isPrivate: $keep->isPrivate || $absorb->isPrivate,
+        ), $actorUserId);
+
+        $this->db->execute(
+            'UPDATE trip_segments SET hotel_stay_id = :keep WHERE hotel_stay_id = :absorb',
+            ['keep' => $keepId, 'absorb' => $absorbId]
+        );
+        $this->db->execute(
+            'UPDATE hotel_photos SET hotel_stay_id = :keep WHERE hotel_stay_id = :absorb',
+            ['keep' => $keepId, 'absorb' => $absorbId]
+        );
+
+        // Move visibility blocks that aren't already on the survivor.
+        $existingBlocks = $this->db->fetchAll(
+            "SELECT blocked_user_id FROM visibility_blocks
+             WHERE resource_type = 'hotel_stay' AND resource_id = :keep",
+            ['keep' => $keepId]
+        );
+        $blocked = [];
+        foreach ($existingBlocks as $row) {
+            $blocked[(int) $row['blocked_user_id']] = true;
+        }
+        $absorbBlocks = $this->db->fetchAll(
+            "SELECT * FROM visibility_blocks
+             WHERE resource_type = 'hotel_stay' AND resource_id = :absorb",
+            ['absorb' => $absorbId]
+        );
+        foreach ($absorbBlocks as $row) {
+            $uid = (int) $row['blocked_user_id'];
+            if (!isset($blocked[$uid])) {
+                $this->db->execute(
+                    "UPDATE visibility_blocks SET resource_id = :keep WHERE id = :id",
+                    ['keep' => $keepId, 'id' => (int) $row['id']]
+                );
+            }
+        }
+        $this->db->execute(
+            "DELETE FROM visibility_blocks WHERE resource_type = 'hotel_stay' AND resource_id = :absorb",
+            ['absorb' => $absorbId]
+        );
+
+        $this->delete($absorbId, $actorUserId);
+        $this->db->audit($actorUserId, 'merge', 'hotel_stays', $keepId, [
+            'absorbed_id' => $absorbId,
+        ]);
+        $this->logger->info('Hotel stays merged', [
+            'keep_id' => $keepId,
+            'absorb_id' => $absorbId,
+        ]);
+
+        $final = $this->find($keepId);
+        if ($final === null) {
+            throw new \RuntimeException('Merge succeeded but survivor stay could not be re-read.');
+        }
+        return $final;
+    }
+
+    private function applyImportOntoExisting(
+        HotelStay $existing,
+        HotelStay $incoming,
+        ?int $actorUserId,
+    ): HotelStay {
+        return $this->update(new HotelStay(
+            id: $existing->id,
+            userId: $existing->userId,
+            hotelPropertyId: $incoming->hotelPropertyId > 0
+                ? $incoming->hotelPropertyId
+                : $existing->hotelPropertyId,
+            roomNumber: $existing->roomNumber,
+            bedType: $existing->bedType,
+            bathroomType: $existing->bathroomType,
+            stayStart: $incoming->stayStart,
+            stayEnd: $incoming->stayEnd,
+            stayRating: $existing->stayRating,
+            lastStayPrice: $existing->lastStayPrice ?? $incoming->lastStayPrice,
+            currency: $existing->currency !== '' ? $existing->currency : $incoming->currency,
+            bookingSource: $existing->bookingSource ?? $incoming->bookingSource,
+            confirmationCode: ($existing->confirmationCode !== null && trim($existing->confirmationCode) !== '')
+                ? $existing->confirmationCode
+                : $incoming->confirmationCode,
+            wouldReturn: $existing->wouldReturn,
+            notes: $this->mergeImportNotes($existing->notes, $incoming->notes),
+            isPrivate: $existing->isPrivate,
+        ), $actorUserId);
     }
 
     /**
@@ -244,7 +420,7 @@ final class HotelStayRepository
         if (str_contains($existing, $incoming)) {
             return $existing;
         }
-        return $existing;
+        return trim($existing) . "\n" . trim($incoming);
     }
 
     public function update(HotelStay $stay, ?int $actorUserId = null): HotelStay

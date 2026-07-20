@@ -48,6 +48,21 @@ $checkbox = static fn (string $key): bool => isset($_POST[$key]) && $_POST[$key]
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $errors[] = 'Your session expired. Please resubmit the form.';
+    } elseif (($_POST['action'] ?? '') === 'merge') {
+        try {
+            $absorbId = (int) ($_POST['absorb_stay_id'] ?? 0);
+            if ($absorbId <= 0) {
+                throw new InvalidArgumentException('Choose a stay to merge into this one.');
+            }
+            $stay = $stayRepo->mergeStays((int) $stay->id, $absorbId, $user->id);
+            $property = $propertyRepo->find($stay->hotelPropertyId) ?? $property;
+            $message = 'Stays merged. Confirmation, dates, and trip links were combined into this stay.';
+        } catch (InvalidArgumentException $e) {
+            $errors[] = $e->getMessage();
+        } catch (Throwable $e) {
+            $app['logger']->error('Stay merge failed', ['error' => $e->getMessage()]);
+            $errors[] = 'Could not merge stays. Please try again.';
+        }
     } else {
         try {
             $ratingRaw = trim((string) ($_POST['stay_rating'] ?? ''));
@@ -107,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $val = static function (string $key, mixed $fallback = '') use ($stay): string {
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && array_key_exists($key, $_POST)) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'merge' && array_key_exists($key, $_POST)) {
         return (string) $_POST[$key];
     }
     return match ($key) {
@@ -132,12 +147,36 @@ $otherUsers = array_values(array_filter(
     $userRepo->findAllActive(),
     static fn ($u) => $u->id !== $user->id
 ));
-$isPrivate = $_SERVER['REQUEST_METHOD'] === 'POST'
+$isPrivate = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'merge'
     ? $checkbox('is_private')
     : $stay->isPrivate;
-$blockedUserIds = $_SERVER['REQUEST_METHOD'] === 'POST'
+$blockedUserIds = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'merge'
     ? array_map('intval', $_POST['hide_from'] ?? [])
     : $blockRepo->blockedUserIds(VisibilityBlockRepository::TYPE_HOTEL_STAY, (int) $stay->id);
+
+// Merge candidates: other stays for this user; same property first.
+$mergeCandidates = [];
+foreach ($stayRepo->findForUser($user->id, 'stay_start DESC') as $candidate) {
+    if ($candidate->id === null || (int) $candidate->id === (int) $stay->id) {
+        continue;
+    }
+    $candProp = $propertyRepo->find($candidate->hotelPropertyId);
+    $sameProperty = (int) $candidate->hotelPropertyId === (int) $stay->hotelPropertyId;
+    $mergeCandidates[] = [
+        'stay_id' => (int) $candidate->id,
+        'same_property' => $sameProperty,
+        'label' => ($candProp !== null ? $candProp->hotelName : 'Hotel')
+            . ' · ' . $candidate->stayStart . ' → ' . $candidate->stayEnd
+            . ($candidate->confirmationCode ? ' · #' . $candidate->confirmationCode : '')
+            . ($sameProperty ? '' : ' (different property)'),
+    ];
+}
+usort($mergeCandidates, static function (array $a, array $b): int {
+    if ($a['same_property'] !== $b['same_property']) {
+        return $a['same_property'] ? -1 : 1;
+    }
+    return $b['stay_id'] <=> $a['stay_id'];
+});
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -240,6 +279,30 @@ $blockedUserIds = $_SERVER['REQUEST_METHOD'] === 'POST'
 
         <button type="submit" class="primary">Save stay</button>
     </form>
+
+    <?php if ($mergeCandidates !== []): ?>
+        <form method="post" class="stack" style="margin-top: 2rem;"
+              onsubmit="return confirm('Merge the selected stay into this one? The other stay will be deleted.');">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="merge">
+            <fieldset>
+                <legend>Merge duplicate stay</legend>
+                <p class="hint">
+                    Use this when you logged a stay manually and email import created a second copy.
+                    This stay is kept; ratings/room notes win here; confirmation + booking dates come from the other stay when it has a confirmation code.
+                </p>
+                <label>Absorb into this stay
+                    <select name="absorb_stay_id" required>
+                        <option value="">— Select duplicate —</option>
+                        <?php foreach ($mergeCandidates as $opt): ?>
+                            <option value="<?= (int) $opt['stay_id'] ?>"><?= htmlspecialchars($opt['label'], ENT_QUOTES) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <button type="submit" class="secondary">Merge into this stay</button>
+            </fieldset>
+        </form>
+    <?php endif; ?>
 </main>
 </body>
 </html>

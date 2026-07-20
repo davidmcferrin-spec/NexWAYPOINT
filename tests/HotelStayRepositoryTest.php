@@ -404,4 +404,74 @@ final class HotelStayRepositoryTest extends NexWaypointTestCase
         self::assertNull($this->stays->find((int) $stay->id));
         self::assertSame([], $this->stays->photosFor((int) $stay->id));
     }
+
+    public function testUpsertFromImportSoftMatchesManualStayByPropertyAndDates(): void
+    {
+        $userId = $this->insertUser('dave');
+        $property = $this->properties->create($this->makeProperty($userId));
+        $pid = (int) $property->id;
+
+        $manual = $this->stays->create($this->makeStay($userId, $pid, [
+            'stayStart' => '2026-09-10',
+            'stayEnd' => '2026-09-12',
+            'stayRating' => 5,
+            'roomNumber' => '801',
+            'confirmationCode' => null,
+            'bookingSource' => 'manual',
+        ]));
+
+        $result = $this->stays->upsertFromImport($this->makeStay($userId, $pid, [
+            'stayStart' => '2026-09-10',
+            'stayEnd' => '2026-09-12',
+            'stayRating' => null,
+            'roomNumber' => null,
+            'confirmationCode' => 'HILTON999',
+            'bookingSource' => 'email_import',
+            'notes' => 'From Hilton email',
+        ]), $userId);
+
+        self::assertFalse($result['created']);
+        self::assertSame((int) $manual->id, (int) $result['stay']->id);
+        self::assertSame('HILTON999', $result['stay']->confirmationCode);
+        self::assertSame(5, $result['stay']->stayRating);
+        self::assertSame('801', $result['stay']->roomNumber);
+        self::assertCount(1, $this->stays->findForUser($userId));
+    }
+
+    public function testMergeStaysKeepsManualFieldsAndAbsorbsConfirmation(): void
+    {
+        $userId = $this->insertUser('dave');
+        $property = $this->properties->create($this->makeProperty($userId));
+        $pid = (int) $property->id;
+
+        $keep = $this->stays->create($this->makeStay($userId, $pid, [
+            'stayStart' => '2026-10-01',
+            'stayEnd' => '2026-10-03',
+            'stayRating' => 4,
+            'roomNumber' => '12',
+            'confirmationCode' => null,
+            'bookingSource' => 'manual',
+            'notes' => 'Logged ahead',
+        ]));
+        $dup = $this->stays->create($this->makeStay($userId, $pid, [
+            'stayStart' => '2026-10-01',
+            'stayEnd' => '2026-10-04',
+            'stayRating' => null,
+            'roomNumber' => null,
+            'confirmationCode' => 'EMAIL42',
+            'bookingSource' => 'email_import',
+            'notes' => 'Conf email',
+        ]));
+
+        $merged = $this->stays->mergeStays((int) $keep->id, (int) $dup->id, $userId);
+
+        self::assertSame((int) $keep->id, (int) $merged->id);
+        self::assertNull($this->stays->find((int) $dup->id));
+        self::assertSame('EMAIL42', $merged->confirmationCode);
+        self::assertSame('2026-10-01', $merged->stayStart);
+        self::assertSame('2026-10-04', $merged->stayEnd);
+        self::assertSame(4, $merged->stayRating);
+        self::assertSame('12', $merged->roomNumber);
+        self::assertStringContainsString('Logged ahead', (string) $merged->notes);
+    }
 }

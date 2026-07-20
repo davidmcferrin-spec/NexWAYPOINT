@@ -101,8 +101,10 @@ Mail auto-import stays on auto-create + notify (no pending-approval queue).
   (teammates can see matching adverse prefs). Any auth user can edit
   amenities; hard-delete property is site-admin only. Add-stay UI filters
   by **City, State** then property; Add New is a modal. Rate/edit a stay via
-  `public/hotels/edit-stay.php`. Edit property via
-  `public/hotels/edit-property.php`.
+  `public/hotels/edit-stay.php` (includes merge-duplicate). Edit property via
+  `public/hotels/edit-property.php`. Email import upserts by confirmation
+  code, else soft-matches same property + check-in so manual stays absorb
+  the confirmation instead of duplicating.
 - **Carriers own IATA.** Per-user `carriers` table (name + iata_code);
   `trip_segments.carrier_id` links flights. Flight form asks for flight
   number only; enrichment builds FlightAware ident as IATA+number.
