@@ -77,12 +77,13 @@ All PHP files pass `php -l`.
   `--install-packages` / `--with-dev` exist for non-DreamHost hosts.
   Maintenance commands: `backup`, `update` (git pull with pre-backup),
   `restore`, and `list-backups`.
-- **Production host layout keeps the DreamHost domain folder alone.** Code
-  lives at `/home/dh_w9tij7/NexWAYPOINT`; the public site is
-  `https://nexwaypoint.area51consulting.com`. Set the domain's Web Directory
-  in the DreamHost panel to `/home/dh_w9tij7/NexWAYPOINT/public`. Do not
-  symlink or replace `/home/dh_w9tij7/nexwaypoint.area51consulting.com`.
-  Storage and secrets stay under the clone, never under a web-facing path.
+- **Production host layout keeps the DreamHost domain folder and deploys into
+  it.** Code lives at `/home/dh_w9tij7/NexWAYPOINT`; the public site is
+  `https://nexwaypoint.area51consulting.com` served from
+  `/home/dh_w9tij7/nexwaypoint.area51consulting.com`. `setup.sh deploy`
+  (also run by install/update) publishes `public/` into that folder with
+  absolute symlinks so PHP bootstrap paths still resolve under the clone.
+  Storage and secrets stay under the clone, never copied into the web dir.
 
 ## Things to watch out for
 

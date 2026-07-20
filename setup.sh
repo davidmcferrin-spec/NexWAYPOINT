@@ -16,13 +16,16 @@ RESTORE_CODE=false
 FORCE_UPDATE=false
 
 # Production layout on DreamHost:
-#   code + public web root: /home/dh_w9tij7/NexWAYPOINT
-#   site: https://nexwaypoint.area51consulting.com
-# Set the domain's Web Directory in the DreamHost panel to NexWAYPOINT/public.
-# Do not replace or symlink /home/dh_w9tij7/nexwaypoint.area51consulting.com.
+#   code: /home/dh_w9tij7/NexWAYPOINT
+#   web:  /home/dh_w9tij7/nexwaypoint.area51consulting.com
+# setup.sh deploy publishes public/ into the DreamHost domain folder via
+# absolute symlinks (keeps the domain directory itself; does not replace it).
 DEFAULT_SITE_HOST="nexwaypoint.area51consulting.com"
 DEFAULT_SITE_URL="https://${DEFAULT_SITE_HOST}"
+DEFAULT_WEB_ROOT="/home/dh_w9tij7/${DEFAULT_SITE_HOST}"
 SITE_URL="${DEFAULT_SITE_URL}"
+WEB_ROOT="${DEFAULT_WEB_ROOT}"
+SKIP_DEPLOY=false
 
 usage() {
     cat <<'EOF'
@@ -30,13 +33,17 @@ Install and maintain NexWAYPOINT on DreamHost (no sudo) or a Debian/Ubuntu host.
 
 Usage:
   ./setup.sh [install options]           First-time / re-run install
+  ./setup.sh deploy                      Publish public/ into the DreamHost web dir
   ./setup.sh backup                      Snapshot .env, storage, and DB dump
-  ./setup.sh update [--ref REF]          Backup, then git-fetch/pull the repo
+  ./setup.sh update [--ref REF]          Backup, git-pull, then redeploy web
   ./setup.sh restore [ID|latest] [--code]
   ./setup.sh list-backups                Show available backup IDs
 
 Install options:
   --skip-user          Do not offer to create a local login
+  --skip-deploy        Do not publish public/ into the DreamHost web directory
+  --web-root PATH      DreamHost domain web directory
+                       (default: /home/dh_w9tij7/nexwaypoint.area51consulting.com)
   --install-packages   Attempt apt package installs (requires root/sudo)
   --with-dev           Offer to run Composer for PHPUnit only
 
@@ -49,8 +56,9 @@ Update / restore options:
 Legacy flag forms also work: --backup, --update, --restore [ID], --list-backups
 
 DreamHost note: no sudo, apt, or Composer needed at runtime. Use the panel for
-PHP, MySQL, and the domain Web Directory (NexWAYPOINT/public). setup.sh never
-touches /home/dh_w9tij7/nexwaypoint.area51consulting.com.
+PHP and MySQL. Leave the domain Web Directory at the default domain folder;
+setup.sh publishes web files into it with symlinks to NexWAYPOINT/public so
+PHP bootstrap paths keep working. The domain folder itself is never replaced.
 
 Backups are stored under storage/backups/<timestamp>/ (outside the web root).
 EOF
@@ -366,6 +374,83 @@ ensure_storage_dirs() {
         "${BACKUP_ROOT}"
 }
 
+deploy_web() {
+    local public_dir="${ROOT_DIR}/public"
+    local item
+    local name
+    local target
+    local linked=0
+
+    if [[ "${SKIP_DEPLOY}" == true ]]; then
+        echo "Skipping web deploy (--skip-deploy)."
+        return
+    fi
+
+    if [[ ! -d "${public_dir}" ]]; then
+        echo "Missing public/ directory at ${public_dir}." >&2
+        exit 1
+    fi
+
+    if [[ ! -d "${WEB_ROOT}" ]]; then
+        echo "Creating DreamHost web directory ${WEB_ROOT}"
+        mkdir -p "${WEB_ROOT}"
+    fi
+
+    if [[ -e "${WEB_ROOT}/index.html" && ! -L "${WEB_ROOT}/index.html" ]]; then
+        mv -- "${WEB_ROOT}/index.html" "${WEB_ROOT}/index.html.dreamhost.bak.$(date +%Y%m%d%H%M%S)"
+        echo "Moved DreamHost placeholder index.html aside."
+    fi
+
+    # Publish every top-level public/ entry into the domain folder via absolute
+    # symlinks. PHP resolves __DIR__/__FILE__ through the real path, so
+    # config/bootstrap.php keeps resolving under the git clone.
+    shopt -s nullglob
+    for item in "${public_dir}"/*; do
+        name="$(basename -- "${item}")"
+        target="${WEB_ROOT}/${name}"
+        if [[ -e "${target}" || -L "${target}" ]]; then
+            if [[ -L "${target}" ]]; then
+                rm -- "${target}"
+            elif [[ -d "${target}" && ! -L "${target}" ]]; then
+                echo "Refusing to replace existing directory ${target}. Move it aside and rerun deploy." >&2
+                exit 1
+            else
+                mv -- "${target}" "${target}.bak.$(date +%Y%m%d%H%M%S)"
+            fi
+        fi
+        ln -sfn "${item}" "${target}"
+        linked=$((linked + 1))
+        echo "  ${name} -> ${item}"
+    done
+    shopt -u nullglob
+
+    # Drop stale NexWAYPOINT symlinks that no longer exist in public/.
+    shopt -s nullglob
+    for item in "${WEB_ROOT}"/*; do
+        [[ -L "${item}" ]] || continue
+        target="$(readlink -- "${item}")"
+        if [[ "${target}" == "${public_dir}/"* && ! -e "${target}" ]]; then
+            rm -- "${item}"
+            echo "  removed stale symlink $(basename -- "${item}")"
+        fi
+    done
+    shopt -u nullglob
+
+    if (( linked == 0 )); then
+        echo "No files found under ${public_dir} to deploy." >&2
+        exit 1
+    fi
+
+    echo "Web deployed: ${linked} entries published into ${WEB_ROOT}"
+}
+
+cmd_deploy() {
+    echo "NexWAYPOINT web deploy"
+    echo "Public: ${ROOT_DIR}/public"
+    echo "Web:    ${WEB_ROOT}"
+    deploy_web
+}
+
 require_git_repo() {
     if ! command -v git >/dev/null 2>&1; then
         echo "git is required for update/backup metadata." >&2
@@ -652,12 +737,17 @@ cmd_update() {
         echo "No .env found after update; run ./setup.sh install next."
     fi
 
+    echo
+    echo "Publishing web components..."
+    deploy_web
+
     cat <<EOF
 
 Update complete.
   Before: ${before_sha}
   After:  ${after_sha}
   Ref:    ${ref}
+  Web:    ${WEB_ROOT}
 EOF
     if [[ -n "${backup_path}" ]]; then
         echo "  Backup: ${backup_path}"
@@ -710,6 +800,9 @@ cmd_restore() {
         fi
         git -C "${ROOT_DIR}" checkout "${recorded_sha}"
         echo "Checked out code ${recorded_sha}"
+        echo
+        echo "Publishing web components..."
+        deploy_web
     fi
 
     cat <<EOF
@@ -744,6 +837,10 @@ run_install() {
         php "${ROOT_DIR}/scripts/create_user.php"
     fi
 
+    echo
+    echo "Publishing web components into ${WEB_ROOT}..."
+    deploy_web
+
     install_cron_jobs
 
     if [[ "${WITH_DEV}" == true ]]; then
@@ -760,17 +857,16 @@ Setup complete.
 
 Site: ${SITE_URL}
 Code: ${ROOT_DIR}
-Web:  ${ROOT_DIR}/public   (set this as the domain Web Directory in the DreamHost panel)
+Web:  ${WEB_ROOT}  (symlinks into ${ROOT_DIR}/public)
 
 Next:
-  1. In DreamHost panel → Domains → ${DEFAULT_SITE_HOST}, set Web Directory to:
-       ${ROOT_DIR}/public
-     Do not symlink or replace /home/dh_w9tij7/${DEFAULT_SITE_HOST}.
+  1. Leave the DreamHost Web Directory as ${WEB_ROOT} (default domain folder)
   2. Confirm HTTPS is forced for ${DEFAULT_SITE_HOST}
   3. Open ${SITE_URL}/login.php
   4. Forward travel confirmations to the dedicated IMAP mailbox once configured
 
 Maintenance:
+  ./setup.sh deploy
   ./setup.sh backup
   ./setup.sh update
   ./setup.sh restore latest
@@ -782,7 +878,7 @@ EOF
 
 while (( $# > 0 )); do
     case "$1" in
-        install|backup|update|restore|list-backups)
+        install|deploy|backup|update|restore|list-backups)
             COMMAND="$1"
             ;;
         --backup)
@@ -790,6 +886,9 @@ while (( $# > 0 )); do
             ;;
         --update)
             COMMAND="update"
+            ;;
+        --deploy)
+            COMMAND="deploy"
             ;;
         --restore)
             COMMAND="restore"
@@ -812,6 +911,17 @@ while (( $# > 0 )); do
         --ref=*)
             UPDATE_REF="${1#*=}"
             ;;
+        --web-root)
+            WEB_ROOT="${2:-}"
+            if [[ -z "${WEB_ROOT}" ]]; then
+                echo "--web-root requires a path." >&2
+                exit 2
+            fi
+            shift
+            ;;
+        --web-root=*)
+            WEB_ROOT="${1#*=}"
+            ;;
         --no-backup)
             NO_BACKUP=true
             ;;
@@ -822,12 +932,14 @@ while (( $# > 0 )); do
             RESTORE_CODE=true
             ;;
         --skip-user) SKIP_USER=true ;;
+        --skip-deploy) SKIP_DEPLOY=true ;;
         --install-packages) SKIP_PACKAGES=false ;;
         --with-dev) WITH_DEV=true ;;
         --skip-packages)
             SKIP_PACKAGES=true
             ;;
         --skip-web-root)
+            SKIP_DEPLOY=true
             ;;
         --help|-h)
             usage
@@ -848,6 +960,7 @@ done
 
 case "${COMMAND}" in
     install) run_install ;;
+    deploy) cmd_deploy ;;
     backup) cmd_backup ;;
     update) cmd_update ;;
     restore) cmd_restore ;;

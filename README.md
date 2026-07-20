@@ -87,12 +87,13 @@ flagged here instead of silently guessed.
 |---|---|
 | Public site | https://nexwaypoint.area51consulting.com |
 | Git clone | `/home/dh_w9tij7/NexWAYPOINT` |
-| Panel Web Directory | `/home/dh_w9tij7/NexWAYPOINT/public` |
+| DreamHost web dir | `/home/dh_w9tij7/nexwaypoint.area51consulting.com` |
 
-Keep the clone's Web Directory pointed at `public/` so `config/`, `src/`,
-`.env`, and `storage/` stay outside HTTP reach. Set that path in the
-DreamHost panel for the domain — do **not** symlink or replace
-`/home/dh_w9tij7/nexwaypoint.area51consulting.com`.
+Keep the clone outside HTTP reach for `config/`, `src/`, `.env`, and
+`storage/`. Leave the domain Web Directory at DreamHost's default domain
+folder. `setup.sh install` / `update` / `deploy` publish `public/` into that
+folder with absolute symlinks (so PHP `__DIR__` still resolves into the
+clone). The domain directory itself is never replaced.
 
 1. Create an empty MySQL database + user in the DreamHost panel.
 2. Clone and install:
@@ -115,20 +116,26 @@ on a machine that already has Composer). `setup.sh` then:
   `/home/dh_w9tij7/NexWAYPOINT/storage/...`;
 - prompts for MySQL/SQLite, optional IMAP, and optional FlightAware settings;
 - creates writable storage directories and installs the database schema;
-- securely creates the first local user; and
+- securely creates the first local user;
+- publishes `public/` into `/home/dh_w9tij7/nexwaypoint.area51consulting.com`; and
 - optionally installs the configured mail/flight cron jobs.
 
 It is safe to rerun. Use `bash setup.sh --help` for options
-(`--skip-user`, `--with-dev`). To add another
+(`--skip-user`, `--skip-deploy`, `--web-root`, `--with-dev`). To add another
 local user later:
 
 ```bash
 php scripts/create_user.php
 ```
 
-In the DreamHost panel, set the domain Web Directory to
-`/home/dh_w9tij7/NexWAYPOINT/public`, force HTTPS, then open
+Force HTTPS for the subdomain in the DreamHost panel, then open
 https://nexwaypoint.area51consulting.com/login.php.
+
+To republish web files after a manual edit:
+
+```bash
+bash setup.sh deploy
+```
 
 ### Backup / update / restore
 
@@ -144,7 +151,7 @@ bash setup.sh backup
 # List backup IDs
 bash setup.sh list-backups
 
-# Backup, then git fetch + fast-forward pull on the current branch
+# Backup, then git fetch + fast-forward pull on the current branch, then redeploy web
 bash setup.sh update
 
 # Update to a specific branch/tag/commit
