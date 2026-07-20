@@ -151,7 +151,12 @@ function statusBadgeClass(string $status): string
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
     <div class="card">
-        <h3>Your status</h3>
+        <h3>
+            <button type="button" class="status-override-trigger" data-open-modal="status-override-modal"
+                title="Set a temporary status override">
+                Your status
+            </button>
+        </h3>
         <p>
             <span class="badge <?= statusBadgeClass($myStatus['status']) ?>"><?= htmlspecialchars($myStatus['label'], ENT_QUOTES) ?></span>
             <?php if ($overrideActive && !$travelOverridesManual): ?>
@@ -168,54 +173,14 @@ function statusBadgeClass(string $status): string
         <?php if (!empty($myStatus['detail']['note'])): ?>
             <p class="hint"><?= htmlspecialchars((string) $myStatus['detail']['note'], ENT_QUOTES) ?></p>
         <?php endif; ?>
+        <p class="hint">
+            <button type="button" class="linkish" data-open-modal="status-override-modal">Change status</button>
+            (temporary override with an end date)
+        </p>
 
-        <?php foreach ($statusErrors as $err): ?>
-            <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
-        <?php endforeach; ?>
         <?php if ($statusMessage !== null): ?>
             <p class="alert alert-success"><?= htmlspecialchars($statusMessage, ENT_QUOTES) ?></p>
         <?php endif; ?>
-
-        <form method="post" class="stack status-override-form">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-            <input type="hidden" name="form" value="status_override">
-            <div class="status-override-row">
-                <label>Set status
-                    <select name="status" required>
-                        <?php foreach ([
-                            'home' => 'Home',
-                            'office' => 'Office',
-                            'remote' => 'Working remote',
-                            'unavailable' => 'Unavailable',
-                        ] as $value => $label): ?>
-                            <option value="<?= $value ?>" <?= $formStatus === $value ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($label, ENT_QUOTES) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-                <label>Until
-                    <input type="date" name="expires_on" required
-                        min="<?= htmlspecialchars($todayYmd, ENT_QUOTES) ?>"
-                        value="<?= htmlspecialchars((string) $defaultExpires, ENT_QUOTES) ?>">
-                </label>
-            </div>
-            <label>Note (optional)
-                <input type="text" name="note" maxlength="255"
-                    value="<?= htmlspecialchars($formNote, ENT_QUOTES) ?>"
-                    placeholder="e.g. WFH while waiting on parts">
-            </label>
-            <div class="modal-actions" style="margin:0">
-                <button type="submit" class="primary" name="action" value="set">Save override</button>
-                <?php if ($overrideActive): ?>
-                    <button type="submit" class="secondary" name="action" value="clear">Clear override</button>
-                <?php endif; ?>
-            </div>
-            <p class="hint">
-                Temporary override for the team board. Active travel (in flight, layover, hotel)
-                still takes priority while you are on the road.
-            </p>
-        </form>
 
         <?php if ($unreadCount > 0): ?>
             <p>
@@ -288,5 +253,86 @@ function statusBadgeClass(string $status): string
         <?php endforeach; ?>
     <?php endif; ?>
 </main>
+
+<div id="status-override-modal" class="modal-backdrop" <?= $statusErrors !== [] ? '' : 'hidden' ?>>
+    <div class="modal-panel" role="dialog" aria-labelledby="status-override-modal-title">
+        <h2 id="status-override-modal-title">Set status override</h2>
+        <p class="hint">
+            Temporary status for the team board. Active travel (in flight, layover, hotel)
+            still takes priority while you are on the road.
+        </p>
+        <?php foreach ($statusErrors as $err): ?>
+            <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
+        <?php endforeach; ?>
+        <form method="post" class="stack status-override-form">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="form" value="status_override">
+            <div class="status-override-row">
+                <label>Status
+                    <select name="status" required>
+                        <?php foreach ([
+                            'home' => 'Home',
+                            'office' => 'Office',
+                            'remote' => 'Working remote',
+                            'unavailable' => 'Unavailable',
+                        ] as $value => $label): ?>
+                            <option value="<?= $value ?>" <?= $formStatus === $value ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($label, ENT_QUOTES) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Until
+                    <input type="date" name="expires_on" required
+                        min="<?= htmlspecialchars($todayYmd, ENT_QUOTES) ?>"
+                        value="<?= htmlspecialchars((string) $defaultExpires, ENT_QUOTES) ?>">
+                </label>
+            </div>
+            <label>Note (optional)
+                <input type="text" name="note" maxlength="255"
+                    value="<?= htmlspecialchars($formNote, ENT_QUOTES) ?>"
+                    placeholder="e.g. WFH while waiting on parts">
+            </label>
+            <div class="modal-actions">
+                <button type="submit" class="primary" name="action" value="set">Save override</button>
+                <?php if ($overrideActive): ?>
+                    <button type="submit" class="secondary" name="action" value="clear">Clear override</button>
+                <?php endif; ?>
+                <button type="button" class="secondary" data-close-modal>Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+(function () {
+    var modal = document.getElementById('status-override-modal');
+    if (!modal) return;
+    function openModal() {
+        modal.hidden = false;
+        document.body.classList.add('modal-open');
+        var first = modal.querySelector('select[name="status"]');
+        if (first) first.focus();
+    }
+    function closeModal() {
+        modal.hidden = true;
+        document.body.classList.remove('modal-open');
+    }
+    document.querySelectorAll('[data-open-modal="status-override-modal"]').forEach(function (btn) {
+        btn.addEventListener('click', openModal);
+    });
+    modal.querySelectorAll('[data-close-modal]').forEach(function (btn) {
+        btn.addEventListener('click', closeModal);
+    });
+    modal.addEventListener('click', function (ev) {
+        if (ev.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape' && !modal.hidden) closeModal();
+    });
+    if (!modal.hidden) {
+        document.body.classList.add('modal-open');
+    }
+})();
+</script>
 </body>
 </html>

@@ -60,17 +60,18 @@ final class NotificationRepository
     }
 
     /**
-     * Mark one notification read only if it belongs to the user.
+     * Mark one unread notification as read only if it belongs to the user.
+     *
+     * @return bool true only when a previously unread row was updated
      */
     public function markReadForUser(int $userId, int $notificationId): bool
     {
-        $this->db->execute(
+        $affected = $this->db->execute(
             'UPDATE notifications SET is_read = 1
              WHERE id = :id AND user_id = :user_id AND is_read = 0',
             ['id' => $notificationId, 'user_id' => $userId]
         );
-        $row = $this->find($notificationId);
-        return $row !== null && (int) $row['user_id'] === $userId && !empty($row['is_read']);
+        return $affected > 0;
     }
 
     /**

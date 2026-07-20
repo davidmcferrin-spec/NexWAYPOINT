@@ -22,6 +22,7 @@ final class NotificationRepositoryTest extends NexWaypointTestCase
 
         self::assertTrue($repo->markReadForUser($userId, $a));
         self::assertSame(1, $repo->unreadCount($userId));
+        self::assertFalse($repo->markReadForUser($userId, $a), 'Already-read alert must not report success again');
 
         $otherAlert = $repo->create($otherId, null, 'landed', 'Landed: AUS -> ORD');
         self::assertFalse($repo->markReadForUser($userId, $otherAlert));
@@ -30,6 +31,7 @@ final class NotificationRepositoryTest extends NexWaypointTestCase
         $cleared = $repo->markAllReadForUser($userId);
         self::assertSame(1, $cleared);
         self::assertSame(0, $repo->unreadCount($userId));
+        self::assertFalse($repo->markReadForUser($userId, $b));
 
         $row = $repo->find($b);
         self::assertNotNull($row);
