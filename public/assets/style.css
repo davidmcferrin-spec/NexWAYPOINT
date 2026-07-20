@@ -155,21 +155,40 @@ a:hover {
     vertical-align: 0.1rem;
 }
 .nav-dropdown-menu {
-    display: none;
+    /* Keep in layout for hover bridging; hide with visibility so a short
+       leave-delay still lets the pointer reach menu items. */
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
     position: absolute;
-    top: calc(100% + 0.35rem);
+    top: 100%;
     left: 0;
     min-width: 12.5rem;
     padding: 0.4rem 0;
+    margin: 0;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 6px;
     box-shadow: var(--shadow);
     z-index: 50;
+    transition: opacity 0.12s ease, visibility 0.12s ease;
+    transition-delay: 0.18s; /* linger when leaving so the pointer can catch up */
+}
+.nav-dropdown-menu::before {
+    /* Invisible bridge over any sub-pixel gap under the trigger */
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -0.5rem;
+    height: 0.5rem;
 }
 .nav-dropdown:hover .nav-dropdown-menu,
 .nav-dropdown:focus-within .nav-dropdown-menu {
-    display: block;
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transition-delay: 0s; /* open immediately */
 }
 .nav-dropdown-menu a {
     display: block;
