@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace NexWaypoint\Users;
 
+use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\TripSegment;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
@@ -21,6 +23,8 @@ final class TeamTravelPreviewBuilder
         private readonly TripRepository $trips,
         private readonly VisibilityEngine $visibility,
         private readonly VisibilityBlockRepository $blocks,
+        private readonly ?HotelStayRepository $stays = null,
+        private readonly ?HotelPropertyRepository $properties = null,
     ) {
     }
 
@@ -296,13 +300,28 @@ final class TeamTravelPreviewBuilder
     ): ?array {
         $name = null;
         if ($canHotelName) {
-            // Hotel segments typically stash property/city in destination; carrier may hold brand.
-            $name = trim((string) ($segment->destination ?? ''));
-            if ($name === '' && $segment->carrier !== null) {
+            if (
+                $segment->hotelStayId !== null
+                && $segment->hotelStayId > 0
+                && $this->stays !== null
+                && $this->properties !== null
+            ) {
+                $stay = $this->stays->find((int) $segment->hotelStayId);
+                if ($stay !== null) {
+                    $property = $this->properties->find($stay->hotelPropertyId);
+                    if ($property !== null && trim($property->hotelName) !== '') {
+                        $name = trim($property->hotelName);
+                    }
+                }
+            }
+            if ($name === null && $segment->carrier !== null && trim($segment->carrier) !== '') {
                 $name = trim($segment->carrier);
             }
-            if ($name === '') {
-                $name = null;
+            if ($name === null) {
+                $name = trim((string) ($segment->destination ?? ''));
+                if ($name === '') {
+                    $name = null;
+                }
             }
         }
 

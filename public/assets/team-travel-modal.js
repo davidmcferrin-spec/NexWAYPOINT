@@ -58,18 +58,29 @@
                     bits.push(escapeHtml(profile.status_label));
                 }
                 if (profile.location) {
-                    bits.push(escapeHtml(profile.location));
+                    bits.push('Currently in ' + escapeHtml(profile.location));
                 }
-                metaEl.innerHTML = bits.join(' · ');
+                if (profile.next && profile.next.city_label) {
+                    var nextBit = 'Next: ' + escapeHtml(profile.next.city_label);
+                    if (profile.next.dates) {
+                        nextBit += ' · ' + escapeHtml(profile.next.dates);
+                    }
+                    bits.push(nextBit);
+                }
+                metaEl.innerHTML = bits.join('<br>');
             }
             if (bodyEl) {
                 var trips = profile.trips || [];
+                var windowDays = escapeHtml(String(profile.window_days || 21));
                 if (!trips.length) {
                     bodyEl.innerHTML = '<p class="empty-state">No visible travel in the next '
-                        + escapeHtml(String(profile.window_days || 21))
+                        + windowDays
                         + ' days.</p>';
                 } else {
-                    var html = '<ul class="teammate-trip-list">';
+                    var html = '<h3 class="teammate-travel-heading">Next '
+                        + windowDays
+                        + ' days</h3>';
+                    html += '<ul class="teammate-trip-list">';
                     trips.forEach(function (t) {
                         html += '<li class="teammate-trip-item">';
                         var heading = t.destination

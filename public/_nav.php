@@ -74,7 +74,6 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
         <span class="navbar-sep" aria-hidden="true"></span>
         <a href="/hotels/add.php">Log stay</a>
         <a href="/trips/builder.php">Add trip</a>
-        <a href="/trains/add.php">Add train</a>
         <span class="navbar-sep" aria-hidden="true"></span>
         <div class="nav-dropdown">
             <a href="/settings/index.php" class="nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">Settings</a>

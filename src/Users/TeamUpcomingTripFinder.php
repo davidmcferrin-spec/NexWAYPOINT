@@ -10,8 +10,10 @@ use NexWaypoint\Visibility\VisibilityBlockRepository;
 use NexWaypoint\Visibility\VisibilityEngine;
 
 /**
- * Finds the soonest trip destination a viewer may see on the team map
- * (next N days). Subject viewing self may see their own private trips.
+ * Finds the soonest upcoming trip destination a viewer may see on the
+ * team board (next N days). Pass $excludeTripId to skip the trip the
+ * subject is already on so "Next" is a later destination.
+ * Subject viewing self may see their own private trips.
  */
 final class TeamUpcomingTripFinder
 {
@@ -26,8 +28,12 @@ final class TeamUpcomingTripFinder
         int $viewerId,
         int $subjectId,
         int $daysAhead = 21,
+        ?int $excludeTripId = null,
     ): ?Trip {
         foreach ($this->trips->findActiveOrUpcoming($subjectId, $daysAhead) as $trip) {
+            if ($excludeTripId !== null && (int) $trip->id === $excludeTripId) {
+                continue;
+            }
             $isSelf = $viewerId === $subjectId;
             if (!$isSelf) {
                 if ($trip->isPrivate) {

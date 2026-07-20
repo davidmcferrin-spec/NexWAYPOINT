@@ -32,14 +32,22 @@ $statusEngine = new TripStatusEngine($tripRepo, $logger);
 $visibilityEngine = new VisibilityEngine($userRepo, new VisibilityRuleRepository($db));
 $blockRepo = new VisibilityBlockRepository($db);
 $notifications = new NotificationRepository($db);
+$propertyRepo = new HotelPropertyRepository($db, $logger);
+$stayRepo = new HotelStayRepository($db, $logger, $propertyRepo);
 $locationResolver = new TeamLocationResolver(
     $tripRepo,
-    new HotelStayRepository($db, $logger),
-    new HotelPropertyRepository($db, $logger),
+    $stayRepo,
+    $propertyRepo,
     new Geocoder($logger),
 );
 $upcomingFinder = new TeamUpcomingTripFinder($tripRepo, $visibilityEngine, $blockRepo);
-$travelPreview = new TeamTravelPreviewBuilder($tripRepo, $visibilityEngine, $blockRepo);
+$travelPreview = new TeamTravelPreviewBuilder(
+    $tripRepo,
+    $visibilityEngine,
+    $blockRepo,
+    $stayRepo,
+    $propertyRepo,
+);
 
 $myUpcomingTrips = $tripRepo->findActiveOrUpcoming($user->id, 60);
 $unreadCount = $notifications->unreadCount($user->id);
@@ -84,6 +92,7 @@ if (!function_exists('nexwaypoint_initials')) {
  *   label: string,
  *   location: array{lat: float, lon: float, city_label: string, city_key: string}|null,
  *   upcoming: string|null,
+ *   next: array{city_label: string, dates: string}|null,
  *   avatar_url: string|null,
  *   photo_focus_x: float,
  *   photo_focus_y: float,
@@ -144,10 +153,9 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
             }
         }
 
-        $upcomingTrip = null;
-        if (TeamLocationResolver::isAtBaseStatus($status['status'], $status['detail'] ?? [])) {
-            $upcomingTrip = $upcomingFinder->findVisible($viewerId, $subject->id, 21);
-        }
+        // Next = soonest visible trip that is not the one they are already on.
+        $excludeTripId = $tripId !== null ? (int) $tripId : null;
+        $upcomingTrip = $upcomingFinder->findVisible($viewerId, $subject->id, 21, $excludeTripId);
         $resolved = $locationResolver->resolveWithUpcoming(
             $subject,
             $status,
@@ -161,6 +169,7 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
             'label' => $displayLabel,
             'location' => $resolved['location'],
             'upcoming' => $resolved['upcoming'],
+            'next' => $resolved['next'],
             'avatar_url' => $subject->hasPhoto() ? '/media/avatar.php?id=' . $subject->id : null,
             'photo_focus_x' => $subject->photoFocusX,
             'photo_focus_y' => $subject->photoFocusY,
@@ -244,6 +253,7 @@ foreach (array_merge([$selfEntry], $team) as $entry) {
             : $entry['user']->displayName,
         'status_label' => $entry['label'],
         'location' => $entry['location']['city_label'] ?? null,
+        'next' => $entry['next'],
         'window_days' => $upcomingMapDays,
         'trips' => $travelPreview->build($user->id, $entry['user']->id, $upcomingMapDays),
     ];
@@ -295,7 +305,7 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                 <p class="empty-state">No other active teammates yet.</p>
             <?php else: ?>
                 <table>
-                    <thead><tr><th>Teammate</th><th>Status</th><th>Location</th></tr></thead>
+                    <thead><tr><th>Teammate</th><th>Status</th><th>Current</th><th>Next</th></tr></thead>
                     <tbody>
                         <?php foreach ($team as $entry): ?>
                             <tr class="team-row-clickable"
@@ -318,13 +328,18 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                                 </td>
                                 <td>
                                     <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
-                                    <?php if ($entry['upcoming'] !== null): ?>
-                                        <div class="hint">Upcoming: <?= htmlspecialchars($entry['upcoming'], ENT_QUOTES) ?></div>
-                                    <?php endif; ?>
                                 </td>
                                 <td>
                                     <?php if ($entry['location'] !== null): ?>
                                         <?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?>
+                                    <?php else: ?>
+                                        <span class="hint">—</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($entry['next'] !== null): ?>
+                                        <div><?= htmlspecialchars($entry['next']['city_label'], ENT_QUOTES) ?></div>
+                                        <div class="hint"><?= htmlspecialchars($entry['next']['dates'], ENT_QUOTES) ?></div>
                                     <?php else: ?>
                                         <span class="hint">—</span>
                                     <?php endif; ?>
@@ -357,14 +372,23 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                             <?php endif; ?>
                             <h3 class="team-card-name"><?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?></h3>
                             <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
-                            <?php if ($entry['location'] !== null): ?>
-                                <p class="team-card-location"><?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?></p>
-                            <?php else: ?>
-                                <p class="team-card-location hint">—</p>
-                            <?php endif; ?>
-                            <?php if ($entry['upcoming'] !== null): ?>
-                                <p class="hint">Upcoming: <?= htmlspecialchars($entry['upcoming'], ENT_QUOTES) ?></p>
-                            <?php endif; ?>
+                            <div class="team-card-places">
+                                <p class="team-place">
+                                    <span class="team-place-label">Current</span>
+                                    <?php if ($entry['location'] !== null): ?>
+                                        <?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?>
+                                    <?php else: ?>
+                                        <span class="hint">—</span>
+                                    <?php endif; ?>
+                                </p>
+                                <?php if ($entry['next'] !== null): ?>
+                                    <p class="team-place">
+                                        <span class="team-place-label">Next</span>
+                                        <?= htmlspecialchars($entry['next']['city_label'], ENT_QUOTES) ?>
+                                        <span class="hint"><?= htmlspecialchars($entry['next']['dates'], ENT_QUOTES) ?></span>
+                                    </p>
+                                <?php endif; ?>
+                            </div>
                         </article>
                     <?php endforeach; ?>
                 </div>
@@ -379,14 +403,14 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                     <p class="hint">You’re the only one with a location set so far.</p>
                 <?php endif; ?>
                 <div id="team-map" class="team-map" role="img" aria-label="Teammate locations"></div>
-                <p class="hint">Zoom in to see faces. City clusters show how many people are in that city. Upcoming trips (next <?= (int) $upcomingMapDays ?> days) pin at the destination when not already traveling.</p>
+                <p class="hint">Pins show where people are now. Click a face for their <?= (int) $upcomingMapDays ?>-day travel look-ahead.</p>
             <?php endif; ?>
         </div>
     <?php endif; ?>
 
     <h2>Your upcoming trips <a class="hint" href="/trips/list.php" style="font-weight: 400; font-size: 0.85rem;">View all</a></h2>
     <?php if ($myUpcomingTrips === []): ?>
-        <p class="empty-state">Nothing on the books. <a href="/trips/builder.php">Add a trip</a>, <a href="/trains/add.php">add a train</a>, <a href="/trips/list.php">review past trips</a>, or <a href="/hotels/add.php">log a hotel stay</a>.</p>
+        <p class="empty-state">Nothing on the books. <a href="/trips/builder.php">Add a trip</a>, <a href="/trips/list.php">review past trips</a>, or <a href="/hotels/add.php">log a hotel stay</a>.</p>
     <?php else: ?>
         <?php foreach ($myUpcomingTrips as $trip): ?>
             <div class="card">

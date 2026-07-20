@@ -242,4 +242,158 @@ final class TripEditRepositoryTest extends NexWaypointTestCase
         // Midpoint of outbound half → LAX, not HSV home.
         self::assertSame('LAX', $multi['trip']->destinationCity);
     }
+
+    public function testReplaceTripLegsMixedFlightAndTrain(): void
+    {
+        $userId = $this->insertUser('traveler');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $carriers = new \NexWaypoint\Trips\CarrierRepository($this->db, $this->logger);
+        $airline = $carriers->findOrCreateByIata($userId, 'UA', 'United', $userId);
+        $rail = $carriers->findOrCreateByName($userId, 'Amtrak', null, $userId, \NexWaypoint\Trips\Carrier::TYPE_RAIL);
+
+        $trip = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'New York',
+            startDate: '2026-09-01',
+            endDate: '2026-09-03',
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $tripRepo->replaceTripLegs((int) $trip->id, [
+            [
+                'segment_type' => 'flight',
+                'carrier_id' => $airline->id,
+                'carrier' => $airline->name,
+                'flight_number' => '100',
+                'origin' => 'HSV',
+                'destination' => 'DCA',
+                'depart_dt' => '2026-09-01 08:00:00',
+                'arrive_dt' => '2026-09-01 11:00:00',
+            ],
+            [
+                'segment_type' => 'train',
+                'carrier_id' => $rail->id,
+                'carrier' => $rail->name,
+                'flight_number' => '90',
+                'origin' => 'WAS',
+                'destination' => 'NYP',
+                'depart_dt' => '2026-09-01 13:00:00',
+                'arrive_dt' => '2026-09-01 16:00:00',
+            ],
+        ], $userId);
+
+        $segments = $tripRepo->segmentsForTrip((int) $trip->id);
+        self::assertCount(2, $segments);
+        self::assertSame('flight', $segments[0]->segmentType);
+        self::assertSame('train', $segments[1]->segmentType);
+        self::assertSame('90', $segments[1]->flightNumber);
+    }
+
+    public function testReplaceTripHotelsLinksStay(): void
+    {
+        $userId = $this->insertUser('traveler');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $props = new \NexWaypoint\Hotels\HotelPropertyRepository($this->db, $this->logger);
+        $stays = new \NexWaypoint\Hotels\HotelStayRepository($this->db, $this->logger, $props);
+
+        $property = $props->create(new \NexWaypoint\Hotels\HotelProperty(
+            id: null,
+            createdByUserId: $userId,
+            hotelName: 'Hilton Midtown',
+            brand: 'Hilton',
+            addressLine1: null,
+            addressLine2: null,
+            city: 'New York',
+            stateRegion: 'NY',
+            postalCode: null,
+            country: null,
+            phone: null,
+            website: null,
+            latitude: 40.75,
+            longitude: -73.98,
+            hasDesk: false,
+            deskNotes: null,
+            hasPool: false,
+            hasHotTub: false,
+            hasBreakfast: false,
+            breakfastNotes: null,
+            hasGym: false,
+            hasFreeParking: false,
+            hasAirportShuttle: false,
+            hasEvCharging: false,
+            hasOnsiteRestaurant: false,
+            hasOffsiteGym: false,
+            walkToOffice: false,
+            walkToOfficeNotes: null,
+            hasDestinationFee: false,
+            destinationFeeNotes: null,
+            wifiQuality: null,
+            noiseLevel: null,
+            uniqueFeatures: null,
+        ), $userId);
+
+        $stay = $stays->create(new \NexWaypoint\Hotels\HotelStay(
+            id: null,
+            userId: $userId,
+            hotelPropertyId: (int) $property->id,
+            roomNumber: null,
+            bedType: null,
+            bathroomType: null,
+            stayStart: '2026-09-01',
+            stayEnd: '2026-09-03',
+            stayRating: null,
+            lastStayPrice: null,
+            currency: 'USD',
+            bookingSource: null,
+            confirmationCode: null,
+            wouldReturn: null,
+            notes: null,
+            isPrivate: false,
+        ), $userId);
+
+        $trip = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'New York',
+            startDate: '2026-09-01',
+            endDate: '2026-09-03',
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $tripRepo->replaceTripLegs((int) $trip->id, [[
+            'segment_type' => 'flight',
+            'carrier' => 'UA',
+            'flight_number' => '1',
+            'origin' => 'HSV',
+            'destination' => 'LGA',
+            'depart_dt' => '2026-09-01 08:00:00',
+            'arrive_dt' => '2026-09-01 12:00:00',
+        ]], $userId);
+
+        $hotels = $tripRepo->replaceTripHotels(
+            (int) $trip->id,
+            [(int) $stay->id],
+            $props,
+            $stays,
+            $userId
+        );
+
+        self::assertCount(1, $hotels);
+        self::assertSame('hotel', $hotels[0]->segmentType);
+        self::assertSame((int) $stay->id, $hotels[0]->hotelStayId);
+        self::assertSame('Hilton Midtown', $hotels[0]->carrier);
+        self::assertSame('New York', $hotels[0]->destination);
+        self::assertSame([(int) $stay->id], $tripRepo->hotelStayIdsForTrip((int) $trip->id));
+
+        // Transit legs still present.
+        $all = $tripRepo->segmentsForTrip((int) $trip->id);
+        self::assertCount(2, $all);
+    }
 }

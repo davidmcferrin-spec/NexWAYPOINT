@@ -155,9 +155,12 @@ final class TripStatusEngine
 
                 if ($now > $arrive && $now <= $postEnd) {
                     $city = $segment->destination ?? 'destination';
+                    $postLabel = $segment->segmentType === 'flight'
+                        ? "Post-flight: arrived {$city}"
+                        : "Post-arrival: arrived {$city}";
                     return $this->result(
                         'post_flight',
-                        "Post-flight: arrived {$city}",
+                        $postLabel,
                         $segment,
                         ['location_city' => $segment->destination]
                     );
@@ -183,6 +186,12 @@ final class TripStatusEngine
                     );
                 }
 
+                // Long gap: hotel stay on this trip wins over itinerary remote.
+                $hotelHit = $this->hotelAt($segments, $now);
+                if ($hotelHit !== null) {
+                    return $hotelHit;
+                }
+
                 return $this->result(
                     'remote',
                     "Working Remote · {$city}",
@@ -195,21 +204,34 @@ final class TripStatusEngine
                 );
             }
 
-            foreach ($segments as $segment) {
-                if ($segment->segmentType !== 'hotel' || $segment->departDt === null || $segment->arriveDt === null) {
-                    continue;
-                }
-                $checkIn = new \DateTimeImmutable($segment->departDt);
-                $checkOut = new \DateTimeImmutable($segment->arriveDt);
-                if ($now >= $checkIn && $now <= $checkOut) {
-                    $city = $segment->destination ?? $segment->origin ?? 'destination';
-                    return $this->result('at_hotel', "At hotel in {$city}", $segment, [
-                        'location_city' => $segment->destination ?? $segment->origin,
-                    ]);
-                }
+            $hotelHit = $this->hotelAt($segments, $now);
+            if ($hotelHit !== null) {
+                return $hotelHit;
             }
         }
 
+        return null;
+    }
+
+    /**
+     * @param TripSegment[] $segments
+     * @return array{status: string, label: string, detail: array<string, mixed>}|null
+     */
+    private function hotelAt(array $segments, \DateTimeImmutable $now): ?array
+    {
+        foreach ($segments as $segment) {
+            if ($segment->segmentType !== 'hotel' || $segment->departDt === null || $segment->arriveDt === null) {
+                continue;
+            }
+            $checkIn = new \DateTimeImmutable($segment->departDt);
+            $checkOut = new \DateTimeImmutable($segment->arriveDt);
+            if ($now >= $checkIn && $now <= $checkOut) {
+                $city = $segment->destination ?? $segment->origin ?? 'destination';
+                return $this->result('at_hotel', "At hotel in {$city}", $segment, [
+                    'location_city' => $segment->destination ?? $segment->origin,
+                ]);
+            }
+        }
         return null;
     }
 

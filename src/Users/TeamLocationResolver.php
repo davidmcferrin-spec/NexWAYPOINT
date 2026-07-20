@@ -90,13 +90,14 @@ final class TeamLocationResolver
     }
 
     /**
-     * Resolve current pin, then if at-base and a visible upcoming trip exists,
-     * move the pin to that destination.
+     * Resolve current pin; optionally attach the next visible trip as a label
+     * (city + dates). Pin always stays where they are now.
      *
      * @param array{status: string, label: string, detail: array<string, mixed>} $status
      * @return array{
      *   location: array{lat: float, lon: float, city_label: string, city_key: string}|null,
-     *   upcoming: string|null
+     *   upcoming: string|null,
+     *   next: array{city_label: string, dates: string}|null
      * }
      */
     public function resolveWithUpcoming(
@@ -106,24 +107,34 @@ final class TeamLocationResolver
         ?\NexWaypoint\Trips\Trip $upcomingVisibleTrip,
     ): array {
         $location = $this->resolve($user, $status, $destinationVisible);
-        $upcomingLabel = null;
+        $next = null;
 
+        $activeTripId = isset($status['detail']['trip_id']) ? (int) $status['detail']['trip_id'] : 0;
         if (
-            self::isAtBaseStatus($status['status'], $status['detail'] ?? [])
-            && $upcomingVisibleTrip !== null
+            $upcomingVisibleTrip !== null
             && trim($upcomingVisibleTrip->destinationCity) !== ''
+            && (int) ($upcomingVisibleTrip->id ?? 0) !== $activeTripId
         ) {
             $upcomingPin = $this->resolveUpcomingDestination($upcomingVisibleTrip->destinationCity);
             if ($upcomingPin !== null) {
-                $location = $upcomingPin;
-                $upcomingLabel = $upcomingPin['city_label'] . ' · '
-                    . self::formatTripDateRange($upcomingVisibleTrip->startDate, $upcomingVisibleTrip->endDate);
+                $next = [
+                    'city_label' => $upcomingPin['city_label'],
+                    'dates' => self::formatTripDateRange(
+                        $upcomingVisibleTrip->startDate,
+                        $upcomingVisibleTrip->endDate,
+                    ),
+                ];
             }
         }
+
+        $upcomingLabel = $next !== null
+            ? $next['city_label'] . ' · ' . $next['dates']
+            : null;
 
         return [
             'location' => $location,
             'upcoming' => $upcomingLabel,
+            'next' => $next,
         ];
     }
 
@@ -152,7 +163,7 @@ final class TeamLocationResolver
     }
 
     /**
-     * Whether the current status is still at base (eligible for an upcoming-trip pin).
+     * Whether the current status is still at base (eligible for an upcoming label).
      * Mid-trip phases (including itinerary gap remote) are not at base.
      *
      * @param array<string, mixed> $detail

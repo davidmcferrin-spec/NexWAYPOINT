@@ -6,6 +6,8 @@ namespace NexWaypoint\Trips;
 
 use NexWaypoint\Core\Database;
 use NexWaypoint\Core\Logger;
+use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\HotelStayRepository;
 
 final class TripRepository
 {
@@ -277,6 +279,101 @@ final class TripRepository
         $this->db->audit($actorUserId, 'replace_legs', 'trips', $tripId, ['legs' => count($created)]);
 
         return $created;
+    }
+
+    /**
+     * Replace hotel segments on a trip (keeps flight/train/car). Each attachment
+     * is a hotel_stay_id owned by the trip owner; segment windows come from stay dates.
+     *
+     * @param list<int> $stayIds
+     * @return TripSegment[]
+     */
+    public function replaceTripHotels(
+        int $tripId,
+        array $stayIds,
+        HotelPropertyRepository $properties,
+        HotelStayRepository $stays,
+        ?int $actorUserId = null,
+    ): array {
+        $trip = $this->find($tripId);
+        if ($trip === null) {
+            throw new \InvalidArgumentException("Trip {$tripId} not found.");
+        }
+
+        foreach ($this->segmentsForTrip($tripId) as $existing) {
+            if ($existing->segmentType !== 'hotel') {
+                continue;
+            }
+            if ($existing->id !== null) {
+                $this->deleteSegment((int) $existing->id, $actorUserId);
+            }
+        }
+
+        $created = [];
+        $seen = [];
+        foreach ($stayIds as $stayId) {
+            $stayId = (int) $stayId;
+            if ($stayId <= 0 || isset($seen[$stayId])) {
+                continue;
+            }
+            $seen[$stayId] = true;
+
+            $stay = $stays->find($stayId);
+            if ($stay === null || $stay->userId !== $trip->ownerId) {
+                throw new \InvalidArgumentException("Hotel stay {$stayId} not found for this trip owner.");
+            }
+
+            $property = $properties->find($stay->hotelPropertyId);
+            $city = $property !== null ? trim((string) $property->city) : '';
+            if ($city === '') {
+                $city = $property !== null ? trim($property->hotelName) : 'Hotel';
+            }
+            $propertyName = $property !== null ? trim($property->hotelName) : 'Hotel';
+
+            $checkIn = $stay->stayStart . ' 15:00:00';
+            $checkOut = $stay->stayEnd > $stay->stayStart
+                ? $stay->stayEnd . ' 11:00:00'
+                : $stay->stayEnd . ' 23:59:59';
+
+            $created[] = $this->addSegment(new TripSegment(
+                id: null,
+                tripId: $tripId,
+                segmentType: 'hotel',
+                segmentSubtype: null,
+                carrierId: null,
+                carrier: $propertyName !== '' ? $propertyName : null,
+                flightNumber: null,
+                confirmationCode: $stay->confirmationCode,
+                origin: $city,
+                destination: $city,
+                departDt: $this->normalizeDateTime($checkIn),
+                arriveDt: $this->normalizeDateTime($checkOut),
+                hotelStayId: (int) $stay->id,
+                status: 'scheduled',
+                sourceParseLogId: null,
+            ), $actorUserId);
+        }
+
+        $this->syncTripDatesFromSegments($tripId, $actorUserId);
+        $this->db->audit($actorUserId, 'replace_hotels', 'trips', $tripId, ['hotels' => count($created)]);
+
+        return $created;
+    }
+
+    /**
+     * Stay IDs already linked to a trip via hotel segments.
+     *
+     * @return list<int>
+     */
+    public function hotelStayIdsForTrip(int $tripId): array
+    {
+        $ids = [];
+        foreach ($this->segmentsForTrip($tripId) as $segment) {
+            if ($segment->segmentType === 'hotel' && $segment->hotelStayId !== null && $segment->hotelStayId > 0) {
+                $ids[] = (int) $segment->hotelStayId;
+            }
+        }
+        return array_values(array_unique($ids));
     }
 
     /**

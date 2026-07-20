@@ -38,15 +38,18 @@ global-properties migration).
 (Settings → My profile), home city for map pins, nav-centered
 `You are: <Status>` override (remote requires city/state), dashboard
 Table / Cards / Map views (`localStorage` preference) with Leaflet city
-clusters → face markers.
+clusters → face markers. Map pins = current location only. Table/cards show
+Current + Next (city + dates when a later trip exists). Avatar/row/card click
+opens a 21-day travel look-ahead modal.
 
 **Complex itinerary (2026-07-20):** `TripStatusEngine` phases are pre-flight /
 en_route / post-flight (45m windows), layover (gap ≤3h), itinerary remote
 (gap >3h at arrived city), then hotel / override / Home. Times stay naive
 local wall-clock. Trip create/edit uses spreadsheet builder
-(`/trips/builder.php` + `replaceTripLegs`); `/flights/add.php` and
-`/trips/edit.php` redirect there. United parser emits multi-leg `segments[]`;
-round-trip upserts set `destination_city` to the outbound peak, not home.
+(`/trips/builder.php` + `replaceTripLegs` / `replaceTripHotels`); Mode is
+Flight or Train; hotels attach via `hotel_stay_id` (existing stay or create
+inline). Long transit gaps use `at_hotel` when a linked hotel covers `now`.
+`/flights/add.php` and `/trains/add.php` redirect to the builder.
 
 **Not started:** car/rideshare email parsers, Azure AD SSO,
 PWA/offline, push notifications, approval UI for auto-imported stays
@@ -167,7 +170,7 @@ PWA/offline, push notifications, approval UI for auto-imported stays
 
 - `TripStatusEngine` itinerary `remote` (gap >3h) sets `detail.from_itinerary`
   so `TeamLocationResolver::isAtBaseStatus` does not treat it like a manual
-  remote override (no upcoming-trip pin swap mid-stay).
+  remote override (upcoming trips never relocate an at-base pin).
 
 ## Immediate next steps (suggested, not started)
 

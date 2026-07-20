@@ -854,7 +854,7 @@ button.linkish {
 
 .team-card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(12.5rem, 1fr));
     gap: 1rem;
     margin-bottom: 1.5rem;
 }
@@ -880,6 +880,31 @@ button.linkish {
     font-size: 0.9rem;
     color: var(--text-dim);
 }
+.team-card-places {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.15rem;
+}
+.team-place {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.35;
+}
+.team-place .hint {
+    display: block;
+    margin-top: 0.1rem;
+}
+.team-place-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.1rem;
+}
 .team-card-clickable,
 .team-row-clickable {
     cursor: pointer;
@@ -901,13 +926,18 @@ button.linkish {
     margin: 0.75rem 0 0;
     padding: 0;
 }
+.teammate-travel-heading {
+    margin: 0.85rem 0 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
 .teammate-trip-item {
     border-top: 1px solid var(--border);
     padding: 0.75rem 0;
 }
 .teammate-trip-item:first-child {
     border-top: none;
-    padding-top: 0;
+    padding-top: 0.35rem;
 }
 .teammate-itinerary {
     list-style: none;
@@ -1106,6 +1136,49 @@ button.linkish {
     color: var(--accent);
     cursor: pointer;
     padding: 0.15rem 0.25rem;
+}
+
+.trip-builder-section-title {
+    margin: 1.1rem 0 0.4rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.trip-hotels-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+}
+
+.trip-hotel-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--input-bg);
+    font-size: 0.9rem;
+}
+
+.trip-hotels-controls,
+.trip-hotels-new-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 0.85rem;
+    align-items: end;
+    margin-bottom: 0.75rem;
+}
+
+.trip-hotels-controls label,
+.trip-hotels-new-row label {
+    flex: 1 1 160px;
+}
+
+.trip-legs-table .leg-mode {
+    max-width: 5.5rem;
 }
 
 .trip-builder-actions {

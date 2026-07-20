@@ -126,7 +126,7 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         @unlink($path);
     }
 
-    public function testUpcomingDestinationWinsOverHomeWhenAtBase(): void
+    public function testUpcomingLabelKeepsHomePinWhenAtBase(): void
     {
         $userId = $this->insertUser('dave');
         $userRepo = new UserRepository($this->db, $this->logger);
@@ -174,7 +174,11 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         );
 
         self::assertNotNull($result['location']);
-        self::assertSame(41.8781, $result['location']['lat']);
+        self::assertSame(34.7304, $result['location']['lat']);
+        self::assertStringContainsString('Huntsville', $result['location']['city_label']);
+        self::assertNotNull($result['next']);
+        self::assertStringContainsString('Chicago', $result['next']['city_label']);
+        self::assertNotSame('', $result['next']['dates']);
         self::assertStringContainsString('Chicago', (string) $result['upcoming']);
         self::assertStringContainsString('·', (string) $result['upcoming']);
     }
@@ -256,8 +260,9 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
             $trip,
         );
 
-        // en_route uses destination from status, not upcoming override label.
+        // Active trip passed as "upcoming" must not become Next while en_route.
         self::assertNull($result['upcoming']);
+        self::assertNull($result['next']);
         self::assertTrue(TeamLocationResolver::isAtBaseStatus('home'));
         self::assertFalse(TeamLocationResolver::isAtBaseStatus('en_route'));
         self::assertFalse(TeamLocationResolver::isAtBaseStatus('pre_flight'));
@@ -295,6 +300,50 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
 
         self::assertNull($finder->findVisible($viewerId, $ownerId, 21));
         self::assertNotNull($finder->findVisible($ownerId, $ownerId, 21));
+    }
+
+    public function testUpcomingFinderExcludesActiveTrip(): void
+    {
+        $ownerId = $this->insertUser('owner_ex');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+
+        $current = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Washington, DC',
+            startDate: (new \DateTimeImmutable('today'))->format('Y-m-d'),
+            endDate: (new \DateTimeImmutable('today'))->modify('+3 days')->format('Y-m-d'),
+            status: 'active',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $later = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Chicago, IL',
+            startDate: (new \DateTimeImmutable('today'))->modify('+10 days')->format('Y-m-d'),
+            endDate: (new \DateTimeImmutable('today'))->modify('+12 days')->format('Y-m-d'),
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $finder = new TeamUpcomingTripFinder(
+            $tripRepo,
+            new VisibilityEngine(new UserRepository($this->db, $this->logger), new VisibilityRuleRepository($this->db)),
+            new VisibilityBlockRepository($this->db),
+        );
+
+        $withoutExclude = $finder->findVisible($ownerId, $ownerId, 21);
+        self::assertNotNull($withoutExclude);
+        self::assertSame((int) $current->id, (int) $withoutExclude->id);
+
+        $next = $finder->findVisible($ownerId, $ownerId, 21, (int) $current->id);
+        self::assertNotNull($next);
+        self::assertSame((int) $later->id, (int) $next->id);
+        self::assertStringContainsString('Chicago', $next->destinationCity);
     }
 
     public function testTravelPreviewHidesPrivateTripsFromOthers(): void
@@ -573,5 +622,117 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertStringNotContainsString('ORD', $itin[1]['label']);
         self::assertStringNotContainsString('HSV', $itin[0]['label']);
         self::assertStringContainsString('Flight', $itin[0]['label']);
+    }
+
+    public function testTravelPreviewHotelUsesPropertyName(): void
+    {
+        $ownerId = $this->insertUser('hotelguest');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $props = new HotelPropertyRepository($this->db, $this->logger);
+        $stays = new HotelStayRepository($this->db, $this->logger, $props);
+
+        $day = (new \DateTimeImmutable('today'))->modify('+6 days');
+        $property = $props->create(new \NexWaypoint\Hotels\HotelProperty(
+            id: null,
+            createdByUserId: $ownerId,
+            hotelName: 'Hilton Midtown',
+            brand: 'Hilton',
+            addressLine1: null,
+            addressLine2: null,
+            city: 'New York',
+            stateRegion: 'NY',
+            postalCode: null,
+            country: null,
+            phone: null,
+            website: null,
+            latitude: null,
+            longitude: null,
+            hasDesk: false,
+            deskNotes: null,
+            hasPool: false,
+            hasHotTub: false,
+            hasBreakfast: false,
+            breakfastNotes: null,
+            hasGym: false,
+            hasFreeParking: false,
+            hasAirportShuttle: false,
+            hasEvCharging: false,
+            hasOnsiteRestaurant: false,
+            hasOffsiteGym: false,
+            walkToOffice: false,
+            walkToOfficeNotes: null,
+            hasDestinationFee: false,
+            destinationFeeNotes: null,
+            wifiQuality: null,
+            noiseLevel: null,
+            uniqueFeatures: null,
+        ), $ownerId);
+
+        $stay = $stays->create(new \NexWaypoint\Hotels\HotelStay(
+            id: null,
+            userId: $ownerId,
+            hotelPropertyId: (int) $property->id,
+            roomNumber: null,
+            bedType: null,
+            bathroomType: null,
+            stayStart: $day->format('Y-m-d'),
+            stayEnd: $day->modify('+2 days')->format('Y-m-d'),
+            stayRating: null,
+            lastStayPrice: null,
+            currency: 'USD',
+            bookingSource: null,
+            confirmationCode: null,
+            wouldReturn: null,
+            notes: null,
+            isPrivate: false,
+        ), $ownerId);
+
+        $trip = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'New York, NY',
+            startDate: $day->format('Y-m-d'),
+            endDate: $day->modify('+2 days')->format('Y-m-d'),
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '1',
+            confirmationCode: 'H1',
+            origin: 'HSV',
+            destination: 'LGA',
+            departDt: $day->setTime(8, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(12, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $tripRepo->replaceTripHotels((int) $trip->id, [(int) $stay->id], $props, $stays, $ownerId);
+
+        $builder = new TeamTravelPreviewBuilder(
+            $tripRepo,
+            new VisibilityEngine(new UserRepository($this->db, $this->logger), new VisibilityRuleRepository($this->db)),
+            new VisibilityBlockRepository($this->db),
+            $stays,
+            $props,
+        );
+        $preview = $builder->build($ownerId, $ownerId, 21);
+        self::assertCount(1, $preview);
+        $hotelItems = array_values(array_filter(
+            $preview[0]['itinerary'],
+            static fn (array $i) => $i['type'] === 'hotel'
+        ));
+        self::assertCount(1, $hotelItems);
+        self::assertStringContainsString('Hilton Midtown', $hotelItems[0]['label']);
     }
 }

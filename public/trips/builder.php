@@ -3,11 +3,13 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\HotelStay;
+use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\Carrier;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripRepository;
-use NexWaypoint\Trips\TripSegment;
 use NexWaypoint\Users\UserRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
 
@@ -17,6 +19,8 @@ $user = $app['auth']->requireAuth();
 $userRepo = new UserRepository($app['db'], $app['logger']);
 $tripRepo = new TripRepository($app['db'], $app['logger']);
 $carrierRepo = new CarrierRepository($app['db'], $app['logger']);
+$propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
+$stayRepo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
 $blockRepo = new VisibilityBlockRepository($app['db']);
 
 $tripId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
@@ -37,13 +41,15 @@ if ($isEdit && !in_array($trip->status, ['planned', 'active'], true)) {
 
 $errors = [];
 $schemaWarning = null;
-$carriers = [];
+$airlines = [];
+$railOperators = [];
 
 if (!$app['db']->tableExists('carriers')) {
     $schemaWarning = 'Database is missing the carriers table. Run: php scripts/migrate.php';
 } else {
     try {
-        $carriers = $carrierRepo->findByType(Carrier::TYPE_AIRLINE);
+        $airlines = $carrierRepo->findByType(Carrier::TYPE_AIRLINE);
+        $railOperators = $carrierRepo->findByType(Carrier::TYPE_RAIL);
     } catch (Throwable $e) {
         $schemaWarning = 'Could not load carriers.';
         $app['logger']->error('Failed loading carriers for trip builder', ['error' => $e->getMessage()]);
@@ -54,6 +60,9 @@ $otherUsers = array_values(array_filter(
     $userRepo->findAllActive(),
     static fn ($u) => $u->id !== $user->id
 ));
+
+$allProperties = $propertyRepo->findAll();
+$userStays = $stayRepo->findForUser($user->id, 'stay_start DESC');
 
 function nx_builder_trim(?string $value): ?string
 {
@@ -102,10 +111,11 @@ function nx_builder_existing_legs(TripRepository $tripRepo, Trip $trip): array
 {
     $legs = [];
     foreach ($tripRepo->segmentsForTrip((int) $trip->id) as $segment) {
-        if ($segment->segmentType !== 'flight') {
+        if (!in_array($segment->segmentType, ['flight', 'train'], true)) {
             continue;
         }
         $legs[] = [
+            'segment_type' => $segment->segmentType,
             'carrier_id' => $segment->carrierId,
             'flight_number' => $segment->flightNumber,
             'origin' => $segment->origin,
@@ -118,7 +128,41 @@ function nx_builder_existing_legs(TripRepository $tripRepo, Trip $trip): array
     return $legs;
 }
 
+/**
+ * @param HotelStay[] $stays
+ * @param HotelPropertyRepository $properties
+ * @param list<int> $stayIds
+ * @return list<array<string, mixed>>
+ */
+function nx_builder_hotel_rows(array $stays, HotelPropertyRepository $properties, array $stayIds): array
+{
+    $byId = [];
+    foreach ($stays as $stay) {
+        if ($stay->id !== null) {
+            $byId[(int) $stay->id] = $stay;
+        }
+    }
+    $rows = [];
+    foreach ($stayIds as $id) {
+        $stay = $byId[$id] ?? null;
+        if ($stay === null) {
+            continue;
+        }
+        $prop = $properties->find($stay->hotelPropertyId);
+        $rows[] = [
+            'stay_id' => (int) $stay->id,
+            'label' => $prop !== null ? $prop->hotelName : 'Hotel',
+            'city' => $prop !== null ? (string) $prop->city : '',
+            'stay_start' => $stay->stayStart,
+            'stay_end' => $stay->stayEnd,
+        ];
+    }
+    return $rows;
+}
+
 $postedLegs = null;
+$postedHotelStayIds = null;
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($schemaWarning !== null) {
         $errors[] = $schemaWarning;
@@ -145,6 +189,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!is_array($row)) {
                 continue;
             }
+            $mode = strtolower((string) ($row['segment_type'] ?? 'flight'));
+            if (!in_array($mode, ['flight', 'train'], true)) {
+                $mode = 'flight';
+            }
             $carrierId = (int) ($row['carrier_id'] ?? 0);
             $flightNumber = nx_builder_trim($row['flight_number'] ?? null);
             $origin = nx_builder_trim($row['origin'] ?? null);
@@ -153,23 +201,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $arriveLocal = nx_builder_trim($row['arrive_dt'] ?? null);
             $confirmation = nx_builder_trim($row['confirmation_code'] ?? null);
 
-            // Skip completely empty rows.
             if ($carrierId <= 0 && $flightNumber === null && $origin === null && $destination === null
                 && $departLocal === null && $arriveLocal === null && $confirmation === null) {
                 continue;
             }
 
             $carrier = $carrierId > 0 ? $carrierRepo->find($carrierId) : null;
-            if ($carrier === null || $carrier->isRail()) {
-                $errors[] = 'Each leg needs an airline carrier.';
+            if ($carrier === null) {
+                $errors[] = 'Each leg needs a carrier / operator.';
                 continue;
             }
-            if ($carrier->iataCode === null || $carrier->iataCode === '') {
-                $errors[] = 'Carrier ' . $carrier->name . ' is missing an IATA code.';
+            if ($mode === 'flight') {
+                if ($carrier->isRail()) {
+                    $errors[] = 'Flight legs need an airline carrier.';
+                    continue;
+                }
+                if ($carrier->iataCode === null || $carrier->iataCode === '') {
+                    $errors[] = 'Carrier ' . $carrier->name . ' is missing an IATA code.';
+                    continue;
+                }
+            } elseif (!$carrier->isRail()) {
+                $errors[] = 'Train legs need a rail operator.';
                 continue;
             }
             if ($flightNumber === null) {
-                $errors[] = 'Flight number is required on every leg.';
+                $errors[] = ($mode === 'train' ? 'Train' : 'Flight') . ' number is required on every leg.';
                 continue;
             }
             if ($origin === null || $destination === null) {
@@ -181,11 +237,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 continue;
             }
 
+            $number = $mode === 'flight'
+                ? nx_builder_flight_number($flightNumber, $carrier)
+                : strtoupper(preg_replace('/[^A-Z0-9]/', '', $flightNumber) ?? '');
+
             $legs[] = [
-                'segment_type' => 'flight',
+                'segment_type' => $mode,
                 'carrier_id' => (int) $carrier->id,
                 'carrier' => $carrier->name,
-                'flight_number' => nx_builder_flight_number($flightNumber, $carrier),
+                'flight_number' => $number,
                 'origin' => strtoupper($origin),
                 'destination' => strtoupper($destination),
                 'depart_dt' => nx_builder_datetime($departLocal),
@@ -197,8 +257,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $postedLegs = $legs;
 
+        // Hotel attachments: existing stay ids + newly created stays.
+        $hotelStayIds = [];
+        $rawHotels = $_POST['hotels'] ?? [];
+        if (is_array($rawHotels)) {
+            foreach ($rawHotels as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $sid = (int) ($row['stay_id'] ?? 0);
+                if ($sid > 0) {
+                    $hotelStayIds[] = $sid;
+                }
+            }
+        }
+
+        $rawNewHotels = $_POST['hotels_new'] ?? [];
+        if (!is_array($rawNewHotels)) {
+            $rawNewHotels = [];
+        }
+
         if ($legs === []) {
-            $errors[] = 'Add at least one flight leg.';
+            $errors[] = 'Add at least one flight or train leg.';
         }
 
         if ($errors === []) {
@@ -240,7 +320,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         notes: $notes,
                         isPrivate: $isPrivate,
                     ), $user->id);
-                    $tripRepo->replaceTripLegs((int) $trip->id, $legs, $user->id);
                 } else {
                     $trip = $tripRepo->create(new Trip(
                         id: null,
@@ -253,7 +332,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         notes: $notes,
                         isPrivate: $isPrivate,
                     ), $user->id);
-                    $tripRepo->replaceTripLegs((int) $trip->id, $legs, $user->id);
 
                     if (!$isPrivate && $hideFrom !== []) {
                         $blockRepo->replaceBlocks(
@@ -266,6 +344,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                $tripRepo->replaceTripLegs((int) $trip->id, $legs, $user->id);
+
+                foreach ($rawNewHotels as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $propertyId = (int) ($row['property_id'] ?? 0);
+                    $stayStart = nx_builder_trim($row['stay_start'] ?? null);
+                    $stayEnd = nx_builder_trim($row['stay_end'] ?? null);
+                    if ($propertyId <= 0 && $stayStart === null && $stayEnd === null) {
+                        continue;
+                    }
+                    if ($propertyId <= 0 || $stayStart === null || $stayEnd === null) {
+                        throw new InvalidArgumentException('New hotels need a property and check-in/out dates.');
+                    }
+                    $property = $propertyRepo->find($propertyId);
+                    if ($property === null) {
+                        throw new InvalidArgumentException('Selected hotel property was not found.');
+                    }
+                    $createdStay = $stayRepo->create(new HotelStay(
+                        id: null,
+                        userId: $user->id,
+                        hotelPropertyId: (int) $property->id,
+                        roomNumber: null,
+                        bedType: null,
+                        bathroomType: null,
+                        stayStart: $stayStart,
+                        stayEnd: $stayEnd,
+                        stayRating: null,
+                        lastStayPrice: null,
+                        currency: 'USD',
+                        bookingSource: null,
+                        confirmationCode: null,
+                        wouldReturn: null,
+                        notes: 'Linked from trip itinerary',
+                        isPrivate: false,
+                    ), $user->id);
+                    if ($createdStay->id !== null) {
+                        $hotelStayIds[] = (int) $createdStay->id;
+                    }
+                }
+
+                $hotelStayIds = array_values(array_unique(array_map('intval', $hotelStayIds)));
+                $postedHotelStayIds = $hotelStayIds;
+                $tripRepo->replaceTripHotels(
+                    (int) $trip->id,
+                    $hotelStayIds,
+                    $propertyRepo,
+                    $stayRepo,
+                    $user->id
+                );
+
                 header('Location: /trips/view.php?id=' . (int) $trip->id);
                 exit;
             } catch (Throwable $e) {
@@ -275,10 +405,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+$emptyLeg = [
+    'segment_type' => 'flight',
+    'carrier_id' => null,
+    'flight_number' => '',
+    'origin' => '',
+    'destination' => '',
+    'depart_dt' => '',
+    'arrive_dt' => '',
+    'confirmation_code' => '',
+];
+
 if ($postedLegs !== null) {
     $initialLegs = [];
     foreach ($postedLegs as $leg) {
         $initialLegs[] = [
+            'segment_type' => $leg['segment_type'] ?? 'flight',
             'carrier_id' => $leg['carrier_id'] ?? null,
             'flight_number' => $leg['flight_number'] ?? '',
             'origin' => $leg['origin'] ?? '',
@@ -291,26 +433,37 @@ if ($postedLegs !== null) {
 } elseif ($isEdit) {
     $initialLegs = nx_builder_existing_legs($tripRepo, $trip);
     if ($initialLegs === []) {
-        $initialLegs = [[
-            'carrier_id' => null,
-            'flight_number' => '',
-            'origin' => '',
-            'destination' => '',
-            'depart_dt' => '',
-            'arrive_dt' => '',
-            'confirmation_code' => '',
-        ]];
+        $initialLegs = [$emptyLeg];
     }
 } else {
-    $initialLegs = [[
-        'carrier_id' => null,
-        'flight_number' => '',
-        'origin' => '',
-        'destination' => '',
-        'depart_dt' => '',
-        'arrive_dt' => '',
-        'confirmation_code' => '',
-    ]];
+    $initialLegs = [$emptyLeg];
+}
+
+if ($postedHotelStayIds !== null) {
+    $attachedStayIds = $postedHotelStayIds;
+} elseif ($isEdit) {
+    $attachedStayIds = $tripRepo->hotelStayIdsForTrip((int) $trip->id);
+} else {
+    $attachedStayIds = [];
+}
+
+// Refresh stays after possible create failures leave POST state.
+$userStays = $stayRepo->findForUser($user->id, 'stay_start DESC');
+$attachedHotels = nx_builder_hotel_rows($userStays, $propertyRepo, $attachedStayIds);
+
+$attachableStays = [];
+$attachedSet = array_fill_keys($attachedStayIds, true);
+foreach ($userStays as $stay) {
+    if ($stay->id === null || isset($attachedSet[(int) $stay->id])) {
+        continue;
+    }
+    $prop = $propertyRepo->find($stay->hotelPropertyId);
+    $attachableStays[] = [
+        'stay_id' => (int) $stay->id,
+        'label' => ($prop !== null ? $prop->hotelName : 'Hotel')
+            . ' · ' . $stay->stayStart . ' → ' . $stay->stayEnd
+            . ($prop !== null && $prop->city ? ' · ' . $prop->city : ''),
+    ];
 }
 
 $destinationValue = (string) ($_POST['destination_city'] ?? ($isEdit ? $trip->destinationCity : ''));
@@ -322,9 +475,18 @@ $isPrivate = isset($_POST['is_private'])
 $blockedUserIds = array_map('intval', $_POST['hide_from'] ?? []);
 $statusValue = (string) ($_POST['status'] ?? ($isEdit ? $trip->status : 'planned'));
 
-$carrierOptionsJson = array_map(static function (Carrier $c): array {
-    return ['id' => (int) $c->id, 'label' => $c->label()];
-}, $carriers);
+$carrierJson = static function (array $list): array {
+    return array_map(static function (Carrier $c): array {
+        return ['id' => (int) $c->id, 'label' => $c->label()];
+    }, $list);
+};
+
+$propertyOptions = array_map(static function ($p): array {
+    return [
+        'id' => (int) $p->id,
+        'label' => $p->hotelName . ($p->city ? ' · ' . $p->city : ''),
+    ];
+}, $allProperties);
 
 $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
 ?>
@@ -344,7 +506,7 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
         <header class="trip-builder-header">
             <div>
                 <h1><?= htmlspecialchars($pageTitle, ENT_QUOTES) ?></h1>
-                <p class="hint">Enter legs as local wall-clock times. Gaps ≤3h are connections; longer gaps show as stays.</p>
+                <p class="hint">Mix flights and trains. Gaps ≤3h are connections; longer gaps show as stays. Attach hotels for at-hotel status and map pins.</p>
             </div>
             <a class="secondary" href="<?= $isEdit ? '/trips/view.php?id=' . (int) $trip->id : '/trips/list.php' ?>">Cancel</a>
         </header>
@@ -383,12 +545,14 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
                 <?php endif; ?>
             </div>
 
+            <h2 class="trip-builder-section-title">Transit legs</h2>
             <div class="table-scroll">
                 <table class="trip-legs-table" id="trip-legs-table">
                     <thead>
                         <tr>
+                            <th>Mode</th>
                             <th>Carrier</th>
-                            <th>Flight #</th>
+                            <th class="leg-num-heading">Flight #</th>
                             <th>Origin</th>
                             <th>Dest</th>
                             <th>Depart (local)</th>
@@ -401,9 +565,46 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
                     <tbody id="trip-legs-body"></tbody>
                 </table>
             </div>
-
             <div class="trip-builder-actions">
                 <button type="button" class="secondary" id="trip-leg-add" <?= $schemaWarning !== null ? 'disabled' : '' ?>>Add leg</button>
+            </div>
+
+            <h2 class="trip-builder-section-title">Hotels on this trip</h2>
+            <div id="trip-hotels-attached" class="trip-hotels-list"></div>
+            <div class="trip-hotels-controls">
+                <label class="trip-hotel-attach">Attach existing stay
+                    <select id="trip-hotel-attach-select" <?= $schemaWarning !== null ? 'disabled' : '' ?>>
+                        <option value="">— Select stay —</option>
+                        <?php foreach ($attachableStays as $opt): ?>
+                            <option value="<?= (int) $opt['stay_id'] ?>"><?= htmlspecialchars($opt['label'], ENT_QUOTES) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <button type="button" class="secondary" id="trip-hotel-attach-btn" <?= $schemaWarning !== null ? 'disabled' : '' ?>>Attach</button>
+            </div>
+            <div class="trip-hotels-new" id="trip-hotels-new">
+                <p class="hint">Or add a new stay (creates a hotel stay and links it):</p>
+                <div class="trip-hotels-new-row">
+                    <label>Property
+                        <select id="trip-hotel-new-property" <?= $schemaWarning !== null ? 'disabled' : '' ?>>
+                            <option value="">— Select property —</option>
+                            <?php foreach ($propertyOptions as $opt): ?>
+                                <option value="<?= (int) $opt['id'] ?>"><?= htmlspecialchars($opt['label'], ENT_QUOTES) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>Check-in
+                        <input type="date" id="trip-hotel-new-start" <?= $schemaWarning !== null ? 'disabled' : '' ?>>
+                    </label>
+                    <label>Check-out
+                        <input type="date" id="trip-hotel-new-end" <?= $schemaWarning !== null ? 'disabled' : '' ?>>
+                    </label>
+                    <button type="button" class="secondary" id="trip-hotel-new-btn" <?= $schemaWarning !== null ? 'disabled' : '' ?>>Add hotel</button>
+                </div>
+            </div>
+            <div id="trip-hotels-hidden"></div>
+
+            <div class="trip-builder-actions">
                 <button type="submit" class="primary" <?= $schemaWarning !== null ? 'disabled' : '' ?>>Save itinerary</button>
             </div>
 
@@ -424,15 +625,18 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
 <template id="trip-leg-row-template">
     <tr class="trip-leg-row">
         <td>
+            <select name="legs[__IDX__][segment_type]" class="leg-mode" required>
+                <option value="flight">Flight</option>
+                <option value="train">Train</option>
+            </select>
+        </td>
+        <td>
             <select name="legs[__IDX__][carrier_id]" class="leg-carrier" required>
                 <option value="">—</option>
-                <?php foreach ($carriers as $c): ?>
-                    <option value="<?= (int) $c->id ?>"><?= htmlspecialchars($c->label(), ENT_QUOTES) ?></option>
-                <?php endforeach; ?>
                 <option value="__new__">— Add New… —</option>
             </select>
         </td>
-        <td><input type="text" name="legs[__IDX__][flight_number]" class="leg-flight" required placeholder="1234" inputmode="numeric"></td>
+        <td><input type="text" name="legs[__IDX__][flight_number]" class="leg-flight" required placeholder="1234"></td>
         <td><input type="text" name="legs[__IDX__][origin]" class="leg-origin" required placeholder="HSV" maxlength="32"></td>
         <td><input type="text" name="legs[__IDX__][destination]" class="leg-dest" required placeholder="DEN" maxlength="32"></td>
         <td><input type="datetime-local" name="legs[__IDX__][depart_dt]" class="leg-depart" required></td>
@@ -449,7 +653,10 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
 
 <script type="application/json" id="trip-builder-initial"><?= json_encode([
     'legs' => $initialLegs,
-    'carriers' => $carrierOptionsJson,
+    'airlines' => $carrierJson($airlines),
+    'rail' => $carrierJson($railOperators),
+    'hotels' => $attachedHotels,
+    'attachable' => $attachableStays,
 ], JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
 
 <div id="carrier-modal" class="modal-backdrop" hidden>
@@ -457,11 +664,11 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
         <h2 id="carrier-modal-title">Add carrier</h2>
         <p id="carrier-modal-error" class="alert alert-error" hidden></p>
         <form id="carrier-modal-form" class="stack">
-            <label>Airline name<input type="text" name="name" required placeholder="Delta Air Lines"></label>
-            <label>IATA code<input type="text" name="iata_code" required maxlength="3" placeholder="DL" style="text-transform:uppercase"></label>
-            <p class="hint">IATA is used with the flight number for FlightAware lookups.</p>
+            <label id="carrier-modal-name-label">Airline name<input type="text" name="name" required placeholder="Delta Air Lines"></label>
+            <label id="carrier-modal-iata-wrap">IATA code<input type="text" name="iata_code" maxlength="3" placeholder="DL" style="text-transform:uppercase"></label>
+            <p class="hint" id="carrier-modal-hint">IATA is used with the flight number for FlightAware lookups.</p>
             <div class="modal-actions">
-                <button type="submit" class="primary">Save carrier</button>
+                <button type="submit" class="primary">Save</button>
                 <button type="button" class="secondary" data-close-modal>Cancel</button>
             </div>
         </form>

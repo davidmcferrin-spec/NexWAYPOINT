@@ -259,6 +259,128 @@ final class TripStatusEngineTest extends NexWaypointTestCase
         self::assertTrue($remote['detail']['from_itinerary']);
     }
 
+    public function testHotelSegmentBeatsRemoteGap(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $props = new \NexWaypoint\Hotels\HotelPropertyRepository($this->db, $this->logger);
+        $stays = new \NexWaypoint\Hotels\HotelStayRepository($this->db, $this->logger, $props);
+
+        $property = $props->create(new \NexWaypoint\Hotels\HotelProperty(
+            id: null,
+            createdByUserId: $userId,
+            hotelName: 'Denver Downtown',
+            brand: null,
+            addressLine1: null,
+            addressLine2: null,
+            city: 'Denver',
+            stateRegion: 'CO',
+            postalCode: null,
+            country: null,
+            phone: null,
+            website: null,
+            latitude: 39.74,
+            longitude: -104.99,
+            hasDesk: false,
+            deskNotes: null,
+            hasPool: false,
+            hasHotTub: false,
+            hasBreakfast: false,
+            breakfastNotes: null,
+            hasGym: false,
+            hasFreeParking: false,
+            hasAirportShuttle: false,
+            hasEvCharging: false,
+            hasOnsiteRestaurant: false,
+            hasOffsiteGym: false,
+            walkToOffice: false,
+            walkToOfficeNotes: null,
+            hasDestinationFee: false,
+            destinationFeeNotes: null,
+            wifiQuality: null,
+            noiseLevel: null,
+            uniqueFeatures: null,
+        ), $userId);
+
+        $stay = $stays->create(new \NexWaypoint\Hotels\HotelStay(
+            id: null,
+            userId: $userId,
+            hotelPropertyId: (int) $property->id,
+            roomNumber: null,
+            bedType: null,
+            bathroomType: null,
+            stayStart: '2026-08-10',
+            stayEnd: '2026-08-12',
+            stayRating: null,
+            lastStayPrice: null,
+            currency: 'USD',
+            bookingSource: null,
+            confirmationCode: null,
+            wouldReturn: null,
+            notes: null,
+            isPrivate: false,
+        ), $userId);
+
+        $result = $tripRepo->upsertItineraryByConfirmation($userId, 'HTL001', [
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'United',
+                'flight_number' => '1',
+                'origin' => 'HSV',
+                'destination' => 'DEN',
+                'depart_dt' => '2026-08-10 08:00:00',
+                'arrive_dt' => '2026-08-10 10:00:00',
+            ],
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'United',
+                'flight_number' => '2',
+                'origin' => 'DEN',
+                'destination' => 'HSV',
+                'depart_dt' => '2026-08-12 16:00:00',
+                'arrive_dt' => '2026-08-12 19:00:00',
+            ],
+        ], null, $userId);
+
+        $tripRepo->replaceTripHotels(
+            (int) $result['trip']->id,
+            [(int) $stay->id],
+            $props,
+            $stays,
+            $userId
+        );
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $mid = $engine->resolveForUser($userId, new \DateTimeImmutable('2026-08-11 12:00:00'));
+        self::assertSame('at_hotel', $mid['status']);
+        self::assertStringContainsString('Denver', $mid['label']);
+        self::assertSame((int) $stay->id, $mid['detail']['hotel_stay_id']);
+    }
+
+    public function testTrainPostArrivalLabel(): void
+    {
+        $userId = $this->insertUser('dave');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $now = new \DateTimeImmutable('2026-08-01 12:20:00');
+
+        $trip = $this->makeTrip($tripRepo, $userId, '2026-08-01', '2026-08-01');
+        $this->makeSegment($tripRepo, $trip->id, [
+            'segmentType' => 'train',
+            'carrier' => 'Amtrak',
+            'flightNumber' => '90',
+            'origin' => 'WAS',
+            'destination' => 'NYP',
+            'departDt' => '2026-08-01 08:00:00',
+            'arriveDt' => '2026-08-01 12:00:00',
+            'status' => 'landed',
+        ]);
+
+        $engine = new TripStatusEngine($tripRepo, $this->logger);
+        $result = $engine->resolveForUser($userId, $now);
+        self::assertSame('post_flight', $result['status']);
+        self::assertStringContainsString('Post-arrival', $result['label']);
+    }
+
     public function testManualOverrideUsedWhenNoActiveTravel(): void
     {
         $userId = $this->insertUser('dave');
