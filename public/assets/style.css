@@ -351,6 +351,188 @@ button.address-search-item:hover {
 }
 
 .container { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
+.container.directory-page { max-width: 1100px; }
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.directory-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+.directory-header h1 { margin: 0 0 0.35rem; }
+.directory-header .hint { margin: 0; }
+
+.directory-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-bottom: 1.25rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+}
+.directory-filters-primary,
+.directory-filters-secondary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.65rem;
+    align-items: end;
+}
+.directory-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+.directory-filter-grow { flex: 1 1 12rem; min-width: 10rem; }
+.directory-filter-state { width: 4.5rem; flex: 0 0 4.5rem; }
+.directory-filters input,
+.directory-filters select {
+    padding: 0.45rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 400;
+    letter-spacing: normal;
+}
+.directory-filters-clear {
+    align-self: end;
+    padding: 0.45rem 0.2rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.property-directory {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+.property-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1.25rem;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid var(--border);
+}
+.property-row:last-child { border-bottom: none; }
+.property-row-main { flex: 1 1 auto; min-width: 0; }
+.property-row-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.65rem;
+}
+.property-row-name {
+    font-size: 1.05rem;
+    font-weight: 650;
+    color: var(--text);
+    text-decoration: none;
+}
+.property-row-name:hover { color: var(--accent); }
+.property-row-brand {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-weight: 500;
+}
+.property-row-meta {
+    margin: 0.3rem 0 0;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.4;
+}
+.property-row-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.55rem;
+}
+.chip {
+    display: inline-block;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    background: var(--badge-travel-bg);
+    color: var(--accent);
+}
+.chip-warn {
+    background: var(--badge-delay-bg);
+    color: var(--yellow);
+}
+.chip-danger {
+    background: var(--badge-blacklist-bg);
+    color: var(--red);
+}
+.property-row-adverse { margin: 0.45rem 0 0; }
+.property-row-side {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: right;
+}
+.property-row-rating-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text);
+}
+.property-row-rating-star { color: var(--yellow); margin-left: 0.1rem; }
+.property-row-rating-empty {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+}
+.property-row-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.2rem;
+    font-size: 0.9rem;
+}
+.directory-count { margin-top: 0.85rem; }
+
+@media (max-width: 720px) {
+    .directory-header { flex-direction: column; align-items: stretch; }
+    .property-row { flex-direction: column; gap: 0.75rem; }
+    .property-row-side {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        text-align: left;
+    }
+    .property-row-actions {
+        flex-direction: row;
+        gap: 0.75rem;
+        align-items: center;
+    }
+}
 
 .alert { padding: 0.6rem 1rem; border-radius: 4px; margin-bottom: 1rem; }
 .alert-error {

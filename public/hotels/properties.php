@@ -60,7 +60,6 @@ foreach ($locations as $loc) {
     $cities[$loc['city']] = true;
 }
 
-// Brands for filter: catalog + any in-use brands not in the catalog.
 $brandOptions = [];
 foreach ($hotelBrandNames as $brandName) {
     $brandOptions[$brandName] = true;
@@ -83,6 +82,14 @@ $hasActiveFilters = $filters['q'] !== ''
     || $filters['blacklisted'] !== ''
     || $filters['teammate_adverse'] !== '';
 
+$sortLabels = [
+    'hotel_name' => 'Name',
+    'brand' => 'Brand',
+    'city' => 'City',
+    'overall_rating' => 'Rating',
+    'updated' => 'Recently updated',
+];
+
 $property = null;
 ?>
 <!DOCTYPE html>
@@ -97,168 +104,181 @@ $property = null;
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
-<main class="container">
-    <div class="modal-actions" style="justify-content:space-between;align-items:center;margin-bottom:0.5rem">
-        <h1 style="margin:0">Hotel properties</h1>
+<main class="container directory-page">
+    <header class="directory-header">
+        <div>
+            <h1>Hotel properties</h1>
+            <p class="hint">
+                Shared hotel directory. Address lookup fills street + map pins when you add or edit.
+                <a href="/hotels/list.php">Stays</a>
+                ·
+                <a href="/hotels/map.php">Map</a>
+            </p>
+        </div>
         <button type="button" class="primary" data-open-property-modal>Add hotel</button>
-    </div>
-    <p class="hint">
-        Blacklist is yours to set; teammate adverse preferences for the same hotel/city are shown.
-        Use address lookup when adding/editing to fill street + map pins.
-        <a href="/hotels/list.php">Stays</a>
-        ·
-        <a href="/hotels/map.php">Map</a>
-        <?php if ($hasActiveFilters): ?>
-            ·
-            <a href="/hotels/properties.php">Clear filters</a>
-        <?php endif; ?>
-    </p>
+    </header>
 
-    <form method="get" action="/hotels/properties.php" id="property-filter-form">
-        <input type="hidden" name="sort" value="<?= htmlspecialchars($sort, ENT_QUOTES) ?>">
-        <table class="filterable-table">
-            <thead>
-                <tr>
-                    <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'hotel_name']), ENT_QUOTES) ?>">Hotel</a></th>
-                    <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'brand']), ENT_QUOTES) ?>">Brand</a></th>
-                    <th>Address</th>
-                    <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'city']), ENT_QUOTES) ?>">Location</a></th>
-                    <th>Desk</th>
-                    <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'overall_rating']), ENT_QUOTES) ?>">Overall</a></th>
-                    <th>Dest. charge</th>
-                    <th>Flags</th>
-                    <th></th>
-                </tr>
-                <tr class="table-filters">
-                    <th>
-                        <input type="search" name="q" value="<?= htmlspecialchars($filters['q'], ENT_QUOTES) ?>" placeholder="Name" aria-label="Filter by hotel name">
-                    </th>
-                    <th>
-                        <select name="brand" aria-label="Filter by brand" onchange="this.form.submit()">
-                            <option value="">Any</option>
-                            <?php foreach ($brandOptions as $brandName): ?>
-                                <option value="<?= htmlspecialchars($brandName, ENT_QUOTES) ?>"
-                                    <?= strcasecmp($filters['brand'], $brandName) === 0 ? 'selected' : '' ?>>
-                                    <?= htmlspecialchars($brandName, ENT_QUOTES) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </th>
-                    <th></th>
-                    <th>
-                        <div class="table-filter-pair">
-                            <input type="text" name="city" value="<?= htmlspecialchars($filters['city'], ENT_QUOTES) ?>" placeholder="City" list="city-suggestions" aria-label="Filter by city">
-                            <input type="text" name="state_region" value="<?= htmlspecialchars($filters['state_region'], ENT_QUOTES) ?>" placeholder="ST" aria-label="Filter by state" maxlength="20">
-                        </div>
-                        <datalist id="city-suggestions">
-                            <?php foreach (array_keys($cities) as $c): ?>
-                                <option value="<?= htmlspecialchars($c, ENT_QUOTES) ?>">
-                            <?php endforeach; ?>
-                        </datalist>
-                    </th>
-                    <th>
-                        <select name="has_desk" aria-label="Filter by desk" onchange="this.form.submit()">
-                            <option value="">Any</option>
-                            <option value="1" <?= $filters['has_desk'] === '1' ? 'selected' : '' ?>>Yes</option>
-                            <option value="0" <?= $filters['has_desk'] === '0' ? 'selected' : '' ?>>No</option>
-                        </select>
-                    </th>
-                    <th></th>
-                    <th>
-                        <select name="destination_fee" aria-label="Filter by destination charge" onchange="this.form.submit()">
-                            <option value="">Any</option>
-                            <option value="1" <?= $filters['destination_fee'] === '1' ? 'selected' : '' ?>>Yes</option>
-                            <option value="0" <?= $filters['destination_fee'] === '0' ? 'selected' : '' ?>>No</option>
-                        </select>
-                    </th>
-                    <th>
-                        <div class="table-filter-pair">
-                            <select name="blacklisted" aria-label="Filter by my blacklist" onchange="this.form.submit()">
-                                <option value="">Blacklist</option>
-                                <option value="1" <?= $filters['blacklisted'] === '1' ? 'selected' : '' ?>>Mine</option>
-                                <option value="0" <?= $filters['blacklisted'] === '0' ? 'selected' : '' ?>>Not mine</option>
-                            </select>
-                            <select name="teammate_adverse" aria-label="Filter by teammate adverse" onchange="this.form.submit()">
-                                <option value="">Adverse</option>
-                                <option value="1" <?= $filters['teammate_adverse'] === '1' ? 'selected' : '' ?>>Teammate</option>
-                            </select>
-                        </div>
-                    </th>
-                    <th>
-                        <button type="submit" class="secondary table-filter-go">Go</button>
-                    </th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if ($properties === []): ?>
-                    <tr>
-                        <td colspan="9" class="empty-state">
-                            No properties match.
-                            <button type="button" class="primary" data-open-property-modal>Add hotel</button>
-                            or <a href="/hotels/add.php">log a stay</a>.
-                        </td>
-                    </tr>
-                <?php else: ?>
-                    <?php foreach ($properties as $property): ?>
-                        <?php $adverse = $adverseByPropertyId[(int) $property->id] ?? []; ?>
-                        <tr>
-                            <td><?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?></td>
-                            <td><?= htmlspecialchars($property->brand ?? '—', ENT_QUOTES) ?></td>
-                            <td class="hint">
-                                <?= htmlspecialchars($property->addressSummary() ?? '—', ENT_QUOTES) ?>
-                            </td>
-                            <td><?= htmlspecialchars($property->locationLabel() ?? '—', ENT_QUOTES) ?></td>
-                            <td>
-                                <?php if ($property->hasDesk): ?>
-                                    Yes<?= $property->deskNotes ? ' <span class="hint" title="' . htmlspecialchars($property->deskNotes, ENT_QUOTES) . '">·</span>' : '' ?>
-                                <?php else: ?>
-                                    —
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <?= $property->overallRating !== null ? number_format($property->overallRating, 1) . '★' : '—' ?>
-                            </td>
-                            <td>
-                                <?= $property->hasDestinationFee ? 'Yes' : '—' ?>
-                            </td>
-                            <td>
-                                <?php if (isset($myBlacklistIds[(int) $property->id])): ?>
-                                    <span class="badge badge-blacklist">My blacklist</span>
-                                <?php endif; ?>
-                                <?php if ($adverse !== []): ?>
-                                    <span class="badge badge-status-delay" title="<?= htmlspecialchars(implode('; ', array_map(
-                                        static fn (array $a) => $a['display_name'] . ': ' . ($a['reason'] ?? 'no reason'),
-                                        $adverse
-                                    )), ENT_QUOTES) ?>">
-                                        <?= count($adverse) ?> teammate<?= count($adverse) === 1 ? '' : 's' ?> adverse
-                                    </span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <a href="/hotels/edit-property.php?id=<?= (int) $property->id ?>">Edit</a>
-                                ·
-                                <a href="/hotels/add.php?property_id=<?= (int) $property->id ?>">Log stay</a>
-                            </td>
-                        </tr>
-                        <?php if ($adverse !== []): ?>
-                            <tr>
-                                <td colspan="9" class="hint">
-                                    Teammate adverse preference<?= count($adverse) === 1 ? '' : 's' ?>:
-                                    <?php foreach ($adverse as $i => $a): ?>
-                                        <?= $i > 0 ? '; ' : '' ?>
-                                        <strong><?= htmlspecialchars($a['display_name'], ENT_QUOTES) ?></strong>
-                                        <?= htmlspecialchars($a['reason'] !== null && $a['reason'] !== '' ? ' — ' . $a['reason'] : '', ENT_QUOTES) ?>
-                                    <?php endforeach; ?>
-                                </td>
-                            </tr>
-                        <?php endif; ?>
+    <form method="get" action="/hotels/properties.php" class="directory-filters" id="property-filter-form">
+        <div class="directory-filters-primary">
+            <label class="directory-filter-grow">
+                <span class="visually-hidden">Search hotels</span>
+                <input type="search" name="q" value="<?= htmlspecialchars($filters['q'], ENT_QUOTES) ?>"
+                    placeholder="Search hotel name" aria-label="Search hotel name">
+            </label>
+            <label>
+                <span class="visually-hidden">Brand</span>
+                <select name="brand" aria-label="Filter by brand" onchange="this.form.submit()">
+                    <option value="">All brands</option>
+                    <?php foreach ($brandOptions as $brandName): ?>
+                        <option value="<?= htmlspecialchars($brandName, ENT_QUOTES) ?>"
+                            <?= strcasecmp($filters['brand'], $brandName) === 0 ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($brandName, ENT_QUOTES) ?>
+                        </option>
                     <?php endforeach; ?>
-                <?php endif; ?>
-            </tbody>
-        </table>
+                </select>
+            </label>
+            <label>
+                <span class="visually-hidden">City</span>
+                <input type="text" name="city" value="<?= htmlspecialchars($filters['city'], ENT_QUOTES) ?>"
+                    placeholder="City" list="city-suggestions" aria-label="Filter by city">
+            </label>
+            <label class="directory-filter-state">
+                <span class="visually-hidden">State</span>
+                <input type="text" name="state_region" value="<?= htmlspecialchars($filters['state_region'], ENT_QUOTES) ?>"
+                    placeholder="ST" aria-label="Filter by state" maxlength="20">
+            </label>
+            <datalist id="city-suggestions">
+                <?php foreach (array_keys($cities) as $c): ?>
+                    <option value="<?= htmlspecialchars($c, ENT_QUOTES) ?>">
+                <?php endforeach; ?>
+            </datalist>
+            <button type="submit" class="secondary">Filter</button>
+        </div>
+        <div class="directory-filters-secondary">
+            <label>
+                Desk
+                <select name="has_desk" aria-label="Filter by desk" onchange="this.form.submit()">
+                    <option value="">Any</option>
+                    <option value="1" <?= $filters['has_desk'] === '1' ? 'selected' : '' ?>>Yes</option>
+                    <option value="0" <?= $filters['has_desk'] === '0' ? 'selected' : '' ?>>No</option>
+                </select>
+            </label>
+            <label>
+                Dest. fee
+                <select name="destination_fee" aria-label="Filter by destination charge" onchange="this.form.submit()">
+                    <option value="">Any</option>
+                    <option value="1" <?= $filters['destination_fee'] === '1' ? 'selected' : '' ?>>Yes</option>
+                    <option value="0" <?= $filters['destination_fee'] === '0' ? 'selected' : '' ?>>No</option>
+                </select>
+            </label>
+            <label>
+                Blacklist
+                <select name="blacklisted" aria-label="Filter by my blacklist" onchange="this.form.submit()">
+                    <option value="">Any</option>
+                    <option value="1" <?= $filters['blacklisted'] === '1' ? 'selected' : '' ?>>Mine</option>
+                    <option value="0" <?= $filters['blacklisted'] === '0' ? 'selected' : '' ?>>Not mine</option>
+                </select>
+            </label>
+            <label>
+                Teammate
+                <select name="teammate_adverse" aria-label="Filter by teammate adverse" onchange="this.form.submit()">
+                    <option value="">Any</option>
+                    <option value="1" <?= $filters['teammate_adverse'] === '1' ? 'selected' : '' ?>>Adverse</option>
+                </select>
+            </label>
+            <label>
+                Sort
+                <select name="sort" aria-label="Sort hotels" onchange="this.form.submit()">
+                    <?php foreach ($sortLabels as $key => $label): ?>
+                        <option value="<?= htmlspecialchars($key, ENT_QUOTES) ?>" <?= $sort === $key ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($label, ENT_QUOTES) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <?php if ($hasActiveFilters): ?>
+                <a class="directory-filters-clear" href="/hotels/properties.php">Clear</a>
+            <?php endif; ?>
+        </div>
     </form>
-    <?php if ($properties !== []): ?>
-        <p class="hint"><?= count($properties) ?> propert<?= count($properties) === 1 ? 'y' : 'ies' ?></p>
+
+    <?php if ($properties === []): ?>
+        <div class="empty-state">
+            No properties match.
+            <button type="button" class="primary" data-open-property-modal>Add hotel</button>
+            or <a href="/hotels/add.php">log a stay</a>.
+        </div>
+    <?php else: ?>
+        <ul class="property-directory">
+            <?php foreach ($properties as $property): ?>
+                <?php
+                $adverse = $adverseByPropertyId[(int) $property->id] ?? [];
+                $metaBits = array_values(array_filter([
+                    $property->addressSummary(),
+                    $property->locationLabel(),
+                ]));
+                $adverseTitle = implode('; ', array_map(
+                    static fn (array $a) => $a['display_name'] . ': ' . ($a['reason'] ?? 'no reason'),
+                    $adverse
+                ));
+                ?>
+                <li class="property-row">
+                    <div class="property-row-main">
+                        <div class="property-row-title">
+                            <a class="property-row-name" href="/hotels/edit-property.php?id=<?= (int) $property->id ?>">
+                                <?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?>
+                            </a>
+                            <?php if ($property->brand): ?>
+                                <span class="property-row-brand"><?= htmlspecialchars($property->brand, ENT_QUOTES) ?></span>
+                            <?php endif; ?>
+                        </div>
+                        <?php if ($metaBits !== []): ?>
+                            <p class="property-row-meta"><?= htmlspecialchars(implode(' · ', $metaBits), ENT_QUOTES) ?></p>
+                        <?php endif; ?>
+                        <div class="property-row-chips">
+                            <?php if ($property->hasDesk): ?>
+                                <span class="chip" title="<?= htmlspecialchars($property->deskNotes ?? 'Desk suitable for working', ENT_QUOTES) ?>">Desk</span>
+                            <?php endif; ?>
+                            <?php if ($property->hasDestinationFee): ?>
+                                <span class="chip chip-warn">Dest. fee</span>
+                            <?php endif; ?>
+                            <?php if (isset($myBlacklistIds[(int) $property->id])): ?>
+                                <span class="chip chip-danger">My blacklist</span>
+                            <?php endif; ?>
+                            <?php if ($adverse !== []): ?>
+                                <span class="chip chip-warn" title="<?= htmlspecialchars($adverseTitle, ENT_QUOTES) ?>">
+                                    <?= count($adverse) ?> teammate<?= count($adverse) === 1 ? '' : 's' ?> adverse
+                                </span>
+                            <?php endif; ?>
+                        </div>
+                        <?php if ($adverse !== []): ?>
+                            <p class="property-row-adverse hint">
+                                <?php foreach ($adverse as $i => $a): ?>
+                                    <?= $i > 0 ? '; ' : '' ?>
+                                    <strong><?= htmlspecialchars($a['display_name'], ENT_QUOTES) ?></strong>
+                                    <?= htmlspecialchars($a['reason'] !== null && $a['reason'] !== '' ? ' — ' . $a['reason'] : '', ENT_QUOTES) ?>
+                                <?php endforeach; ?>
+                            </p>
+                        <?php endif; ?>
+                    </div>
+                    <div class="property-row-side">
+                        <div class="property-row-rating" title="Public average of stay ratings">
+                            <?php if ($property->overallRating !== null): ?>
+                                <span class="property-row-rating-value"><?= number_format($property->overallRating, 1) ?></span>
+                                <span class="property-row-rating-star" aria-hidden="true">★</span>
+                            <?php else: ?>
+                                <span class="property-row-rating-empty">No rating</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="property-row-actions">
+                            <a href="/hotels/edit-property.php?id=<?= (int) $property->id ?>">Edit</a>
+                            <a href="/hotels/add.php?property_id=<?= (int) $property->id ?>">Log stay</a>
+                        </div>
+                    </div>
+                </li>
+            <?php endforeach; ?>
+        </ul>
+        <p class="hint directory-count"><?= count($properties) ?> propert<?= count($properties) === 1 ? 'y' : 'ies' ?></p>
     <?php endif; ?>
 </main>
 
