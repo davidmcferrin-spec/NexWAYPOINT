@@ -24,6 +24,17 @@ CREATE TABLE users (
 );
 CREATE INDEX idx_users_manager ON users(manager_id);
 
+-- Addresses that claim inbound confirmation mail for a user.
+CREATE TABLE user_emails (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email           TEXT NOT NULL UNIQUE,
+    label           TEXT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_user_emails_user ON user_emails(user_id);
+
 CREATE TABLE user_status_overrides (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -78,6 +89,21 @@ CREATE INDEX idx_prop_user ON hotel_properties(user_id);
 CREATE INDEX idx_prop_city ON hotel_properties(city);
 CREATE INDEX idx_prop_blacklist ON hotel_properties(is_blacklisted);
 CREATE INDEX idx_prop_name ON hotel_properties(hotel_name);
+
+CREATE TABLE hotel_brands (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO hotel_brands (name, sort_order, is_active) VALUES
+    ('Marriott', 10, 1),
+    ('Hilton', 20, 1),
+    ('IHG', 30, 1),
+    ('Hyatt', 40, 1),
+    ('Choice Hotels', 50, 1);
 
 CREATE TABLE hotel_stays (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,

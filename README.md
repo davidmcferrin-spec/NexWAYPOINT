@@ -42,8 +42,10 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
   defaults" below -- this is the one place a real ambiguity in the
   requirements had to be resolved, and it's called out rather than
   silently guessed.
-- **Local authentication** -- session-based username/password. Azure AD /
-  M365 SSO is a documented future phase, not v1.
+- **Local authentication** -- session-based username/password. Managers get
+  a Users admin screen; each user can register multiple forward-from email
+  aliases for mail import. Azure AD / M365 SSO is a documented future phase,
+  not v1.
 
 ## What's NOT built yet (be aware before you rely on this)
 
@@ -137,6 +139,10 @@ users:
 php scripts/create_user.php
 ```
 
+Managers can also manage users in the UI at `/admin/users.php` (create,
+role/manager, deactivate, reset password, attach forward-from emails).
+Everyone manages their own forward addresses at `/settings/emails.php`.
+
 Reset a password (prints a new random value once):
 
 ```bash
@@ -209,8 +215,9 @@ installer:
 3. Have each teammate set up mail forwarding (or a filter that forwards)
    confirmation emails from their own inbox to that address. `MailPoller`
    attributes each email to a NexWAYPOINT user by matching the `From:`
-   address against `users.email` -- so the forwarded copy's From header
-   needs to be the teammate's own address (true for a normal "Forward").
+   address against that user's rows in `user_emails` (primary plus any
+   aliases). Add every address you send/forward from under **My emails**
+   (`/settings/emails.php`), or have a manager attach them under **Users**.
 4. `IMAP_PROCESSED_FOLDER`/`IMAP_FAILED_FOLDER` are created automatically
    on first connect if they don't exist.
 

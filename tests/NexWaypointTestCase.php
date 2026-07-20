@@ -60,6 +60,13 @@ abstract class NexWaypointTestCase extends TestCase
                 'm' => $managerId,
             ]
         );
-        return $this->db->lastInsertId();
+        $id = $this->db->lastInsertId();
+        if ($this->db->tableExists('user_emails')) {
+            $this->db->execute(
+                'INSERT INTO user_emails (user_id, email, label, is_primary) VALUES (:uid, :email, :label, 1)',
+                ['uid' => $id, 'email' => "{$username}@example.com", 'label' => 'Primary']
+            );
+        }
+        return $id;
     }
 }

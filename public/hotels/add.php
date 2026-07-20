@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
 use NexWaypoint\Core\Env;
+use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStay;
 use NexWaypoint\Hotels\HotelStayRepository;
@@ -17,6 +18,7 @@ $propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
 $stayRepo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
 $userRepo = new UserRepository($app['db'], $app['logger']);
 $blockRepo = new VisibilityBlockRepository($app['db']);
+$hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect();
 
 $existingProperties = $propertyRepo->findForUser($user->id);
 $otherUsers = array_values(array_filter(

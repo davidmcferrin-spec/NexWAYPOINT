@@ -30,6 +30,24 @@ CREATE TABLE users (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
+-- user_emails: addresses that claim inbound confirmation mail for a user.
+-- users.email remains the primary/login contact; every address used to
+-- forward airline/hotel mail into the dump mailbox must appear here.
+-- Emails are globally unique so one address cannot map to two accounts.
+-- ----------------------------------------------------------------------------
+CREATE TABLE user_emails (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id         INT UNSIGNED NOT NULL,
+    email           VARCHAR(255) NOT NULL,
+    label           VARCHAR(100) NULL,
+    is_primary      TINYINT(1) NOT NULL DEFAULT 0,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user_emails_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_user_emails_email (email),
+    INDEX idx_user_emails_user (user_id)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
 -- user_status_overrides: manual status (home/office/remote/unavailable) used
 -- by TripStatusEngine when there is no active travel segment covering "now".
 -- One row per user per effective_date; latest wins if multiple.
@@ -97,6 +115,28 @@ CREATE TABLE hotel_properties (
     INDEX idx_prop_blacklist (is_blacklisted),
     INDEX idx_prop_name (hotel_name)
 ) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- hotel_brands: site-wide catalog for the property Brand dropdown.
+-- hotel_properties.brand stays free-text so mail import / legacy values work;
+-- the UI only offers active rows from this table (plus the current value).
+-- ----------------------------------------------------------------------------
+CREATE TABLE hotel_brands (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name            VARCHAR(100) NOT NULL,
+    sort_order      INT NOT NULL DEFAULT 0,
+    is_active       TINYINT(1) NOT NULL DEFAULT 1,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_hotel_brands_name (name)
+) ENGINE=InnoDB;
+
+INSERT INTO hotel_brands (name, sort_order, is_active) VALUES
+    ('Marriott', 10, 1),
+    ('Hilton', 20, 1),
+    ('IHG', 30, 1),
+    ('Hyatt', 40, 1),
+    ('Choice Hotels', 50, 1);
 
 -- ----------------------------------------------------------------------------
 -- hotel_stays: individual visits. Room # / bed / bath / stay_rating are

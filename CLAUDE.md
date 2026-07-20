@@ -55,7 +55,9 @@ pending-confirmation flow).
 - **Local username/password auth in v1**, not Azure AD. The user's brief
   said M365/Graph integration "would be cool in the future," implying it
   isn't a v1 blocker. Local auth unblocks everything else without an
-  enterprise app registration in the loop.
+  enterprise app registration in the loop. Managers (`role = manager`) get
+  `/admin/users.php`. Mail ownership is correlated via `user_emails`
+  (many addresses per user), not a single `users.email`.
 - **Visibility defaults:** TOP_DOWN (manager viewing subordinate) defaults
   to full visibility; BOTTOM_UP (subordinate viewing manager) defaults to
   city+date only. Managers get total exposure of team travel; subordinates

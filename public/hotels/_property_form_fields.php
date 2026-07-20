@@ -48,8 +48,22 @@ $amenities = [
 ?>
 <label>Hotel name<input type="text" name="<?= htmlspecialchars($name('hotel_name'), ENT_QUOTES) ?>" required
     value="<?= htmlspecialchars($val($property, 'hotelName', 'hotel_name'), ENT_QUOTES) ?>"></label>
-<label>Brand<input type="text" name="<?= htmlspecialchars($name('brand'), ENT_QUOTES) ?>"
-    value="<?= htmlspecialchars($val($property, 'brand', 'brand'), ENT_QUOTES) ?>"></label>
+<?php
+/** @var list<string> $hotelBrandNames */
+$hotelBrandNames = $hotelBrandNames ?? [];
+$currentBrand = $val($property, 'brand', 'brand');
+?>
+<label>Brand
+    <select name="<?= htmlspecialchars($name('brand'), ENT_QUOTES) ?>">
+        <option value="">— none —</option>
+        <?php foreach ($hotelBrandNames as $brandName): ?>
+            <option value="<?= htmlspecialchars($brandName, ENT_QUOTES) ?>"
+                <?= strcasecmp($currentBrand, $brandName) === 0 ? 'selected' : '' ?>>
+                <?= htmlspecialchars($brandName, ENT_QUOTES) ?>
+            </option>
+        <?php endforeach; ?>
+    </select>
+</label>
 <label>Address line 1<input type="text" name="<?= htmlspecialchars($name('address_line1'), ENT_QUOTES) ?>"
     value="<?= htmlspecialchars($val($property, 'addressLine1', 'address_line1'), ENT_QUOTES) ?>"></label>
 <label>Address line 2<input type="text" name="<?= htmlspecialchars($name('address_line2'), ENT_QUOTES) ?>"

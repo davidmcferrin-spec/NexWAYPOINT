@@ -82,18 +82,7 @@ $panels = [
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
 </head>
 <body>
-<nav class="navbar">
-    <div><a href="/dashboard/index.php">NexWAYPOINT</a></div>
-    <div class="navbar-links">
-        <a href="/dashboard/index.php">Dashboard</a>
-        <a href="/hotels/properties.php">Hotels</a>
-        <a href="/hotels/add.php">+ Log a stay</a>
-        <a href="/flights/add.php">+ Add a flight</a>
-        <a href="/settings/visibility.php">Sharing</a>
-        <a href="/logout.php">Sign out</a>
-        <?php require dirname(__DIR__) . '/_theme_toggle.php'; ?>
-    </div>
-</nav>
+<?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
     <h1>Sharing Settings</h1>
     <?php if ($message !== null): ?><p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p><?php endif; ?>

@@ -178,6 +178,7 @@ form.stack { display: flex; flex-direction: column; gap: 0.75rem; max-width: 640
 form.stack label { font-size: 0.85rem; color: var(--text-dim); }
 form.stack input[type=text], form.stack input[type=number], form.stack input[type=date],
 form.stack input[type=datetime-local], form.stack input[type=file],
+form.stack input[type=email], form.stack input[type=password],
 form.stack textarea, form.stack select {
     width: 100%;
     padding: 0.5rem;
@@ -213,6 +214,7 @@ button.danger {
 
 .empty-state { color: var(--text-dim); padding: 2rem 0; text-align: center; }
 .empty-state a { color: var(--accent); }
+.text-dim { color: var(--text-dim); font-size: 0.85rem; }
 
 body.modal-open { overflow: hidden; }
 

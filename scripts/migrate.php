@@ -428,6 +428,104 @@ try {
         }
     }
 
+    if (!$tableExists('user_emails')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE user_emails (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    email TEXT NOT NULL UNIQUE,
+                    label TEXT NULL,
+                    is_primary INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )"
+            );
+            $pdo->exec('CREATE INDEX idx_user_emails_user ON user_emails(user_id)');
+        } else {
+            $pdo->exec(
+                "CREATE TABLE user_emails (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    email VARCHAR(255) NOT NULL,
+                    label VARCHAR(100) NULL,
+                    is_primary TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_user_emails_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    UNIQUE KEY uq_user_emails_email (email),
+                    INDEX idx_user_emails_user (user_id)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created user_emails\n");
+    }
+
+    // Seed primary users.email into user_emails for existing accounts.
+    if ($tableExists('user_emails') && $tableExists('users')) {
+        $missing = $pdo->query(
+            "SELECT u.id, u.email FROM users u
+             WHERE u.email IS NOT NULL AND TRIM(u.email) != ''
+               AND NOT EXISTS (
+                 SELECT 1 FROM user_emails ue
+                 WHERE LOWER(ue.email) = LOWER(u.email)
+               )"
+        )->fetchAll(PDO::FETCH_ASSOC);
+        if ($missing !== []) {
+            $ins = $pdo->prepare(
+                'INSERT INTO user_emails (user_id, email, label, is_primary) VALUES (:uid, :email, :label, 1)'
+            );
+            foreach ($missing as $row) {
+                $ins->execute([
+                    'uid' => (int) $row['id'],
+                    'email' => trim((string) $row['email']),
+                    'label' => 'Primary',
+                ]);
+            }
+            $changes++;
+            fwrite(STDOUT, 'Backfilled ' . count($missing) . " primary addresses into user_emails\n");
+        }
+    }
+
+    if (!$tableExists('hotel_brands')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE hotel_brands (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )"
+            );
+        } else {
+            $pdo->exec(
+                "CREATE TABLE hotel_brands (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    sort_order INT NOT NULL DEFAULT 0,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_hotel_brands_name (name)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $seed = $pdo->prepare('INSERT INTO hotel_brands (name, sort_order, is_active) VALUES (:n, :s, 1)');
+        $defaults = [
+            ['Marriott', 10],
+            ['Hilton', 20],
+            ['IHG', 30],
+            ['Hyatt', 40],
+            ['Choice Hotels', 50],
+        ];
+        foreach ($defaults as [$name, $sort]) {
+            $seed->execute(['n' => $name, 's' => $sort]);
+        }
+        $changes++;
+        fwrite(STDOUT, "Created hotel_brands and seeded top 5 brands\n");
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {

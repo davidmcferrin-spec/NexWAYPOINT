@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelProperty;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 
@@ -18,6 +19,8 @@ if ($property === null || $property->userId !== $user->id) {
     echo 'Property not found.';
     exit;
 }
+
+$hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect($property->brand);
 
 $errors = [];
 $message = null;
