@@ -501,12 +501,12 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
-<main class="container trip-builder">
+<main class="container container-wide trip-builder">
     <div class="trip-builder-panel">
         <header class="trip-builder-header">
             <div>
                 <h1><?= htmlspecialchars($pageTitle, ENT_QUOTES) ?></h1>
-                <p class="hint">Mix flights and trains. Gaps ≤3h are connections; longer gaps show as stays. Attach hotels for at-hotel status and map pins.</p>
+                <p class="hint">Mix flights and trains. Gaps ≤3h are connections; longer gaps show as stays. Attach one or more hotels (e.g. DC then NY) for at-hotel status and map pins.</p>
             </div>
             <a class="secondary" href="<?= $isEdit ? '/trips/view.php?id=' . (int) $trip->id : '/trips/list.php' ?>">Cancel</a>
         </header>
@@ -570,6 +570,7 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
             </div>
 
             <h2 class="trip-builder-section-title">Hotels on this trip</h2>
+            <p class="hint">Multiple stays are fine on one trip — attach or add each city separately.</p>
             <div id="trip-hotels-attached" class="trip-hotels-list"></div>
             <div class="trip-hotels-controls">
                 <label class="trip-hotel-attach">Attach existing stay
