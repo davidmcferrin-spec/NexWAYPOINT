@@ -336,4 +336,169 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         $forOwner = $builder->build($ownerId, $ownerId, 21);
         self::assertCount(2, $forOwner);
     }
+
+    public function testTravelPreviewIncludesMultiLegAndLayover(): void
+    {
+        $ownerId = $this->insertUser('flyer');
+        $viewerId = $this->insertUser('peer');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $day = (new \DateTimeImmutable('today'))->modify('+3 days');
+        $start = $day->format('Y-m-d');
+        $end = $day->format('Y-m-d');
+
+        $trip = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Los Angeles, CA',
+            startDate: $start,
+            endDate: $end,
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'United',
+            flightNumber: '100',
+            confirmationCode: 'ABC123',
+            origin: 'HSV',
+            destination: 'DEN',
+            departDt: $day->setTime(8, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(10, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'United',
+            flightNumber: '200',
+            confirmationCode: 'ABC123',
+            origin: 'DEN',
+            destination: 'LAX',
+            departDt: $day->setTime(12, 30)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(14, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $builder = new TeamTravelPreviewBuilder(
+            $tripRepo,
+            new VisibilityEngine(new UserRepository($this->db, $this->logger), new VisibilityRuleRepository($this->db)),
+            new VisibilityBlockRepository($this->db),
+        );
+
+        $preview = $builder->build($viewerId, $ownerId, 21);
+        self::assertCount(1, $preview);
+        $itin = $preview[0]['itinerary'];
+        self::assertCount(3, $itin);
+        self::assertSame('leg', $itin[0]['type']);
+        self::assertStringContainsString('HSV', $itin[0]['label']);
+        self::assertStringContainsString('DEN', $itin[0]['label']);
+        self::assertSame('layover', $itin[1]['type']);
+        self::assertStringContainsString('Layover in DEN', $itin[1]['label']);
+        self::assertStringContainsString('2h 30m', $itin[1]['label']);
+        self::assertSame('leg', $itin[2]['type']);
+        self::assertStringContainsString('LAX', $itin[2]['label']);
+    }
+
+    public function testTravelPreviewRedactsCityOnItineraryWhenDenied(): void
+    {
+        $ownerId = $this->insertUser('owner3');
+        // Viewer reports to owner → BOTTOM_UP defaults to city+dates.
+        $viewerId = $this->insertUser('viewer3', $ownerId);
+        $userRepo = new UserRepository($this->db, $this->logger);
+        $rules = new VisibilityRuleRepository($this->db);
+        $tripRepo = new TripRepository($this->db, $this->logger);
+
+        $rules->upsert(
+            $ownerId,
+            null,
+            VisibilityEngine::DIRECTION_BOTTOM_UP,
+            'destination_city',
+            false,
+            $ownerId,
+        );
+
+        $day = (new \DateTimeImmutable('today'))->modify('+5 days');
+        $trip = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Chicago, IL',
+            startDate: $day->format('Y-m-d'),
+            endDate: $day->format('Y-m-d'),
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'AA',
+            flightNumber: '50',
+            confirmationCode: 'XYZ',
+            origin: 'HSV',
+            destination: 'ORD',
+            departDt: $day->setTime(9, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(11, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'AA',
+            flightNumber: '60',
+            confirmationCode: 'XYZ',
+            origin: 'ORD',
+            destination: 'DEN',
+            departDt: $day->setTime(13, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(15, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $engine = new VisibilityEngine($userRepo, $rules);
+        $fields = $engine->getVisibleFields($viewerId, $ownerId)['visible_fields'];
+        self::assertNotContains('destination_city', $fields);
+        self::assertContains('travel_dates', $fields);
+
+        $builder = new TeamTravelPreviewBuilder(
+            $tripRepo,
+            $engine,
+            new VisibilityBlockRepository($this->db),
+        );
+        $preview = $builder->build($viewerId, $ownerId, 21);
+        self::assertCount(1, $preview);
+        self::assertNull($preview[0]['destination']);
+        self::assertTrue($preview[0]['redacted']);
+
+        $itin = $preview[0]['itinerary'];
+        self::assertCount(3, $itin);
+        self::assertSame('layover', $itin[1]['type']);
+        self::assertStringStartsWith('Layover', $itin[1]['label']);
+        self::assertStringNotContainsString('ORD', $itin[1]['label']);
+        self::assertStringNotContainsString('HSV', $itin[0]['label']);
+        self::assertStringContainsString('Flight', $itin[0]['label']);
+    }
 }

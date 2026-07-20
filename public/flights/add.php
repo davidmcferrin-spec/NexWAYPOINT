@@ -69,7 +69,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $hideFrom = array_map('intval', $_POST['hide_from'] ?? []);
 
         $carrier = $carrierId > 0 ? $carrierRepo->find($carrierId) : null;
-        if ($carrier === null || $carrier->userId !== $user->id) {
+        // Carriers are a site-wide catalog; user_id is audit-only, not ownership.
+        if ($carrier === null || $carrier->isRail()) {
             $errors[] = 'Select a carrier (or Add New).';
         } elseif ($carrier->iataCode === null || $carrier->iataCode === '') {
             $errors[] = 'Selected carrier is missing an IATA code. Edit it under Settings → Site catalogs.';

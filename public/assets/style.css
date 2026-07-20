@@ -909,6 +909,30 @@ button.linkish {
     border-top: none;
     padding-top: 0;
 }
+.teammate-itinerary {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0;
+}
+.teammate-itinerary-item {
+    font-size: 0.9rem;
+    padding: 0.2rem 0;
+    color: var(--text);
+}
+.teammate-itinerary-leg {
+    padding-left: 0;
+}
+.teammate-itinerary-layover {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    padding-left: 0.85rem;
+    border-left: 2px solid var(--border);
+    margin: 0.15rem 0 0.15rem 0.35rem;
+}
+.teammate-itinerary-hotel {
+    color: var(--text-dim);
+    padding-left: 0;
+}
 .teammate-flight-list {
     margin: 0.35rem 0 0;
     padding-left: 1.1rem;

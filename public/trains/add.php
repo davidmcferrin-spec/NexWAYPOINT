@@ -67,7 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $hideFrom = array_map('intval', $_POST['hide_from'] ?? []);
 
         $operator = $carrierId > 0 ? $carrierRepo->find($carrierId) : null;
-        if ($operator === null || $operator->userId !== $user->id || !$operator->isRail()) {
+        // Carriers are a site-wide catalog; user_id is audit-only, not ownership.
+        if ($operator === null || !$operator->isRail()) {
             $errors[] = 'Select a rail operator (or Add New).';
         }
         if ($trainNumber === null) {

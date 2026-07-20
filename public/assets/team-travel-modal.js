@@ -1,6 +1,7 @@
 /**
  * Teammate travel preview modal (table / cards / map).
  * Data: window.NEXWAYPOINT_TEAM_PROFILES
+ * Trip itinerary items: {type: leg|layover|hotel, label: string}
  */
 (function () {
     function ready(fn) {
@@ -17,6 +18,19 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+    }
+
+    function itineraryItems(trip) {
+        if (trip.itinerary && trip.itinerary.length) {
+            return trip.itinerary;
+        }
+        // Older payload shape: flat flights list.
+        if (trip.flights && trip.flights.length) {
+            return trip.flights.map(function (f) {
+                return { type: 'leg', label: f.label };
+            });
+        }
+        return [];
     }
 
     ready(function () {
@@ -71,10 +85,13 @@
                         if (t.notes) {
                             html += '<div class="hint">' + escapeHtml(t.notes) + '</div>';
                         }
-                        if (t.flights && t.flights.length) {
-                            html += '<ul class="teammate-flight-list">';
-                            t.flights.forEach(function (f) {
-                                html += '<li>' + escapeHtml(f.label) + '</li>';
+                        var items = itineraryItems(t);
+                        if (items.length) {
+                            html += '<ul class="teammate-itinerary">';
+                            items.forEach(function (item) {
+                                var cls = 'teammate-itinerary-item teammate-itinerary-'
+                                    + escapeHtml(item.type || 'leg');
+                                html += '<li class="' + cls + '">' + escapeHtml(item.label) + '</li>';
                             });
                             html += '</ul>';
                         }
@@ -95,7 +112,6 @@
 
         document.querySelectorAll('[data-open-teammate]').forEach(function (el) {
             el.addEventListener('click', function (ev) {
-                // Don't steal clicks from inner links if any appear later.
                 if (ev.target.closest && ev.target.closest('a')) {
                     return;
                 }
