@@ -7,16 +7,19 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
 
 ## What's built (v1)
 
-- **Hotel property + stay tracker** -- properties hold identity/amenities
-  (desk/pool/hot tub/breakfast/gym/off-site gym/parking/shuttle/EV charging/
-  on-site restaurant/walk-to-office, WiFi and noise, phone, blacklist). Stays
-  hold visit-specific data (dates, room number, bed/bathroom type, this stay's
-  1–5 rating, price, photos). Overall property rating is the average of stay
-  ratings. Log a stay by picking **City, State** then a property (or Add New
-  in a modal). Browse/filter/sort properties at `/hotels/properties.php`
-  (destination fee, blacklist, teammate adverse prefs). Edit property details
-  from the stay view. Blacklist is per-user; teammates can see matching
-  adverse preferences (name + reason) for the same hotel/location.
+- **Hotel property + stay tracker** -- `hotel_properties` is a site-wide
+  directory (identity, amenities: desk/pool/hot tub/breakfast/gym/off-site
+  gym/parking/shuttle/EV charging/on-site restaurant/walk-to-office, WiFi
+  and noise, phone). Stays are per-user (dates, room, bed/bathroom, this
+  stay's 0–5 rating, price, photos, visit privacy). Overall property rating
+  is the public average of all users' stay ratings. Rate or edit a stay at
+  `/hotels/edit-stay.php`. Personal blacklist lives
+  in `user_hotel_blacklist`. Log a stay by picking **City, State** then a
+  property (or Add New in a modal). Browse/filter/sort at
+  `/hotels/properties.php` (destination fee, my blacklist, teammate adverse
+  prefs). Any authenticated user can edit amenities; only site admins can
+  delete a property. Teammates can see matching adverse preferences (name +
+  reason) for the same hotel/location.
 - **Reusable airline carriers** -- each carrier stores name + IATA; flight
   entry is carrier dropdown + flight number only. FlightAware enrichment
   builds the ident as IATA + number. Carriers and rail operators are a
@@ -284,8 +287,9 @@ composer test              # or: vendor/bin/phpunit
 Tests build a fresh in-memory SQLite database per test from
 `database/schema.sqlite.sql` -- no external DB or network access required.
 Current coverage: hotel property + stay repositories (CRUD, location
-cascade helpers, stay rating → overall average, amenity/room validation,
-blacklist matching), reusable carriers (IATA + flight ident), visibility
+cascade helpers, stay rating → overall average across users, amenity/room
+validation, global directory + per-user blacklist matching), reusable
+carriers (IATA + flight ident), visibility
 engine (all five directions + override precedence), trip status engine
 (home/in-flight/layover/manual override), and the generic hotel parser
 (5 synthetic fixtures).

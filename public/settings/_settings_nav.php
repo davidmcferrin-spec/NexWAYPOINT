@@ -23,6 +23,7 @@ $settingsLinkClass = static function (string $section) use ($settingsSection): s
     <?php if ($settingsIsAdmin): ?>
         <span class="settings-nav-sep" aria-hidden="true"></span>
         <a class="<?= $settingsLinkClass('site') ?>" href="/settings/site.php">Site catalogs</a>
+        <a class="<?= $settingsLinkClass('appearance') ?>" href="/settings/appearance.php">Appearance</a>
         <a class="<?= $settingsLinkClass('integrations') ?>" href="/settings/integrations.php">Integrations</a>
         <a class="<?= $settingsLinkClass('jobs') ?>" href="/settings/jobs.php">Cron / service status</a>
         <a class="<?= $settingsLinkClass('users') ?>" href="/settings/users.php">Users</a>

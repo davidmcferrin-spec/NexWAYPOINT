@@ -38,6 +38,10 @@ $settingsSection = 'hub';
                 <h3>Site catalogs</h3>
                 <p>Airline carriers, rail operators, offices/venues, and hotel brands.</p>
             </a>
+            <a class="settings-card" href="/settings/appearance.php">
+                <h3>Appearance</h3>
+                <p>Map basemap style, pin colors, and default light/dark theme.</p>
+            </a>
             <a class="settings-card" href="/settings/integrations.php">
                 <h3>Integrations</h3>
                 <p>IMAP mail credentials and FlightAware AeroAPI key / rate limits.</p>

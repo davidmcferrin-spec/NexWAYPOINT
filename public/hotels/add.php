@@ -22,12 +22,12 @@ $blockRepo = new VisibilityBlockRepository($app['db']);
 $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect();
 $walkToOfficeVenues = array_values(array_unique(array_merge(
     (new OfficeVenueRepository($app['db'], $app['logger']))->namesForSelect(),
-    $propertyRepo->walkToOfficeVenuesForUser($user->id),
+    $propertyRepo->walkToOfficeVenues(),
 )));
 natcasesort($walkToOfficeVenues);
 $walkToOfficeVenues = array_values($walkToOfficeVenues);
 
-$existingProperties = $propertyRepo->findForUser($user->id);
+$existingProperties = $propertyRepo->findAll();
 $otherUsers = array_values(array_filter(
     $userRepo->findAllActive(),
     static fn ($u) => $u->id !== $user->id
@@ -58,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $property = $propertyRepo->find($selectedPropertyId);
-            if ($property === null || $property->userId !== $user->id) {
+            if ($property === null) {
                 throw new InvalidArgumentException('Selected property was not found.');
             }
 
@@ -138,7 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $selectedPropertyId = (int) ($_POST['hotel_property_id'] ?? $_GET['property_id'] ?? 0);
 if ($selectedPropertyId > 0) {
     $check = $propertyRepo->find($selectedPropertyId);
-    if ($check === null || $check->userId !== $user->id) {
+    if ($check === null) {
         $selectedPropertyId = 0;
     }
 }
@@ -221,10 +221,10 @@ $property = null; // for modal include
                     <option value="walk_in_shower" <?= (($_POST['bathroom_type'] ?? '') === 'walk_in_shower') ? 'selected' : '' ?>>Walk-in shower</option>
                 </select>
             </label>
-            <label>Stay rating (1-5) — feeds overall property rating
+            <label>Stay rating (0–5) — feeds public overall property rating
                 <select name="stay_rating">
                     <option value="">—</option>
-                    <?php for ($i = 1; $i <= 5; $i++): ?>
+                    <?php for ($i = 0; $i <= 5; $i++): ?>
                         <option value="<?= $i ?>" <?= (($_POST['stay_rating'] ?? '') == (string) $i) ? 'selected' : '' ?>><?= $i ?></option>
                     <?php endfor; ?>
                 </select>

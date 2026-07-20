@@ -790,6 +790,391 @@ try {
         fwrite(STDOUT, "Added cron_job_runs.error_message\n");
     }
 
+    // --- Global hotel_properties + per-user blacklist ----------------------------
+    if ($tableExists('hotel_properties') && !$tableExists('user_hotel_blacklist')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE user_hotel_blacklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    hotel_property_id INTEGER NOT NULL REFERENCES hotel_properties(id) ON DELETE CASCADE,
+                    reason TEXT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (user_id, hotel_property_id)
+                )"
+            );
+            $pdo->exec('CREATE INDEX idx_uhb_property ON user_hotel_blacklist(hotel_property_id)');
+        } else {
+            $pdo->exec(
+                "CREATE TABLE user_hotel_blacklist (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    hotel_property_id INT UNSIGNED NOT NULL,
+                    reason TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_uhb_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_uhb_property FOREIGN KEY (hotel_property_id) REFERENCES hotel_properties(id) ON DELETE CASCADE,
+                    UNIQUE KEY uq_uhb_user_property (user_id, hotel_property_id),
+                    INDEX idx_uhb_property (hotel_property_id)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created user_hotel_blacklist\n");
+    }
+
+    if ($tableExists('hotel_properties') && $tableExists('user_hotel_blacklist')
+        && $columnExists('hotel_properties', 'is_blacklisted')
+        && $columnExists('hotel_properties', 'user_id')
+    ) {
+        $pdo->exec(
+            "INSERT INTO user_hotel_blacklist (user_id, hotel_property_id, reason)
+             SELECT user_id, id, blacklist_reason FROM hotel_properties
+             WHERE is_blacklisted = 1"
+        );
+        $changes++;
+        fwrite(STDOUT, "Backfilled user_hotel_blacklist from property flags\n");
+    }
+
+    if ($tableExists('hotel_properties') && $columnExists('hotel_properties', 'user_id')) {
+        $pdo->exec("UPDATE hotel_properties SET city = '' WHERE city IS NULL");
+        $pdo->exec("UPDATE hotel_properties SET state_region = '' WHERE state_region IS NULL");
+
+        $dupGroups = $pdo->query(
+            "SELECT LOWER(hotel_name) AS n, LOWER(COALESCE(city,'')) AS c, LOWER(COALESCE(state_region,'')) AS s,
+                    MIN(id) AS keep_id
+             FROM hotel_properties
+             GROUP BY LOWER(hotel_name), LOWER(COALESCE(city,'')), LOWER(COALESCE(state_region,''))
+             HAVING COUNT(*) > 1"
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        $merged = 0;
+        foreach ($dupGroups as $g) {
+            $keepId = (int) $g['keep_id'];
+            $losers = $pdo->prepare(
+                "SELECT id FROM hotel_properties
+                 WHERE id != :keep
+                   AND LOWER(hotel_name) = :n
+                   AND LOWER(COALESCE(city,'')) = :c
+                   AND LOWER(COALESCE(state_region,'')) = :s"
+            );
+            $losers->execute(['keep' => $keepId, 'n' => $g['n'], 'c' => $g['c'], 's' => $g['s']]);
+            foreach ($losers->fetchAll(PDO::FETCH_ASSOC) as $loser) {
+                $loserId = (int) $loser['id'];
+                $pdo->prepare(
+                    'UPDATE hotel_stays SET hotel_property_id = :keep WHERE hotel_property_id = :loser'
+                )->execute(['keep' => $keepId, 'loser' => $loserId]);
+
+                if ($tableExists('user_hotel_blacklist')) {
+                    $blRows = $pdo->prepare(
+                        'SELECT user_id, reason FROM user_hotel_blacklist WHERE hotel_property_id = :loser'
+                    );
+                    $blRows->execute(['loser' => $loserId]);
+                    foreach ($blRows->fetchAll(PDO::FETCH_ASSOC) as $bl) {
+                        $exists = $pdo->prepare(
+                            'SELECT id FROM user_hotel_blacklist
+                             WHERE user_id = :u AND hotel_property_id = :p LIMIT 1'
+                        );
+                        $exists->execute(['u' => $bl['user_id'], 'p' => $keepId]);
+                        if (!$exists->fetchColumn()) {
+                            $pdo->prepare(
+                                'INSERT INTO user_hotel_blacklist (user_id, hotel_property_id, reason)
+                                 VALUES (:u, :p, :r)'
+                            )->execute([
+                                'u' => $bl['user_id'],
+                                'p' => $keepId,
+                                'r' => $bl['reason'],
+                            ]);
+                        }
+                    }
+                    $pdo->prepare(
+                        'DELETE FROM user_hotel_blacklist WHERE hotel_property_id = :loser'
+                    )->execute(['loser' => $loserId]);
+                }
+
+                $keepProp = $pdo->query(
+                    'SELECT * FROM hotel_properties WHERE id = ' . $keepId
+                )->fetch(PDO::FETCH_ASSOC);
+                $loseProp = $pdo->query(
+                    'SELECT * FROM hotel_properties WHERE id = ' . $loserId
+                )->fetch(PDO::FETCH_ASSOC);
+                if (is_array($keepProp) && is_array($loseProp)) {
+                    $fill = [];
+                    foreach ([
+                        'brand', 'address_line1', 'address_line2', 'postal_code', 'country', 'phone',
+                        'desk_notes', 'breakfast_notes', 'walk_to_office_notes', 'destination_fee_notes',
+                        'unique_features', 'wifi_quality', 'noise_level', 'latitude', 'longitude',
+                    ] as $col) {
+                        $k = $keepProp[$col] ?? null;
+                        $l = $loseProp[$col] ?? null;
+                        if (($k === null || $k === '') && $l !== null && $l !== '') {
+                            $fill[$col] = $l;
+                        }
+                    }
+                    foreach ([
+                        'has_desk', 'has_pool', 'has_hot_tub', 'has_breakfast', 'has_gym',
+                        'has_free_parking', 'has_airport_shuttle', 'has_ev_charging',
+                        'has_onsite_restaurant', 'has_offsite_gym', 'walk_to_office', 'has_destination_fee',
+                    ] as $col) {
+                        if (empty($keepProp[$col]) && !empty($loseProp[$col])) {
+                            $fill[$col] = 1;
+                        }
+                    }
+                    if ($fill !== []) {
+                        $sets = [];
+                        $params = ['id' => $keepId];
+                        foreach ($fill as $col => $val) {
+                            $sets[] = "{$col} = :{$col}";
+                            $params[$col] = $val;
+                        }
+                        $pdo->prepare(
+                            'UPDATE hotel_properties SET ' . implode(', ', $sets) . ' WHERE id = :id'
+                        )->execute($params);
+                    }
+                }
+                $pdo->prepare('DELETE FROM hotel_properties WHERE id = :id')->execute(['id' => $loserId]);
+                $merged++;
+            }
+        }
+        if ($merged > 0) {
+            $changes++;
+            fwrite(STDOUT, "Merged {$merged} duplicate hotel_properties into shared identities\n");
+        }
+
+        if ($driver === 'sqlite') {
+            $pdo->exec('PRAGMA foreign_keys = OFF');
+            $pdo->exec(
+                "CREATE TABLE hotel_properties_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_by_user_id INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
+                    hotel_name TEXT NOT NULL,
+                    brand TEXT NULL,
+                    address_line1 TEXT NULL,
+                    address_line2 TEXT NULL,
+                    city TEXT NOT NULL DEFAULT '',
+                    state_region TEXT NOT NULL DEFAULT '',
+                    postal_code TEXT NULL,
+                    country TEXT NULL,
+                    phone TEXT NULL,
+                    latitude REAL NULL,
+                    longitude REAL NULL,
+                    has_desk INTEGER NOT NULL DEFAULT 0,
+                    desk_notes TEXT NULL,
+                    has_pool INTEGER NOT NULL DEFAULT 0,
+                    has_hot_tub INTEGER NOT NULL DEFAULT 0,
+                    has_breakfast INTEGER NOT NULL DEFAULT 0,
+                    breakfast_notes TEXT NULL,
+                    has_gym INTEGER NOT NULL DEFAULT 0,
+                    has_free_parking INTEGER NOT NULL DEFAULT 0,
+                    has_airport_shuttle INTEGER NOT NULL DEFAULT 0,
+                    has_ev_charging INTEGER NOT NULL DEFAULT 0,
+                    has_onsite_restaurant INTEGER NOT NULL DEFAULT 0,
+                    has_offsite_gym INTEGER NOT NULL DEFAULT 0,
+                    walk_to_office INTEGER NOT NULL DEFAULT 0,
+                    walk_to_office_notes TEXT NULL,
+                    has_destination_fee INTEGER NOT NULL DEFAULT 0,
+                    destination_fee_notes TEXT NULL,
+                    wifi_quality INTEGER NULL,
+                    noise_level INTEGER NULL,
+                    unique_features TEXT NULL,
+                    overall_rating REAL NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE (hotel_name, city, state_region)
+                )"
+            );
+            $pdo->exec(
+                "INSERT INTO hotel_properties_new (
+                    id, created_by_user_id, hotel_name, brand, address_line1, address_line2,
+                    city, state_region, postal_code, country, phone, latitude, longitude,
+                    has_desk, desk_notes, has_pool, has_hot_tub, has_breakfast, breakfast_notes,
+                    has_gym, has_free_parking, has_airport_shuttle, has_ev_charging,
+                    has_onsite_restaurant, has_offsite_gym, walk_to_office, walk_to_office_notes,
+                    has_destination_fee, destination_fee_notes, wifi_quality, noise_level,
+                    unique_features, overall_rating, created_at, updated_at
+                )
+                SELECT
+                    id, user_id, hotel_name, brand, address_line1, address_line2,
+                    COALESCE(city,''), COALESCE(state_region,''), postal_code, country, phone, latitude, longitude,
+                    has_desk, desk_notes, has_pool, has_hot_tub, has_breakfast, breakfast_notes,
+                    has_gym, has_free_parking, has_airport_shuttle,
+                    COALESCE(has_ev_charging,0), COALESCE(has_onsite_restaurant,0), COALESCE(has_offsite_gym,0),
+                    COALESCE(walk_to_office,0), walk_to_office_notes,
+                    COALESCE(has_destination_fee,0), destination_fee_notes, wifi_quality, noise_level,
+                    unique_features, overall_rating, created_at, updated_at
+                FROM hotel_properties"
+            );
+            $pdo->exec('DROP TABLE hotel_properties');
+            $pdo->exec('ALTER TABLE hotel_properties_new RENAME TO hotel_properties');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_prop_creator ON hotel_properties(created_by_user_id)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_prop_city ON hotel_properties(city)');
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_prop_name ON hotel_properties(hotel_name)');
+            $pdo->exec('PRAGMA foreign_keys = ON');
+        } else {
+            if (!$columnExists('hotel_properties', 'created_by_user_id')) {
+                $pdo->exec('ALTER TABLE hotel_properties ADD COLUMN created_by_user_id INT UNSIGNED NULL');
+                $pdo->exec('UPDATE hotel_properties SET created_by_user_id = user_id');
+            }
+            $pdo->exec("UPDATE hotel_properties SET city = '' WHERE city IS NULL");
+            $pdo->exec("UPDATE hotel_properties SET state_region = '' WHERE state_region IS NULL");
+            try {
+                $pdo->exec('ALTER TABLE hotel_properties DROP FOREIGN KEY fk_hotel_properties_user');
+            } catch (Throwable $e) {
+            }
+            try {
+                $pdo->exec('ALTER TABLE hotel_properties DROP INDEX idx_prop_user');
+            } catch (Throwable $e) {
+            }
+            try {
+                $pdo->exec('ALTER TABLE hotel_properties DROP INDEX idx_prop_blacklist');
+            } catch (Throwable $e) {
+            }
+            if ($columnExists('hotel_properties', 'user_id')) {
+                $pdo->exec('ALTER TABLE hotel_properties DROP COLUMN user_id');
+            }
+            if ($columnExists('hotel_properties', 'is_blacklisted')) {
+                $pdo->exec('ALTER TABLE hotel_properties DROP COLUMN is_blacklisted');
+            }
+            if ($columnExists('hotel_properties', 'blacklist_reason')) {
+                $pdo->exec('ALTER TABLE hotel_properties DROP COLUMN blacklist_reason');
+            }
+            try {
+                $pdo->exec(
+                    'ALTER TABLE hotel_properties
+                     ADD CONSTRAINT fk_hotel_properties_creator
+                     FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL'
+                );
+            } catch (Throwable $e) {
+            }
+            try {
+                $pdo->exec('ALTER TABLE hotel_properties ADD UNIQUE KEY uq_prop_identity (hotel_name, city, state_region)');
+            } catch (Throwable $e) {
+            }
+            try {
+                $pdo->exec('CREATE INDEX idx_prop_creator ON hotel_properties (created_by_user_id)');
+            } catch (Throwable $e) {
+            }
+        }
+        $changes++;
+        fwrite(STDOUT, "Converted hotel_properties to site-wide directory\n");
+
+        if ($tableExists('hotel_stays')) {
+            $propIds = $pdo->query('SELECT id FROM hotel_properties')->fetchAll(PDO::FETCH_COLUMN);
+            $avgStmt = $pdo->prepare(
+                'SELECT AVG(stay_rating) FROM hotel_stays
+                 WHERE hotel_property_id = :id AND stay_rating IS NOT NULL'
+            );
+            $setStmt = $pdo->prepare('UPDATE hotel_properties SET overall_rating = :r WHERE id = :id');
+            foreach ($propIds as $pid) {
+                $avgStmt->execute(['id' => (int) $pid]);
+                $avg = $avgStmt->fetchColumn();
+                $setStmt->execute([
+                    'r' => ($avg === false || $avg === null) ? null : round((float) $avg, 2),
+                    'id' => (int) $pid,
+                ]);
+            }
+            fwrite(STDOUT, "Recomputed hotel_properties.overall_rating\n");
+        }
+    }
+
+    // --- Stay ratings allow 0–5 (was 1–5) ----------------------------------------
+    if ($tableExists('hotel_stays')) {
+        if ($driver === 'mysql') {
+            $stayCheck = $pdo->query(
+                "SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS
+                 WHERE CONSTRAINT_SCHEMA = DATABASE()
+                   AND CONSTRAINT_NAME = 'chk_stay_rating'"
+            )->fetchColumn();
+            if (is_string($stayCheck) && preg_match('/between\s+1\s+and\s+5/i', $stayCheck) === 1) {
+                $pdo->exec('ALTER TABLE hotel_stays DROP CHECK chk_stay_rating');
+                $pdo->exec(
+                    'ALTER TABLE hotel_stays ADD CONSTRAINT chk_stay_rating
+                     CHECK (stay_rating IS NULL OR stay_rating BETWEEN 0 AND 5)'
+                );
+                $changes++;
+                fwrite(STDOUT, "Updated hotel_stays.stay_rating check to 0–5\n");
+            }
+            $propCheck = $pdo->query(
+                "SELECT CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS
+                 WHERE CONSTRAINT_SCHEMA = DATABASE()
+                   AND CONSTRAINT_NAME = 'chk_prop_overall'"
+            )->fetchColumn();
+            if (is_string($propCheck) && preg_match('/overall_rating\s*>=\s*1/i', $propCheck) === 1) {
+                $pdo->exec('ALTER TABLE hotel_properties DROP CHECK chk_prop_overall');
+                $pdo->exec(
+                    'ALTER TABLE hotel_properties ADD CONSTRAINT chk_prop_overall
+                     CHECK (overall_rating IS NULL OR (overall_rating >= 0 AND overall_rating <= 5))'
+                );
+                $changes++;
+                fwrite(STDOUT, "Updated hotel_properties.overall_rating check to 0–5\n");
+            }
+        } elseif ($driver === 'sqlite') {
+            $createSql = (string) $pdo->query(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='hotel_stays'"
+            )->fetchColumn();
+            if ($createSql !== '' && str_contains($createSql, 'BETWEEN 1 AND 5')) {
+                $pdo->exec('PRAGMA foreign_keys = OFF');
+                $pdo->exec(
+                    "CREATE TABLE hotel_stays_r05 (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        hotel_property_id INTEGER NOT NULL REFERENCES hotel_properties(id) ON DELETE CASCADE,
+                        room_number TEXT NULL,
+                        bed_type TEXT NULL CHECK (bed_type IS NULL OR bed_type IN ('king','queen','dual_queen')),
+                        bathroom_type TEXT NULL CHECK (bathroom_type IS NULL OR bathroom_type IN ('tub','walk_in_shower')),
+                        stay_start TEXT NOT NULL,
+                        stay_end TEXT NOT NULL,
+                        stay_rating INTEGER NULL CHECK (stay_rating IS NULL OR stay_rating BETWEEN 0 AND 5),
+                        last_stay_price REAL NULL,
+                        currency TEXT NOT NULL DEFAULT 'USD',
+                        booking_source TEXT NULL,
+                        confirmation_code TEXT NULL,
+                        would_return INTEGER NULL,
+                        notes TEXT NULL,
+                        is_private INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        CHECK (stay_end >= stay_start)
+                    )"
+                );
+                $pdo->exec('INSERT INTO hotel_stays_r05 SELECT * FROM hotel_stays');
+                $pdo->exec('DROP TABLE hotel_stays');
+                $pdo->exec('ALTER TABLE hotel_stays_r05 RENAME TO hotel_stays');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_hotel_user ON hotel_stays(user_id)');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_hotel_property ON hotel_stays(hotel_property_id)');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_hotel_private ON hotel_stays(is_private)');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_hotel_dates ON hotel_stays(stay_start)');
+                $pdo->exec('PRAGMA foreign_keys = ON');
+                $changes++;
+                fwrite(STDOUT, "Rebuilt hotel_stays for 0–5 stay_rating\n");
+            }
+        }
+    }
+
+    if (!$tableExists('site_settings')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE site_settings (
+                    setting_key TEXT PRIMARY KEY,
+                    setting_value TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )"
+            );
+        } else {
+            $pdo->exec(
+                "CREATE TABLE site_settings (
+                    setting_key VARCHAR(80) NOT NULL PRIMARY KEY,
+                    setting_value TEXT NOT NULL,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created site_settings\n");
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {

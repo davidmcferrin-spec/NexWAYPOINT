@@ -7,6 +7,7 @@ use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelProperty;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\OfficeVenueRepository;
+use NexWaypoint\Hotels\UserHotelBlacklistRepository;
 use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
@@ -15,19 +16,23 @@ $userRepo = new UserRepository($app['db'], $app['logger']);
 $isAdmin = $userRepo->isAdmin($user);
 
 $repo = new HotelPropertyRepository($app['db'], $app['logger']);
+$blacklistRepo = new UserHotelBlacklistRepository($app['db'], $app['logger']);
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $property = $repo->find($id);
 
-if ($property === null || $property->userId !== $user->id) {
+if ($property === null) {
     http_response_code(404);
     echo 'Property not found.';
     exit;
 }
 
+$myBlacklisted = $blacklistRepo->isBlacklisted($user->id, (int) $property->id);
+$myBlacklistReason = $blacklistRepo->reason($user->id, (int) $property->id);
+
 $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect($property->brand);
 $walkToOfficeVenues = array_values(array_unique(array_merge(
     (new OfficeVenueRepository($app['db'], $app['logger']))->namesForSelect(),
-    $repo->walkToOfficeVenuesForUser($user->id),
+    $repo->walkToOfficeVenues(),
 )));
 natcasesort($walkToOfficeVenues);
 $walkToOfficeVenues = array_values($walkToOfficeVenues);
@@ -70,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $property = $repo->update(new HotelProperty(
                 id: $property->id,
-                userId: $user->id,
+                createdByUserId: $property->createdByUserId,
                 hotelName: $hotelName,
                 brand: $nullable($_POST['brand'] ?? null),
                 addressLine1: $nullable($_POST['address_line1'] ?? null),
@@ -101,10 +106,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 wifiQuality: $_POST['wifi_quality'] !== '' ? (int) $_POST['wifi_quality'] : null,
                 noiseLevel: $_POST['noise_level'] !== '' ? (int) $_POST['noise_level'] : null,
                 uniqueFeatures: $nullable($_POST['unique_features'] ?? null),
-                isBlacklisted: $checkbox('is_blacklisted'),
-                blacklistReason: $nullable($_POST['blacklist_reason'] ?? null),
                 overallRating: $property->overallRating,
             ), $user->id);
+
+            $blacklistRepo->set(
+                $user->id,
+                (int) $property->id,
+                $checkbox('is_blacklisted'),
+                $nullable($_POST['blacklist_reason'] ?? null),
+                $user->id,
+            );
+            $myBlacklisted = $blacklistRepo->isBlacklisted($user->id, (int) $property->id);
+            $myBlacklistReason = $blacklistRepo->reason($user->id, (int) $property->id);
             $message = 'Property updated.';
         } catch (InvalidArgumentException $e) {
             $errors[] = $e->getMessage();
@@ -113,6 +126,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $prefix = '';
+// Form fields still use isBlacklisted / blacklistReason for the current user's preference.
+$propertyForForm = $property;
+$formIsBlacklisted = $myBlacklisted;
+$formBlacklistReason = $myBlacklistReason;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -127,6 +144,7 @@ $prefix = '';
 <main class="container">
     <p><a href="/hotels/properties.php">&larr; Back to hotels</a></p>
     <h1>Edit property</h1>
+    <p class="hint">Identity and amenities are shared site-wide. Blacklist is your personal preference only. Overall rating averages everyone’s stay ratings.</p>
 
     <?php foreach ($errors as $error): ?>
         <p class="alert alert-error"><?= htmlspecialchars($error, ENT_QUOTES) ?></p>
@@ -137,7 +155,11 @@ $prefix = '';
 
     <form class="stack" method="post">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-        <?php require __DIR__ . '/_property_form_fields.php'; ?>
+        <?php
+        $property = $propertyForForm;
+        $overrideBlacklist = ['isBlacklisted' => $formIsBlacklisted, 'blacklistReason' => $formBlacklistReason];
+        require __DIR__ . '/_property_form_fields.php';
+        ?>
         <button type="submit" class="primary">Save property</button>
     </form>
 
@@ -145,17 +167,17 @@ $prefix = '';
     <form class="stack" method="post" style="margin-top: 2rem"
         onsubmit="return confirm(<?= htmlspecialchars(json_encode(
             $stayCount === 0
-                ? 'Permanently delete this hotel? This cannot be undone.'
-                : "Permanently delete this hotel and its {$stayCount} stay" . ($stayCount === 1 ? '' : 's') . '? This cannot be undone.'
+                ? 'Permanently delete this hotel for everyone? This cannot be undone.'
+                : "Permanently delete this hotel and its {$stayCount} stay" . ($stayCount === 1 ? '' : 's') . ' for all users? This cannot be undone.'
         ), ENT_QUOTES) ?>);">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
         <input type="hidden" name="action" value="delete">
         <p class="hint">
-            Delete removes the hotel from your directory
+            Delete removes the hotel from the shared directory
             <?php if ($stayCount > 0): ?>
                 and permanently deletes <?= (int) $stayCount ?> linked stay<?= $stayCount === 1 ? '' : 's' ?>
             <?php endif; ?>.
-            Blacklist only hides preference — use that if you want to keep history.
+            Use your personal blacklist if you only want to flag it for yourself.
         </p>
         <button type="submit" class="danger">Delete hotel</button>
     </form>

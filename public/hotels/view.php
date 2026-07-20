@@ -5,11 +5,13 @@ declare(strict_types=1);
 use NexWaypoint\Core\Csrf;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Hotels\UserHotelBlacklistRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 
 $propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
+$blacklistRepo = new UserHotelBlacklistRepository($app['db'], $app['logger']);
 $repo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
 
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
@@ -53,14 +55,14 @@ $rows = [
         $property->country,
     ]))) ?: null,
     'Overall property rating' => $property->overallRating !== null
-        ? number_format($property->overallRating, 1) . '★ (average of stay ratings)'
+        ? number_format($property->overallRating, 1) . '★ (public average of stay ratings)'
         : null,
     'Room number' => $stay->roomNumber,
     'Bed type' => $stay->bedType !== null ? ($bedLabels[$stay->bedType] ?? $stay->bedType) : null,
     'Bathroom' => $stay->bathroomType !== null ? ($bathLabels[$stay->bathroomType] ?? $stay->bathroomType) : null,
     'Dates' => $stay->stayStart . ' to ' . $stay->stayEnd,
     'This stay rating' => $stay->stayRating !== null
-        ? str_repeat('★', $stay->stayRating) . str_repeat('☆', 5 - $stay->stayRating)
+        ? str_repeat('★', max(0, $stay->stayRating)) . str_repeat('☆', max(0, 5 - $stay->stayRating))
         : null,
     'WiFi quality' => $property->wifiQuality,
     'Noise level' => $property->noiseLevel,
@@ -91,7 +93,7 @@ $amenities = array_filter([
     $property->hasDestinationFee ? 'Destination charge' : null,
 ]);
 
-$teammateAdverse = $propertyRepo->findTeammateAdversePreferences($user->id, $property->hotelName, $property->city);
+$teammateAdverse = $propertyRepo->findTeammateAdverseForProperty($user->id, (int) $property->id);
 $locationAdverse = [];
 if ($property->city !== null && trim($property->city) !== '') {
     $locationAdverse = $propertyRepo->findTeammateAdverseAtLocation(
@@ -100,6 +102,8 @@ if ($property->city !== null && trim($property->city) !== '') {
         $property->stateRegion
     );
 }
+$myBlacklisted = $blacklistRepo->isBlacklisted($user->id, (int) $property->id);
+$myBlacklistReason = $blacklistRepo->reason($user->id, (int) $property->id);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -115,12 +119,12 @@ if ($property->city !== null && trim($property->city) !== '') {
     <p><a href="/hotels/properties.php">&larr; Back to hotels</a></p>
     <h1>
         <?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?>
-        <?php if ($property->isBlacklisted): ?><span class="badge badge-blacklist">My blacklist</span><?php endif; ?>
+        <?php if ($myBlacklisted): ?><span class="badge badge-blacklist">My blacklist</span><?php endif; ?>
         <?php if ($stay->isPrivate): ?><span class="badge badge-blacklist">Private</span><?php endif; ?>
     </h1>
 
-    <?php if ($property->isBlacklisted): ?>
-        <p class="alert alert-error"><?= htmlspecialchars($property->blacklistReason ?? 'No reason recorded.', ENT_QUOTES) ?></p>
+    <?php if ($myBlacklisted): ?>
+        <p class="alert alert-error"><?= htmlspecialchars($myBlacklistReason ?? 'No reason recorded.', ENT_QUOTES) ?></p>
     <?php endif; ?>
 
     <?php if ($teammateAdverse !== []): ?>
@@ -160,6 +164,8 @@ if ($property->city !== null && trim($property->city) !== '') {
     <?php endif; ?>
 
     <p>
+        <a href="/hotels/edit-stay.php?id=<?= (int) $stay->id ?>">Edit / rate this stay</a>
+        &middot;
         <a href="/hotels/add.php?property_id=<?= (int) $property->id ?>">Log another stay at this property</a>
         &middot;
         <a href="/hotels/edit-property.php?id=<?= (int) $property->id ?>">Edit property</a>

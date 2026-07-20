@@ -5,6 +5,8 @@ declare(strict_types=1);
 use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\OfficeVenueRepository;
+use NexWaypoint\Core\AppearanceCatalog;
+use NexWaypoint\Core\SiteSettingsRepository;
 use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
@@ -16,8 +18,10 @@ $geocoder = new Geocoder($app['logger']);
 $userRepo = new UserRepository($app['db'], $app['logger']);
 $canManageVenues = $userRepo->isAdmin($user);
 
-$properties = $propertyRepo->findForUser($user->id);
+$properties = $propertyRepo->findAll();
 $venues = $venueRepo->findActive();
+$blacklistRepo = new \NexWaypoint\Hotels\UserHotelBlacklistRepository($app['db'], $app['logger']);
+$myBlacklistIds = $blacklistRepo->propertyIdsForUser($user->id);
 
 /** Cap live Nominatim lookups per page load (cache hits are free). */
 $maxLiveLookups = 12;
@@ -174,7 +178,7 @@ foreach ($properties as $property) {
         'brand' => $property->brand,
         'place' => $place,
         'rating' => $property->overallRating,
-        'blacklisted' => $property->isBlacklisted,
+        'blacklisted' => isset($myBlacklistIds[(int) $property->id]),
         'destination_fee' => $property->hasDestinationFee,
         'lat' => $lat,
         'lon' => $lon,
@@ -190,6 +194,29 @@ foreach ($properties as $property) {
 }
 
 $hasAnything = $properties !== [] || $venues !== [];
+
+$siteSettings = new SiteSettingsRepository($app['db'], $app['logger']);
+$mapBasemap = AppearanceCatalog::resolveMapBasemap(
+    $siteSettings->get(SiteSettingsRepository::KEY_MAP_STYLE, AppearanceCatalog::defaultMapBasemap())
+);
+$mapColors = [
+    'hotel' => AppearanceCatalog::normalizeHexColor(
+        $siteSettings->get(SiteSettingsRepository::KEY_MAP_HOTEL_COLOR),
+        AppearanceCatalog::defaultHotelColor()
+    ),
+    'venue' => AppearanceCatalog::normalizeHexColor(
+        $siteSettings->get(SiteSettingsRepository::KEY_MAP_VENUE_COLOR),
+        AppearanceCatalog::defaultVenueColor()
+    ),
+    'blacklist' => AppearanceCatalog::normalizeHexColor(
+        $siteSettings->get(SiteSettingsRepository::KEY_MAP_BLACKLIST_COLOR),
+        AppearanceCatalog::defaultBlacklistColor()
+    ),
+    'fee' => AppearanceCatalog::normalizeHexColor(
+        $siteSettings->get(SiteSettingsRepository::KEY_MAP_FEE_COLOR),
+        AppearanceCatalog::defaultFeeColor()
+    ),
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -208,7 +235,14 @@ $hasAnything = $properties !== [] || $venues !== [];
 <main class="container map-page">
     <h1>Hotel map</h1>
     <p class="hint">
-        Your hotels (circles) and site offices/venues (squares) on OpenStreetMap.
+        Your hotels (circles) and site offices/venues (squares).
+        Basemap: <?= htmlspecialchars($mapBasemap['label'], ENT_QUOTES) ?>
+        (change under
+        <?php if ($canManageVenues): ?>
+            <a href="/settings/appearance.php">Settings → Appearance</a>).
+        <?php else: ?>
+            Settings → Appearance — site admin).
+        <?php endif; ?>
         Pins use saved coordinates when available; otherwise address/city is geocoded (cached) and saved.
         <a href="/hotels/properties.php">Hotel list</a>
         <?php if ($canManageVenues): ?>
@@ -277,6 +311,13 @@ $hasAnything = $properties !== [] || $venues !== [];
 window.NEXWAYPOINT_HOTEL_MAP = <?= json_encode([
     'hotels' => $mapped,
     'venues' => $mappedVenues,
+    'basemap' => [
+        'id' => $mapBasemap['id'],
+        'url' => $mapBasemap['url'],
+        'attribution' => $mapBasemap['attribution'],
+        'maxZoom' => $mapBasemap['maxZoom'],
+    ],
+    'colors' => $mapColors,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 </script>
 <script src="<?= htmlspecialchars(nexwaypoint_asset('/assets/hotel-map.js'), ENT_QUOTES) ?>" defer></script>

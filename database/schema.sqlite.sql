@@ -60,13 +60,13 @@ CREATE INDEX idx_status_user_date ON user_status_overrides(user_id, effective_da
 
 CREATE TABLE hotel_properties (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id                 INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by_user_id      INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
     hotel_name              TEXT NOT NULL,
     brand                   TEXT NULL,
     address_line1           TEXT NULL,
     address_line2           TEXT NULL,
-    city                    TEXT NULL,
-    state_region            TEXT NULL,
+    city                    TEXT NOT NULL DEFAULT '',
+    state_region            TEXT NOT NULL DEFAULT '',
     postal_code             TEXT NULL,
     country                 TEXT NULL,
     phone                   TEXT NULL,
@@ -91,16 +91,25 @@ CREATE TABLE hotel_properties (
     wifi_quality            INTEGER NULL CHECK (wifi_quality IS NULL OR wifi_quality BETWEEN 1 AND 5),
     noise_level             INTEGER NULL CHECK (noise_level IS NULL OR noise_level BETWEEN 1 AND 5),
     unique_features         TEXT NULL,
-    is_blacklisted          INTEGER NOT NULL DEFAULT 0,
-    blacklist_reason        TEXT NULL,
-    overall_rating          REAL NULL CHECK (overall_rating IS NULL OR (overall_rating >= 1 AND overall_rating <= 5)),
+    overall_rating          REAL NULL CHECK (overall_rating IS NULL OR (overall_rating >= 0 AND overall_rating <= 5)),
     created_at              TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (hotel_name, city, state_region)
 );
-CREATE INDEX idx_prop_user ON hotel_properties(user_id);
+CREATE INDEX idx_prop_creator ON hotel_properties(created_by_user_id);
 CREATE INDEX idx_prop_city ON hotel_properties(city);
-CREATE INDEX idx_prop_blacklist ON hotel_properties(is_blacklisted);
 CREATE INDEX idx_prop_name ON hotel_properties(hotel_name);
+
+CREATE TABLE user_hotel_blacklist (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    hotel_property_id   INTEGER NOT NULL REFERENCES hotel_properties(id) ON DELETE CASCADE,
+    reason              TEXT NULL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, hotel_property_id)
+);
+CREATE INDEX idx_uhb_property ON user_hotel_blacklist(hotel_property_id);
 
 CREATE TABLE hotel_brands (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,7 +151,7 @@ CREATE TABLE hotel_stays (
     bathroom_type       TEXT NULL CHECK (bathroom_type IS NULL OR bathroom_type IN ('tub','walk_in_shower')),
     stay_start          TEXT NOT NULL,
     stay_end            TEXT NOT NULL,
-    stay_rating         INTEGER NULL CHECK (stay_rating IS NULL OR stay_rating BETWEEN 1 AND 5),
+    stay_rating         INTEGER NULL CHECK (stay_rating IS NULL OR stay_rating BETWEEN 0 AND 5),
     last_stay_price     REAL NULL,
     currency            TEXT NOT NULL DEFAULT 'USD',
     booking_source      TEXT NULL,
@@ -331,3 +340,10 @@ CREATE TABLE cron_job_runs (
 );
 CREATE INDEX idx_cron_runs_job_started ON cron_job_runs(job_name, started_at);
 CREATE INDEX idx_cron_runs_started ON cron_job_runs(started_at);
+
+-- Site-wide UI / map appearance (admin Settings → Appearance).
+CREATE TABLE site_settings (
+    setting_key     TEXT PRIMARY KEY,
+    setting_value   TEXT NOT NULL DEFAULT '',
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);

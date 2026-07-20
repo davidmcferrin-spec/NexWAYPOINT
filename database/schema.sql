@@ -80,18 +80,20 @@ CREATE TABLE user_status_overrides (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
--- hotel_properties: reusable property identity + amenities per user.
--- Overall rating is AVG(stay_rating) from linked hotel_stays.
+-- hotel_properties: site-wide hotel directory (identity + location + amenities).
+-- overall_rating is AVG(stay_rating) across all users' stays (public).
+-- Per-user blacklist lives in user_hotel_blacklist.
+-- created_by_user_id is audit only (who first added the property).
 -- ----------------------------------------------------------------------------
 CREATE TABLE hotel_properties (
     id                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    user_id                 INT UNSIGNED NOT NULL,
+    created_by_user_id      INT UNSIGNED NULL,
     hotel_name              VARCHAR(200) NOT NULL,
     brand                   VARCHAR(100) NULL,
     address_line1           VARCHAR(200) NULL,
     address_line2           VARCHAR(200) NULL,
-    city                    VARCHAR(120) NULL,
-    state_region            VARCHAR(120) NULL,
+    city                    VARCHAR(120) NOT NULL DEFAULT '',
+    state_region            VARCHAR(120) NOT NULL DEFAULT '',
     postal_code             VARCHAR(20) NULL,
     country                 VARCHAR(80) NULL,
     phone                   VARCHAR(40) NULL,
@@ -116,19 +118,31 @@ CREATE TABLE hotel_properties (
     wifi_quality            TINYINT UNSIGNED NULL,
     noise_level             TINYINT UNSIGNED NULL,
     unique_features         TEXT NULL,
-    is_blacklisted          TINYINT(1) NOT NULL DEFAULT 0,
-    blacklist_reason        TEXT NULL,
     overall_rating          DECIMAL(3,2) NULL,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_hotel_properties_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_hotel_properties_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT chk_prop_wifi CHECK (wifi_quality IS NULL OR wifi_quality BETWEEN 1 AND 5),
     CONSTRAINT chk_prop_noise CHECK (noise_level IS NULL OR noise_level BETWEEN 1 AND 5),
-    CONSTRAINT chk_prop_overall CHECK (overall_rating IS NULL OR (overall_rating >= 1 AND overall_rating <= 5)),
-    INDEX idx_prop_user (user_id),
+    CONSTRAINT chk_prop_overall CHECK (overall_rating IS NULL OR (overall_rating >= 0 AND overall_rating <= 5)),
+    UNIQUE KEY uq_prop_identity (hotel_name, city, state_region),
+    INDEX idx_prop_creator (created_by_user_id),
     INDEX idx_prop_city (city),
-    INDEX idx_prop_blacklist (is_blacklisted),
     INDEX idx_prop_name (hotel_name)
+) ENGINE=InnoDB;
+
+-- Per-user "do not book" preference on a global property.
+CREATE TABLE user_hotel_blacklist (
+    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT UNSIGNED NOT NULL,
+    hotel_property_id   INT UNSIGNED NOT NULL,
+    reason              TEXT NULL,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_uhb_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_uhb_property FOREIGN KEY (hotel_property_id) REFERENCES hotel_properties(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_uhb_user_property (user_id, hotel_property_id),
+    INDEX idx_uhb_property (hotel_property_id)
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
@@ -199,7 +213,7 @@ CREATE TABLE hotel_stays (
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_hotel_stays_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     CONSTRAINT fk_hotel_stays_property FOREIGN KEY (hotel_property_id) REFERENCES hotel_properties(id) ON DELETE CASCADE,
-    CONSTRAINT chk_stay_rating CHECK (stay_rating IS NULL OR stay_rating BETWEEN 1 AND 5),
+    CONSTRAINT chk_stay_rating CHECK (stay_rating IS NULL OR stay_rating BETWEEN 0 AND 5),
     CONSTRAINT chk_hotel_dates CHECK (stay_end >= stay_start),
     INDEX idx_hotel_user (user_id),
     INDEX idx_hotel_property (hotel_property_id),
@@ -436,6 +450,15 @@ CREATE TABLE cron_job_runs (
     error_message   VARCHAR(500) NULL,
     INDEX idx_cron_runs_job_started (job_name, started_at),
     INDEX idx_cron_runs_started (started_at)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- site_settings: site-wide appearance / map styling (admin UI).
+-- ----------------------------------------------------------------------------
+CREATE TABLE site_settings (
+    setting_key     VARCHAR(80) NOT NULL PRIMARY KEY,
+    setting_value   TEXT NOT NULL,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 SET FOREIGN_KEY_CHECKS = 1;

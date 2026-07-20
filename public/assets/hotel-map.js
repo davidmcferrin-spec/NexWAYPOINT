@@ -23,16 +23,23 @@
             return;
         }
 
+        var basemap = payload.basemap || {};
+        var colors = payload.colors || {};
+        var hotelColor = colors.hotel || '#0369a1';
+        var venueColor = colors.venue || '#047857';
+        var blacklistColor = colors.blacklist || '#b91c1c';
+        var feeColor = colors.fee || '#a16207';
+
         var map = L.map(el, { scrollWheelZoom: true });
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        L.tileLayer(basemap.url || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: basemap.maxZoom || 19,
+            attribution: basemap.attribution || '&copy; OpenStreetMap'
         }).addTo(map);
 
         var bounds = [];
 
         hotels.forEach(function (h) {
-            var color = h.blacklisted ? '#b91c1c' : (h.destination_fee ? '#a16207' : '#0369a1');
+            var color = h.blacklisted ? blacklistColor : (h.destination_fee ? feeColor : hotelColor);
             var marker = L.circleMarker([h.lat, h.lon], {
                 radius: 9,
                 color: color,
@@ -52,7 +59,7 @@
                 bits.push('Rating: ' + Number(h.rating).toFixed(1) + ' / 5');
             }
             if (h.blacklisted) {
-                bits.push('<span style="color:#b91c1c">Blacklisted</span>');
+                bits.push('<span style="color:' + escapeHtml(blacklistColor) + '">Blacklisted</span>');
             }
             if (h.destination_fee) {
                 bits.push('Destination charge');
@@ -66,7 +73,7 @@
         });
 
         venues.forEach(function (v) {
-            var color = '#047857';
+            var color = venueColor;
             var marker = L.marker([v.lat, v.lon], {
                 icon: L.divIcon({
                     className: 'venue-map-marker',

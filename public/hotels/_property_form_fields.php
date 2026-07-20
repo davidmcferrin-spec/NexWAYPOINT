@@ -31,7 +31,30 @@ $checked = static function (?HotelProperty $p, string $camel, string $postKey) u
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         return isset($_POST[$prefix . $postKey]) && $_POST[$prefix . $postKey] === '1';
     }
-    return $p !== null && (bool) $p->{$camel};
+    return $p !== null && property_exists($p, $camel) && (bool) $p->{$camel};
+};
+
+/** @var array{isBlacklisted?: bool, blacklistReason?: ?string}|null $overrideBlacklist */
+$overrideBlacklist = $overrideBlacklist ?? null;
+
+$blacklistChecked = static function () use ($property, $prefix, $overrideBlacklist, $checked): bool {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        return isset($_POST[$prefix . 'is_blacklisted']) && $_POST[$prefix . 'is_blacklisted'] === '1';
+    }
+    if (is_array($overrideBlacklist) && array_key_exists('isBlacklisted', $overrideBlacklist)) {
+        return (bool) $overrideBlacklist['isBlacklisted'];
+    }
+    return false;
+};
+
+$blacklistReasonVal = static function () use ($property, $prefix, $overrideBlacklist, $val): string {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST[$prefix . 'blacklist_reason'])) {
+        return (string) $_POST[$prefix . 'blacklist_reason'];
+    }
+    if (is_array($overrideBlacklist) && array_key_exists('blacklistReason', $overrideBlacklist)) {
+        return (string) ($overrideBlacklist['blacklistReason'] ?? '');
+    }
+    return '';
 };
 
 $amenities = [
@@ -168,10 +191,10 @@ $walkToOfficeVenues = array_values(array_filter(
 </label>
 <label>
     <input type="checkbox" name="<?= htmlspecialchars($name('is_blacklisted'), ENT_QUOTES) ?>" value="1"
-        <?= $checked($property, 'isBlacklisted', 'is_blacklisted') ? 'checked' : '' ?>>
-    Blacklist this property
+        <?= $blacklistChecked() ? 'checked' : '' ?>>
+    Blacklist this property (my preference only)
 </label>
 <label>Blacklist reason
     <input type="text" name="<?= htmlspecialchars($name('blacklist_reason'), ENT_QUOTES) ?>"
-        value="<?= htmlspecialchars($val($property, 'blacklistReason', 'blacklist_reason'), ENT_QUOTES) ?>">
+        value="<?= htmlspecialchars($blacklistReasonVal(), ENT_QUOTES) ?>">
 </label>

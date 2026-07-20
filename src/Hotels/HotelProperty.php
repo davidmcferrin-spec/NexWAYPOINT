@@ -8,7 +8,7 @@ final class HotelProperty
 {
     public function __construct(
         public readonly ?int $id,
-        public readonly int $userId,
+        public readonly ?int $createdByUserId,
         public readonly string $hotelName,
         public readonly ?string $brand,
         public readonly ?string $addressLine1,
@@ -39,8 +39,6 @@ final class HotelProperty
         public readonly ?int $wifiQuality,
         public readonly ?int $noiseLevel,
         public readonly ?string $uniqueFeatures,
-        public readonly bool $isBlacklisted,
-        public readonly ?string $blacklistReason,
         public readonly ?float $overallRating = null,
     ) {
     }
@@ -50,15 +48,17 @@ final class HotelProperty
      */
     public static function fromRow(array $row): self
     {
+        $createdBy = $row['created_by_user_id'] ?? $row['user_id'] ?? null;
+
         return new self(
             id: isset($row['id']) ? (int) $row['id'] : null,
-            userId: (int) $row['user_id'],
+            createdByUserId: $createdBy !== null && $createdBy !== '' ? (int) $createdBy : null,
             hotelName: (string) $row['hotel_name'],
             brand: $row['brand'] ?? null,
             addressLine1: $row['address_line1'] ?? null,
             addressLine2: $row['address_line2'] ?? null,
-            city: $row['city'] ?? null,
-            stateRegion: $row['state_region'] ?? null,
+            city: self::emptyToNull($row['city'] ?? null),
+            stateRegion: self::emptyToNull($row['state_region'] ?? null),
             postalCode: $row['postal_code'] ?? null,
             country: $row['country'] ?? null,
             phone: $row['phone'] ?? null,
@@ -83,10 +83,17 @@ final class HotelProperty
             wifiQuality: isset($row['wifi_quality']) ? (int) $row['wifi_quality'] : null,
             noiseLevel: isset($row['noise_level']) ? (int) $row['noise_level'] : null,
             uniqueFeatures: $row['unique_features'] ?? null,
-            isBlacklisted: (bool) $row['is_blacklisted'],
-            blacklistReason: $row['blacklist_reason'] ?? null,
             overallRating: isset($row['overall_rating']) ? (float) $row['overall_rating'] : null,
         );
+    }
+
+    private static function emptyToNull(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $s = trim((string) $value);
+        return $s === '' ? null : $s;
     }
 
     /**
@@ -96,13 +103,13 @@ final class HotelProperty
     {
         return [
             'id' => $this->id,
-            'user_id' => $this->userId,
+            'created_by_user_id' => $this->createdByUserId,
             'hotel_name' => $this->hotelName,
             'brand' => $this->brand,
             'address_line1' => $this->addressLine1,
             'address_line2' => $this->addressLine2,
-            'city' => $this->city,
-            'state_region' => $this->stateRegion,
+            'city' => $this->city ?? '',
+            'state_region' => $this->stateRegion ?? '',
             'postal_code' => $this->postalCode,
             'country' => $this->country,
             'phone' => $this->phone,
@@ -127,8 +134,6 @@ final class HotelProperty
             'wifi_quality' => $this->wifiQuality,
             'noise_level' => $this->noiseLevel,
             'unique_features' => $this->uniqueFeatures,
-            'is_blacklisted' => $this->isBlacklisted,
-            'blacklist_reason' => $this->blacklistReason,
             'overall_rating' => $this->overallRating,
         ];
     }

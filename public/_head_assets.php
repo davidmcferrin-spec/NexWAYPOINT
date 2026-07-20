@@ -9,6 +9,9 @@ declare(strict_types=1);
  * Asset URLs get ?v=filemtime so deploys invalidate browser caches
  * without requiring a hard refresh.
  */
+
+use NexWaypoint\Core\SiteSettingsRepository;
+
 if (!function_exists('nexwaypoint_asset')) {
     /**
      * @param non-empty-string $webPath Path under public/, e.g. /assets/style.css
@@ -21,12 +24,40 @@ if (!function_exists('nexwaypoint_asset')) {
         return $webPath . '?v=' . rawurlencode($version);
     }
 }
+
+$nxThemeDefault = 'light';
+$nxThemeLock = false;
+if (isset($app) && is_array($app) && isset($app['db'], $app['logger'])) {
+    try {
+        $nxSettings = new SiteSettingsRepository($app['db'], $app['logger']);
+        if ($nxSettings->tableReady()) {
+            $rawTheme = $nxSettings->get(SiteSettingsRepository::KEY_UI_THEME_DEFAULT, 'light');
+            $nxThemeDefault = $rawTheme === 'dark' ? 'dark' : 'light';
+            $nxThemeLock = $nxSettings->getBool(SiteSettingsRepository::KEY_UI_THEME_LOCK, false);
+        }
+    } catch (Throwable) {
+        // Keep defaults if settings unavailable (login before migrate, etc.).
+    }
+}
 ?>
 <script>
+window.NEXWAYPOINT_APPEARANCE = <?= json_encode([
+    'themeDefault' => $nxThemeDefault,
+    'themeLock' => $nxThemeLock,
+], JSON_UNESCAPED_UNICODE) ?>;
 (function () {
     try {
-        var t = localStorage.getItem('nexwaypoint-theme');
-        document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+        var cfg = window.NEXWAYPOINT_APPEARANCE || {};
+        var siteDefault = cfg.themeDefault === 'dark' ? 'dark' : 'light';
+        var locked = !!cfg.themeLock;
+        var t = siteDefault;
+        if (!locked) {
+            var stored = localStorage.getItem('nexwaypoint-theme');
+            if (stored === 'dark' || stored === 'light') {
+                t = stored;
+            }
+        }
+        document.documentElement.setAttribute('data-theme', t);
     } catch (e) {
         document.documentElement.setAttribute('data-theme', 'light');
     }

@@ -234,6 +234,17 @@ final class TripRepository
         $dest = $destinationCity
             ?? $this->inferDestinationCity($legs)
             ?? 'Travel';
+        $isPast = $this->isPastEndDate($dates['end']);
+        if ($isPast) {
+            $tripStatus = 'completed';
+        } elseif ($trip !== null && $trip->status === 'cancelled') {
+            $tripStatus = 'planned';
+        } elseif ($trip !== null) {
+            $tripStatus = $trip->status;
+        } else {
+            $tripStatus = 'planned';
+        }
+        $segmentStatus = $isPast ? 'completed' : 'scheduled';
 
         if ($trip === null) {
             $trip = $this->create(new Trip(
@@ -242,7 +253,7 @@ final class TripRepository
                 destinationCity: $dest,
                 startDate: $dates['start'],
                 endDate: $dates['end'],
-                status: 'planned',
+                status: $tripStatus,
                 tripPurpose: null,
                 notes: 'Auto-imported from email confirmation ' . $code,
                 isPrivate: false,
@@ -255,7 +266,7 @@ final class TripRepository
                 destinationCity: $dest,
                 startDate: $dates['start'],
                 endDate: $dates['end'],
-                status: $trip->status === 'cancelled' ? 'planned' : $trip->status,
+                status: $tripStatus,
                 tripPurpose: $trip->tripPurpose,
                 notes: $trip->notes,
                 isPrivate: $trip->isPrivate,
@@ -278,7 +289,7 @@ final class TripRepository
                 departDt: $this->normalizeDateTime($leg['depart_dt'] ?? null),
                 arriveDt: $this->normalizeDateTime($leg['arrive_dt'] ?? null),
                 hotelStayId: null,
-                status: 'scheduled',
+                status: $segmentStatus,
                 sourceParseLogId: $sourceParseLogId,
             ), $actorUserId);
         }
@@ -339,6 +350,12 @@ final class TripRepository
         }
 
         return count($segments);
+    }
+
+    private function isPastEndDate(string $endDate, ?\DateTimeImmutable $asOf = null): bool
+    {
+        $today = ($asOf ?? new \DateTimeImmutable('today'))->format('Y-m-d');
+        return substr($endDate, 0, 10) < $today;
     }
 
     /**

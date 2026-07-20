@@ -1,4 +1,5 @@
 .env
+.tools/
 vendor/
 .phpunit.result.cache
 storage/logs/*.log

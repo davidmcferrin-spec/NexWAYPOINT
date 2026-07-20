@@ -6,7 +6,6 @@ namespace NexWaypoint\Mail;
 
 use NexWaypoint\Core\Env;
 use NexWaypoint\Core\Logger;
-use NexWaypoint\Hotels\HotelProperty;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStay;
 use NexWaypoint\Hotels\HotelStayRepository;
@@ -243,47 +242,17 @@ final class MailPoller
 
         $propertyName = (string) $extracted['property_name'];
         $city = isset($extracted['city']) && is_string($extracted['city']) ? $extracted['city'] : null;
-        $property = $this->hotelProperties->findByNameCity($userId, $propertyName, $city);
-        if ($property === null) {
-            $property = $this->hotelProperties->create(new HotelProperty(
-                id: null,
-                userId: $userId,
-                hotelName: $propertyName,
-                brand: isset($extracted['brand']) && is_string($extracted['brand']) ? $extracted['brand'] : null,
-                addressLine1: isset($extracted['address']) && is_string($extracted['address']) ? $extracted['address'] : null,
-                addressLine2: null,
-                city: $city,
-                stateRegion: isset($extracted['state_region']) && is_string($extracted['state_region']) ? $extracted['state_region'] : null,
-                postalCode: null,
-                country: isset($extracted['country']) && is_string($extracted['country']) && trim($extracted['country']) !== ''
-                    ? trim($extracted['country'])
-                    : 'USA',
-                phone: null,
-                latitude: null,
-                longitude: null,
-                hasDesk: false,
-                deskNotes: null,
-                hasPool: false,
-                hasHotTub: false,
-                hasBreakfast: false,
-                breakfastNotes: null,
-                hasGym: false,
-                hasFreeParking: false,
-                hasAirportShuttle: false,
-                hasEvCharging: false,
-                hasOnsiteRestaurant: false,
-                hasOffsiteGym: false,
-                walkToOffice: false,
-                walkToOfficeNotes: null,
-                hasDestinationFee: false,
-                destinationFeeNotes: null,
-                wifiQuality: null,
-                noiseLevel: null,
-                uniqueFeatures: isset($extracted['room_type']) && is_string($extracted['room_type']) ? $extracted['room_type'] : null,
-                isBlacklisted: false,
-                blacklistReason: null,
-            ), $userId);
-        }
+        $state = isset($extracted['state_region']) && is_string($extracted['state_region']) ? $extracted['state_region'] : null;
+        $property = $this->hotelProperties->findOrCreate(
+            $propertyName,
+            $city,
+            $state,
+            $userId,
+            $userId,
+            isset($extracted['brand']) && is_string($extracted['brand']) ? $extracted['brand'] : null,
+            isset($extracted['address']) && is_string($extracted['address']) ? $extracted['address'] : null,
+            null,
+        );
 
         $result = $this->hotelStays->upsertFromImport(new HotelStay(
             id: null,

@@ -331,8 +331,8 @@ final class HotelStayRepository
         if ($this->isValidDate($stay->stayStart) && $this->isValidDate($stay->stayEnd) && $stay->stayEnd < $stay->stayStart) {
             $errors[] = 'stay_end cannot be before stay_start.';
         }
-        if ($stay->stayRating !== null && ($stay->stayRating < 1 || $stay->stayRating > 5)) {
-            $errors[] = 'stay_rating must be between 1 and 5.';
+        if ($stay->stayRating !== null && ($stay->stayRating < 0 || $stay->stayRating > 5)) {
+            $errors[] = 'stay_rating must be between 0 and 5.';
         }
         if ($stay->bedType !== null && !in_array($stay->bedType, HotelPropertyRepository::BED_TYPES, true)) {
             $errors[] = 'bed_type must be king, queen, or dual_queen.';

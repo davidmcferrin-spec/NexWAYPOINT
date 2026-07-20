@@ -103,6 +103,52 @@ final class MailImportTest extends NexWaypointTestCase
         self::assertSame('cancelled', $trip->status);
     }
 
+    public function testPastItineraryImportMarkedCompleted(): void
+    {
+        $userId = $this->insertUser('dave');
+        $trips = new TripRepository($this->db, $this->logger);
+        $carriers = new CarrierRepository($this->db, $this->logger);
+        $carrier = $carriers->findOrCreateByIata($userId, 'AA', 'American Airlines', $userId);
+
+        $result = $trips->upsertItineraryByConfirmation($userId, 'OLDPNR', [[
+            'segment_type' => 'flight',
+            'carrier_id' => $carrier->id,
+            'carrier' => $carrier->name,
+            'flight_number' => '50',
+            'origin' => 'ORD',
+            'destination' => 'DFW',
+            'depart_dt' => '2024-03-01 10:00:00',
+            'arrive_dt' => '2024-03-01 12:30:00',
+        ]], null, $userId);
+
+        self::assertTrue($result['created']);
+        self::assertSame('completed', $result['trip']->status);
+        self::assertSame('completed', $result['segments'][0]->status);
+        self::assertSame('2024-03-01', $result['trip']->endDate);
+    }
+
+    public function testFutureItineraryImportStaysPlanned(): void
+    {
+        $userId = $this->insertUser('dave');
+        $trips = new TripRepository($this->db, $this->logger);
+        $carriers = new CarrierRepository($this->db, $this->logger);
+        $carrier = $carriers->findOrCreateByIata($userId, 'AA', 'American Airlines', $userId);
+
+        $result = $trips->upsertItineraryByConfirmation($userId, 'NEWPNR', [[
+            'segment_type' => 'flight',
+            'carrier_id' => $carrier->id,
+            'carrier' => $carrier->name,
+            'flight_number' => '100',
+            'origin' => 'ORD',
+            'destination' => 'DFW',
+            'depart_dt' => '2099-09-01 10:00:00',
+            'arrive_dt' => '2099-09-01 12:00:00',
+        ]], null, $userId);
+
+        self::assertSame('planned', $result['trip']->status);
+        self::assertSame('scheduled', $result['segments'][0]->status);
+    }
+
     public function testHotelUpsertAndCancelByConfirmation(): void
     {
         $userId = $this->insertUser('dave');
@@ -111,7 +157,7 @@ final class MailImportTest extends NexWaypointTestCase
 
         $property = $props->create(new \NexWaypoint\Hotels\HotelProperty(
             id: null,
-            userId: $userId,
+            createdByUserId: $userId,
             hotelName: 'Test Hilton Downtown',
             brand: 'Hilton',
             addressLine1: null,
@@ -142,8 +188,6 @@ final class MailImportTest extends NexWaypointTestCase
             wifiQuality: null,
             noiseLevel: null,
             uniqueFeatures: null,
-            isBlacklisted: false,
-            blacklistReason: null,
         ), $userId);
 
         $stay = new \NexWaypoint\Hotels\HotelStay(

@@ -14,27 +14,29 @@ feature breadth. Prefers direct technical pushback over agreement.
 ## Status as of this build (2026-07-19)
 
 v1 scaffold is complete and passes lint + tests: hotel tracker split into
-`hotel_properties` (identity, amenities including EV/restaurant/off-site
-gym/walk-to-office, blacklist, overall rating) and `hotel_stays` (dates,
-room/bed/bath, stay rating, price/privacy); add form can reuse a prior
-property; mail ingestion (DreamHost IMAP working end-to-end, Gmail/M365
-interfaces defined but throw `NotImplementedException`), airline/hotel/train
-parsers (AA/Delta/United/Breeze, Hilton/Marriott/generic hotel, Amtrak)
-with PNR/confirmation upsert + cancel, FlightAware AeroAPI client with
-rate limiting + caching, trip status engine, alert evaluator +
-notifications, and the visibility/sharing engine covering all five
-directions with override precedence. Basic server-rendered PHP UI exists
-for login, hotel list/add/view, dashboard, and sharing settings. VPS
-deployment is bootstrapped by an idempotent `setup.sh`. Additional users
-via `scripts/create_user.php` or `/settings/users.php` (org chart =
-reports-to + dotted line; `is_admin` for site admin). Install auto-seeds
+site-wide `hotel_properties` (identity, amenities including EV/restaurant/
+off-site gym/walk-to-office, public `overall_rating`) and per-user
+`hotel_stays` (dates, room/bed/bath, stay rating, price/privacy); personal
+blacklist in `user_hotel_blacklist`; add form reuses the global directory;
+mail ingestion (DreamHost IMAP working end-to-end, Gmail/M365 interfaces
+defined but throw `NotImplementedException`), airline/hotel/train parsers
+(AA/Delta/United/Breeze, Hilton/Marriott/generic hotel, Amtrak) with
+PNR/confirmation upsert + cancel, FlightAware AeroAPI client with rate
+limiting + caching, trip status engine, alert evaluator + notifications,
+and the visibility/sharing engine covering all five directions with
+override precedence. Basic server-rendered PHP UI exists for login, hotel
+list/add/view, dashboard, and sharing settings. VPS deployment is
+bootstrapped by an idempotent `setup.sh`. Additional users via
+`scripts/create_user.php` or `/settings/users.php` (org chart = reports-to
++ dotted line; `is_admin` for site admin). Appearance (map basemap, pin
+colors, default theme) is under Settings → Appearance. Install auto-seeds
 `admin` with a random password; `setup.sh reset-password` regenerates.
-Existing DBs need `php scripts/migrate.php` after pull.
+Existing DBs need `php scripts/migrate.php` after pull (includes
+global-properties migration).
 
 **Not started:** car/rideshare email parsers, Azure AD SSO,
-PWA/offline, push notifications, hotel-stay edit page, approval UI for
-auto-imported stays (currently auto-creates + notifies instead of a
-pending-confirmation flow).
+PWA/offline, push notifications, approval UI for auto-imported stays
+(currently auto-creates + notifies instead of a pending-confirmation flow).
 
 ## Key architecture decisions (and why)
 
@@ -69,11 +71,17 @@ pending-confirmation flow).
   dotted) defaults to full visibility; BOTTOM_UP (report viewing manager)
   defaults to city+date only. Per-hotel / per-trip `is_private` and
   `visibility_blocks` can hide an item from everyone or from selected users.
-- **Hotels are properties vs stays.** Property identity/amenities/blacklist/
-  phone live on `hotel_properties`; visit-specific room/bed/bath/`stay_rating`
-  live on `hotel_stays`. `overall_rating` on the property is
-  `AVG(stay_rating)` recomputed on stay create/update/delete. Add-stay UI
-  filters by **City, State** then property; Add New is a modal. Edit via
+- **Hotels are properties vs stays.** `hotel_properties` is a site-wide
+  directory (identity, location, amenities, phone; `created_by_user_id` is
+  audit only). Dedup key: case-insensitive name + city + state. Stays are
+  per-user (`user_id` + visit fields + `stay_rating` + `is_private`).
+  `overall_rating` is the public `AVG(stay_rating)` across all users'
+  stays on that property (each stay is 0–5 stars). Blacklist is per-user in
+  `user_hotel_blacklist`
+  (teammates can see matching adverse prefs). Any auth user can edit
+  amenities; hard-delete property is site-admin only. Add-stay UI filters
+  by **City, State** then property; Add New is a modal. Rate/edit a stay via
+  `public/hotels/edit-stay.php`. Edit property via
   `public/hotels/edit-property.php`.
 - **Carriers own IATA.** Per-user `carriers` table (name + iata_code);
   `trip_segments.carrier_id` links flights. Flight form asks for flight

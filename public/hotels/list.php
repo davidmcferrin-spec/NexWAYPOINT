@@ -5,15 +5,18 @@ declare(strict_types=1);
 use NexWaypoint\Hotels\CriteriaSuggestionEngine;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Hotels\UserHotelBlacklistRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 
 $propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
+$blacklistRepo = new UserHotelBlacklistRepository($app['db'], $app['logger']);
 $stayRepo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
 $stays = $stayRepo->findForUser($user->id);
+$myBlacklistIds = $blacklistRepo->propertyIdsForUser($user->id);
 $propertiesById = [];
-foreach ($propertyRepo->findForUser($user->id) as $property) {
+foreach ($propertyRepo->findAll() as $property) {
     $propertiesById[$property->id] = $property;
 }
 
@@ -69,8 +72,8 @@ $bathLabels = ['tub' => 'Tub', 'walk_in_shower' => 'Walk-in shower'];
                     <tr>
                         <td>
                             <?= htmlspecialchars($property->hotelName ?? 'Unknown', ENT_QUOTES) ?>
-                            <?php if ($property?->isBlacklisted): ?>
-                                <span class="badge badge-blacklist">Blacklisted</span>
+                            <?php if ($property !== null && isset($myBlacklistIds[(int) $property->id])): ?>
+                                <span class="badge badge-blacklist">My blacklist</span>
                             <?php endif; ?>
                             <?php if ($stay->isPrivate): ?>
                                 <span class="badge badge-blacklist">Private</span>
@@ -94,9 +97,13 @@ $bathLabels = ['tub' => 'Tub', 'walk_in_shower' => 'Walk-in shower'];
                                 · <?= htmlspecialchars($bathLabels[$stay->bathroomType] ?? $stay->bathroomType, ENT_QUOTES) ?>
                             <?php endif; ?>
                         </td>
-                        <td><?= $stay->stayRating !== null ? str_repeat('★', $stay->stayRating) . str_repeat('☆', 5 - $stay->stayRating) : '—' ?></td>
+                        <td><?= $stay->stayRating !== null ? str_repeat('★', max(0, $stay->stayRating)) . str_repeat('☆', max(0, 5 - $stay->stayRating)) : '—' ?></td>
                         <td><?= $stay->lastStayPrice !== null ? htmlspecialchars($stay->currency, ENT_QUOTES) . ' ' . number_format($stay->lastStayPrice, 2) : '—' ?></td>
-                        <td><a href="/hotels/view.php?id=<?= $stay->id ?>">View</a></td>
+                        <td>
+                            <a href="/hotels/view.php?id=<?= $stay->id ?>">View</a>
+                            ·
+                            <a href="/hotels/edit-stay.php?id=<?= $stay->id ?>"><?= $stay->stayRating === null ? 'Rate' : 'Edit' ?></a>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

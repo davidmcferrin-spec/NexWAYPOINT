@@ -6,15 +6,17 @@ use NexWaypoint\Core\Csrf;
 use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\OfficeVenueRepository;
+use NexWaypoint\Hotels\UserHotelBlacklistRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 
 $propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
+$blacklistRepo = new UserHotelBlacklistRepository($app['db'], $app['logger']);
 $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect();
 $walkToOfficeVenues = array_values(array_unique(array_merge(
     (new OfficeVenueRepository($app['db'], $app['logger']))->namesForSelect(),
-    $propertyRepo->walkToOfficeVenuesForUser($user->id),
+    $propertyRepo->walkToOfficeVenues(),
 )));
 natcasesort($walkToOfficeVenues);
 $walkToOfficeVenues = array_values($walkToOfficeVenues);
@@ -33,15 +35,15 @@ if (!in_array($sort, $allowedSort, true)) {
     $sort = 'hotel_name';
 }
 
-$properties = $propertyRepo->searchForUser($user->id, $filters, $sort);
-$locations = $propertyRepo->locationsForUser($user->id);
+$properties = $propertyRepo->search($user->id, $filters, $sort);
+$locations = $propertyRepo->locations();
+$myBlacklistIds = $blacklistRepo->propertyIdsForUser($user->id);
 
 $adverseByPropertyId = [];
 foreach ($properties as $property) {
-    $adverseByPropertyId[(int) $property->id] = $propertyRepo->findTeammateAdversePreferences(
+    $adverseByPropertyId[(int) $property->id] = $propertyRepo->findTeammateAdverseForProperty(
         $user->id,
-        $property->hotelName,
-        $property->city
+        (int) $property->id
     );
 }
 
@@ -172,7 +174,7 @@ $property = null;
                                 <?= $property->hasDestinationFee ? 'Yes' : '—' ?>
                             </td>
                             <td>
-                                <?php if ($property->isBlacklisted): ?>
+                                <?php if (isset($myBlacklistIds[(int) $property->id])): ?>
                                     <span class="badge badge-blacklist">My blacklist</span>
                                 <?php endif; ?>
                                 <?php if ($adverse !== []): ?>
