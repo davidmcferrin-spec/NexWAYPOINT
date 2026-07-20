@@ -128,7 +128,9 @@
                         marker.bindPopup(
                             '<strong>' + escapeHtml(p.name) + '</strong><br>' +
                             escapeHtml(p.label) +
-                            (p.city_label ? '<br>' + escapeHtml(p.city_label) : '')
+                            (p.upcoming
+                                ? '<br>Upcoming: ' + escapeHtml(p.upcoming)
+                                : (p.city_label ? '<br>' + escapeHtml(p.city_label) : ''))
                         );
                         faceLayer.addLayer(marker);
                     });

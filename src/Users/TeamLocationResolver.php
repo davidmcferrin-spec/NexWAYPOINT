@@ -86,6 +86,76 @@ final class TeamLocationResolver
     }
 
     /**
+     * Resolve current pin, then if at-base and a visible upcoming trip exists,
+     * move the pin to that destination.
+     *
+     * @param array{status: string, label: string, detail: array<string, mixed>} $status
+     * @return array{
+     *   location: array{lat: float, lon: float, city_label: string, city_key: string}|null,
+     *   upcoming: string|null
+     * }
+     */
+    public function resolveWithUpcoming(
+        User $user,
+        array $status,
+        bool $destinationVisible,
+        ?\NexWaypoint\Trips\Trip $upcomingVisibleTrip,
+    ): array {
+        $location = $this->resolve($user, $status, $destinationVisible);
+        $upcomingLabel = null;
+
+        if (
+            self::isAtBaseStatus($status['status'])
+            && $upcomingVisibleTrip !== null
+            && trim($upcomingVisibleTrip->destinationCity) !== ''
+        ) {
+            $upcomingPin = $this->resolveUpcomingDestination($upcomingVisibleTrip->destinationCity);
+            if ($upcomingPin !== null) {
+                $location = $upcomingPin;
+                $upcomingLabel = $upcomingPin['city_label'] . ' · '
+                    . self::formatTripDateRange($upcomingVisibleTrip->startDate, $upcomingVisibleTrip->endDate);
+            }
+        }
+
+        return [
+            'location' => $location,
+            'upcoming' => $upcomingLabel,
+        ];
+    }
+
+    public static function formatTripDateRange(string $start, string $end): string
+    {
+        try {
+            $startDt = new \DateTimeImmutable($start);
+            $endDt = new \DateTimeImmutable($end);
+        } catch (\Exception) {
+            return $start . '–' . $end;
+        }
+        if ($startDt->format('Y-m') === $endDt->format('Y-m')) {
+            return $startDt->format('M j') . '–' . $endDt->format('j');
+        }
+        return $startDt->format('M j') . '–' . $endDt->format('M j');
+    }
+
+    /**
+     * Geocode an upcoming trip destination for map/table pins.
+     *
+     * @return array{lat: float, lon: float, city_label: string, city_key: string}|null
+     */
+    public function resolveUpcomingDestination(string $destinationCity): ?array
+    {
+        return $this->fromCityState($destinationCity, null);
+    }
+
+    /**
+     * Whether the current status is still at base (eligible for an upcoming-trip pin).
+     */
+    public static function isAtBaseStatus(string $status): bool
+    {
+        return in_array($status, ['home', 'office', 'remote', 'unavailable'], true);
+    }
+
+    /**
      * @return array{lat: float, lon: float, city_label: string, city_key: string}|null
      */
     private function fromHome(User $user): ?array

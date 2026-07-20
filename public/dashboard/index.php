@@ -12,6 +12,8 @@ use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\TeamLocationResolver;
+use NexWaypoint\Users\TeamUpcomingTripFinder;
+use NexWaypoint\Users\User;
 use NexWaypoint\Users\UserRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
 use NexWaypoint\Visibility\VisibilityEngine;
@@ -35,9 +37,12 @@ $locationResolver = new TeamLocationResolver(
     new HotelPropertyRepository($db, $logger),
     new Geocoder($logger),
 );
+$upcomingFinder = new TeamUpcomingTripFinder($tripRepo, $visibilityEngine, $blockRepo);
 
 $myUpcomingTrips = $tripRepo->findActiveOrUpcoming($user->id, 60);
 $unreadCount = $notifications->unreadCount($user->id);
+
+$upcomingMapDays = 21;
 
 if (!function_exists('statusBadgeClass')) {
     function statusBadgeClass(string $status): string
@@ -69,84 +74,145 @@ if (!function_exists('nexwaypoint_initials')) {
 }
 
 /**
- * Manual work-state statuses (home/office/remote/unavailable) are always
- * shown team-wide -- they aren't trip data and aren't covered by the
- * visibility_rules field list. Trip-derived detail (destination city,
- * carrier, etc.) IS gated per VisibilityEngine, per-viewer. Private trips
- * and per-user hide lists suppress travel detail entirely.
+ * @return array{
+ *   user: User,
+ *   status: string,
+ *   label: string,
+ *   location: array{lat: float, lon: float, city_label: string, city_key: string}|null,
+ *   upcoming: string|null,
+ *   avatar_url: string|null,
+ *   photo_focus_x: float,
+ *   photo_focus_y: float,
+ *   initials: string,
+ *   is_self: bool
+ * }
  */
-$alwaysVisibleStatuses = ['home', 'office', 'remote', 'unavailable'];
+if (!function_exists('nexwaypoint_build_board_entry')) {
+    function nexwaypoint_build_board_entry(
+        User $subject,
+        int $viewerId,
+        TripStatusEngine $statusEngine,
+        TripRepository $tripRepo,
+        VisibilityEngine $visibilityEngine,
+        VisibilityBlockRepository $blockRepo,
+        TeamLocationResolver $locationResolver,
+        TeamUpcomingTripFinder $upcomingFinder,
+        bool $isSelf,
+    ): array {
+        $alwaysVisibleStatuses = ['home', 'office', 'remote', 'unavailable'];
+        $status = $statusEngine->resolveForUser($subject->id);
+        $tripId = $status['detail']['trip_id'] ?? null;
+
+        $displayLabel = $status['label'];
+        $destinationVisible = true;
+        if (!$isSelf && !in_array($status['status'], $alwaysVisibleStatuses, true) && $tripId !== null) {
+            $trip = $tripRepo->find((int) $tripId);
+            $hidden = $trip !== null && $blockRepo->isHiddenFromViewer(
+                $subject->id,
+                $viewerId,
+                $trip->isPrivate,
+                VisibilityBlockRepository::TYPE_TRIP,
+                $trip->id
+            );
+
+            if ($hidden) {
+                $destinationVisible = false;
+                $displayLabel = match ($status['status']) {
+                    'en_route', 'layover', 'delayed', 'at_hotel' => 'Traveling',
+                    'cancelled' => 'Travel disrupted',
+                    default => 'Unavailable',
+                };
+            } else {
+                $tripIsPrivate = $trip !== null && $trip->isPrivate;
+                $visibility = $visibilityEngine->getVisibleFields($viewerId, $subject->id, $tripIsPrivate);
+
+                if (!in_array('destination_city', $visibility['visible_fields'], true)) {
+                    $destinationVisible = false;
+                    $displayLabel = match ($status['status']) {
+                        'en_route' => 'Traveling',
+                        'layover' => 'Traveling (layover)',
+                        'delayed' => 'Traveling (delayed)',
+                        'at_hotel' => 'Traveling',
+                        'cancelled' => 'Travel disrupted',
+                        default => $status['label'],
+                    };
+                }
+            }
+        }
+
+        $upcomingTrip = null;
+        if (TeamLocationResolver::isAtBaseStatus($status['status'])) {
+            $upcomingTrip = $upcomingFinder->findVisible($viewerId, $subject->id, 21);
+        }
+        $resolved = $locationResolver->resolveWithUpcoming(
+            $subject,
+            $status,
+            $destinationVisible,
+            $upcomingTrip,
+        );
+
+        return [
+            'user' => $subject,
+            'status' => $status['status'],
+            'label' => $displayLabel,
+            'location' => $resolved['location'],
+            'upcoming' => $resolved['upcoming'],
+            'avatar_url' => $subject->hasPhoto() ? '/media/avatar.php?id=' . $subject->id : null,
+            'photo_focus_x' => $subject->photoFocusX,
+            'photo_focus_y' => $subject->photoFocusY,
+            'initials' => nexwaypoint_initials($subject->displayName),
+            'is_self' => $isSelf,
+        ];
+    }
+}
 
 $team = [];
 foreach ($userRepo->findAllActive() as $teammate) {
     if ($teammate->id === $user->id) {
         continue;
     }
-
-    $status = $statusEngine->resolveForUser($teammate->id);
-    $tripId = $status['detail']['trip_id'] ?? null;
-
-    $displayLabel = $status['label'];
-    $destinationVisible = true;
-    if (!in_array($status['status'], $alwaysVisibleStatuses, true) && $tripId !== null) {
-        $trip = $tripRepo->find((int) $tripId);
-        $hidden = $trip !== null && $blockRepo->isHiddenFromViewer(
-            $teammate->id,
-            $user->id,
-            $trip->isPrivate,
-            VisibilityBlockRepository::TYPE_TRIP,
-            $trip->id
-        );
-
-        if ($hidden) {
-            $destinationVisible = false;
-            $displayLabel = match ($status['status']) {
-                'en_route', 'layover', 'delayed', 'at_hotel' => 'Traveling',
-                'cancelled' => 'Travel disrupted',
-                default => 'Unavailable',
-            };
-        } else {
-            $tripIsPrivate = $trip !== null && $trip->isPrivate;
-            $visibility = $visibilityEngine->getVisibleFields($user->id, $teammate->id, $tripIsPrivate);
-
-            if (!in_array('destination_city', $visibility['visible_fields'], true)) {
-                $destinationVisible = false;
-                $displayLabel = match ($status['status']) {
-                    'en_route' => 'Traveling',
-                    'layover' => 'Traveling (layover)',
-                    'delayed' => 'Traveling (delayed)',
-                    'at_hotel' => 'Traveling',
-                    'cancelled' => 'Travel disrupted',
-                    default => $status['label'],
-                };
-            }
-        }
-    }
-
-    $location = $locationResolver->resolve($teammate, $status, $destinationVisible);
-
-    $team[] = [
-        'user' => $teammate,
-        'status' => $status['status'],
-        'label' => $displayLabel,
-        'location' => $location,
-        'avatar_url' => $teammate->hasPhoto() ? '/media/avatar.php?id=' . $teammate->id : null,
-        'photo_focus_x' => $teammate->photoFocusX,
-        'photo_focus_y' => $teammate->photoFocusY,
-        'initials' => nexwaypoint_initials($teammate->displayName),
-    ];
+    $team[] = nexwaypoint_build_board_entry(
+        $teammate,
+        $user->id,
+        $statusEngine,
+        $tripRepo,
+        $visibilityEngine,
+        $blockRepo,
+        $locationResolver,
+        $upcomingFinder,
+        false,
+    );
 }
 
-$travelingCount = count(array_filter($team, static fn (array $t) => !in_array($t['status'], $alwaysVisibleStatuses, true)));
+$selfEntry = nexwaypoint_build_board_entry(
+    $user,
+    $user->id,
+    $statusEngine,
+    $tripRepo,
+    $visibilityEngine,
+    $blockRepo,
+    $locationResolver,
+    $upcomingFinder,
+    true,
+);
 
 $mapPeople = [];
-foreach ($team as $entry) {
+$selfOnMap = false;
+$othersOnMap = 0;
+
+$mapCandidates = array_merge([$selfEntry], $team);
+foreach ($mapCandidates as $entry) {
     if ($entry['location'] === null) {
         continue;
     }
+    if ($entry['is_self']) {
+        $selfOnMap = true;
+    } else {
+        $othersOnMap++;
+    }
     $mapPeople[] = [
         'id' => $entry['user']->id,
-        'name' => $entry['user']->displayName,
+        'name' => $entry['is_self'] ? $entry['user']->displayName . ' (you)' : $entry['user']->displayName,
         'status' => $entry['status'],
         'label' => $entry['label'],
         'lat' => $entry['location']['lat'],
@@ -157,8 +223,12 @@ foreach ($team as $entry) {
         'photo_focus_x' => $entry['photo_focus_x'],
         'photo_focus_y' => $entry['photo_focus_y'],
         'initials' => $entry['initials'],
+        'upcoming' => $entry['upcoming'],
+        'is_self' => $entry['is_self'],
     ];
 }
+
+$mapLonelyNote = $selfOnMap && $othersOnMap === 0;
 
 $basemap = AppearanceCatalog::resolveMapBasemap(null);
 try {
@@ -171,6 +241,8 @@ try {
 } catch (Throwable) {
     // Keep default basemap.
 }
+
+$showTeamBoard = $team !== [] || $mapPeople !== [];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -186,14 +258,12 @@ try {
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
     <h1>Who's traveling this week</h1>
-    <p><?= $travelingCount ?> of <?= count($team) ?> teammates currently traveling.
-        <?php if ($unreadCount > 0): ?>
-            · <a href="/alerts/index.php"><?= $unreadCount ?> unread alert<?= $unreadCount === 1 ? '' : 's' ?></a>
-        <?php endif; ?>
-    </p>
+    <?php if ($unreadCount > 0): ?>
+        <p><a href="/alerts/index.php"><?= $unreadCount ?> unread alert<?= $unreadCount === 1 ? '' : 's' ?></a></p>
+    <?php endif; ?>
 
-    <?php if ($team === []): ?>
-        <p class="empty-state">No other active teammates yet.</p>
+    <?php if (!$showTeamBoard): ?>
+        <p class="empty-state">No other active teammates yet. Set a <a href="/settings/profile.php">home city</a> to appear on the map.</p>
     <?php else: ?>
         <div class="view-toggle" role="tablist" aria-label="Team view">
             <button type="button" class="view-toggle-btn is-active" data-team-view="table" role="tab" aria-selected="true">Table</button>
@@ -202,63 +272,84 @@ try {
         </div>
 
         <div class="team-view" data-team-panel="table">
-            <table>
-                <thead><tr><th>Teammate</th><th>Status</th><th>Location</th></tr></thead>
-                <tbody>
-                    <?php foreach ($team as $entry): ?>
-                        <tr>
-                            <td>
-                                <span class="team-name-cell">
-                                    <?php if ($entry['avatar_url']): ?>
-                                        <img class="avatar-circle avatar-sm"
-                                            src="<?= htmlspecialchars($entry['avatar_url'], ENT_QUOTES) ?>"
-                                            alt=""
-                                            style="object-position: <?= (float) $entry['photo_focus_x'] ?>% <?= (float) $entry['photo_focus_y'] ?>%;">
-                                    <?php else: ?>
-                                        <span class="avatar-circle avatar-sm avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
+            <?php if ($team === []): ?>
+                <p class="empty-state">No other active teammates yet.</p>
+            <?php else: ?>
+                <table>
+                    <thead><tr><th>Teammate</th><th>Status</th><th>Location</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($team as $entry): ?>
+                            <tr>
+                                <td>
+                                    <span class="team-name-cell">
+                                        <?php if ($entry['avatar_url']): ?>
+                                            <img class="avatar-circle avatar-sm"
+                                                src="<?= htmlspecialchars($entry['avatar_url'], ENT_QUOTES) ?>"
+                                                alt=""
+                                                style="object-position: <?= (float) $entry['photo_focus_x'] ?>% <?= (float) $entry['photo_focus_y'] ?>%;">
+                                        <?php else: ?>
+                                            <span class="avatar-circle avatar-sm avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
+                                        <?php endif; ?>
+                                        <?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
+                                    <?php if ($entry['upcoming'] !== null): ?>
+                                        <div class="hint">Upcoming: <?= htmlspecialchars($entry['upcoming'], ENT_QUOTES) ?></div>
                                     <?php endif; ?>
-                                    <?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?>
-                                </span>
-                            </td>
-                            <td><span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span></td>
-                            <td>
-                                <?php if ($entry['location'] !== null): ?>
-                                    <?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?>
-                                <?php else: ?>
-                                    <span class="hint">—</span>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                                </td>
+                                <td>
+                                    <?php if ($entry['location'] !== null): ?>
+                                        <?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?>
+                                    <?php else: ?>
+                                        <span class="hint">—</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
         </div>
 
         <div class="team-view" data-team-panel="cards" hidden>
-            <div class="team-card-grid">
-                <?php foreach ($team as $entry): ?>
-                    <article class="team-card">
-                        <?php if ($entry['avatar_url']): ?>
-                            <img class="avatar-circle avatar-lg"
-                                src="<?= htmlspecialchars($entry['avatar_url'], ENT_QUOTES) ?>"
-                                alt=""
-                                style="object-position: <?= (float) $entry['photo_focus_x'] ?>% <?= (float) $entry['photo_focus_y'] ?>%;">
-                        <?php else: ?>
-                            <span class="avatar-circle avatar-lg avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
-                        <?php endif; ?>
-                        <h3 class="team-card-name"><?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?></h3>
-                        <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
-                    </article>
-                <?php endforeach; ?>
-            </div>
+            <?php if ($team === []): ?>
+                <p class="empty-state">No other active teammates yet.</p>
+            <?php else: ?>
+                <div class="team-card-grid">
+                    <?php foreach ($team as $entry): ?>
+                        <article class="team-card">
+                            <?php if ($entry['avatar_url']): ?>
+                                <img class="avatar-circle avatar-lg"
+                                    src="<?= htmlspecialchars($entry['avatar_url'], ENT_QUOTES) ?>"
+                                    alt=""
+                                    style="object-position: <?= (float) $entry['photo_focus_x'] ?>% <?= (float) $entry['photo_focus_y'] ?>%;">
+                            <?php else: ?>
+                                <span class="avatar-circle avatar-lg avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
+                            <?php endif; ?>
+                            <h3 class="team-card-name"><?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?></h3>
+                            <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
+                            <?php if ($entry['upcoming'] !== null): ?>
+                                <p class="hint">Upcoming: <?= htmlspecialchars($entry['upcoming'], ENT_QUOTES) ?></p>
+                            <?php elseif ($entry['location'] !== null): ?>
+                                <p class="hint"><?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?></p>
+                            <?php endif; ?>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
         </div>
 
         <div class="team-view" data-team-panel="map" hidden>
             <?php if ($mapPeople === []): ?>
-                <p class="empty-state">No teammates have a map location yet. Set a home city under <a href="/settings/profile.php">My profile</a>, or travel with a visible destination.</p>
+                <p class="empty-state">No map locations yet. Set a home city under <a href="/settings/profile.php">My profile</a>, or travel with a visible destination.</p>
             <?php else: ?>
+                <?php if ($mapLonelyNote): ?>
+                    <p class="hint">You’re the only one with a location set so far.</p>
+                <?php endif; ?>
                 <div id="team-map" class="team-map" role="img" aria-label="Teammate locations"></div>
-                <p class="hint">Zoom in to see faces. City clusters show how many people are in that city.</p>
+                <p class="hint">Zoom in to see faces. City clusters show how many people are in that city. Upcoming trips (next <?= (int) $upcomingMapDays ?> days) pin at the destination when not already traveling.</p>
             <?php endif; ?>
         </div>
     <?php endif; ?>
