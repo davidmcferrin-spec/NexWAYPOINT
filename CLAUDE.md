@@ -26,7 +26,7 @@ notifications, and the visibility/sharing engine covering all five
 directions with override precedence. Basic server-rendered PHP UI exists
 for login, hotel list/add/view, dashboard, and sharing settings. VPS
 deployment is bootstrapped by an idempotent `setup.sh`. Additional users
-via `scripts/create_user.php` or `/admin/users.php` (org chart =
+via `scripts/create_user.php` or `/settings/users.php` (org chart =
 reports-to + dotted line; `is_admin` for site admin). Install auto-seeds
 `admin` with a random password; `setup.sh reset-password` regenerates.
 Existing DBs need `php scripts/migrate.php` after pull.
@@ -58,8 +58,11 @@ pending-confirmation flow).
   isn't a v1 blocker. Local auth unblocks everything else without an
   enterprise app registration in the loop. Org structure is who reports to
   whom (`manager_id` solid line + `user_dotted_managers` dotted line), not
-  a coarse role dropdown. Site-admin (`is_admin`) gates `/admin/users.php`
-  and Site settings — separate from the reporting chart. Mail ownership is
+  a coarse role dropdown. The seeded `admin` account is `is_system` —
+  isolated from the org chart. Site-admin (`is_admin`) gates Settings →
+  Users and Site catalogs. Settings also manage `hotel_brands` and
+  `office_venues` (named offices with addresses for the walk-to combobox
+  and hotel map squares). Mail ownership is
   correlated via `user_emails` (many addresses per user), not a single
   `users.email`.
 - **Visibility defaults:** TOP_DOWN (manager viewing report, solid or
@@ -75,7 +78,7 @@ pending-confirmation flow).
 - **Carriers own IATA.** Per-user `carriers` table (name + iata_code);
   `trip_segments.carrier_id` links flights. Flight form asks for flight
   number only; enrichment builds FlightAware ident as IATA+number.
-  Manage at `public/flights/carriers.php`.
+  Manage under Settings → Site catalogs (`/settings/site.php`); shared site-wide catalog.
 - **Auto-import creates the hotel stay / trip segments directly + notifies**,
   rather than a pending-approval queue the user has to click through. The
   original "We found a trip... Confirm?" flow from the pasted spec is more

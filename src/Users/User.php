@@ -16,6 +16,7 @@ final class User
         public readonly string $timezone,
         public readonly bool $isActive,
         public readonly bool $isAdmin = false,
+        public readonly bool $isSystem = false,
     ) {
     }
 
@@ -34,6 +35,7 @@ final class User
             timezone: (string) ($row['timezone'] ?? 'America/Chicago'),
             isActive: (bool) $row['is_active'],
             isAdmin: (bool) ($row['is_admin'] ?? false),
+            isSystem: (bool) ($row['is_system'] ?? false),
         );
     }
 }

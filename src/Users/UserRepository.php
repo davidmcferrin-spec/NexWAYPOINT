@@ -191,11 +191,20 @@ final class UserRepository
     }
 
     /**
+     * Active users for teammate lists / sharing. Excludes isolated system accounts
+     * (seeded admin) unless $includeSystem is true.
+     *
      * @return User[]
      */
-    public function findAllActive(): array
+    public function findAllActive(bool $includeSystem = false): array
     {
-        $rows = $this->db->fetchAll('SELECT * FROM users WHERE is_active = 1 ORDER BY display_name');
+        if ($includeSystem || !$this->db->columnExists('users', 'is_system')) {
+            $rows = $this->db->fetchAll('SELECT * FROM users WHERE is_active = 1 ORDER BY display_name');
+        } else {
+            $rows = $this->db->fetchAll(
+                'SELECT * FROM users WHERE is_active = 1 AND is_system = 0 ORDER BY display_name'
+            );
+        }
         return array_map(static fn (array $r) => User::fromRow($r), $rows);
     }
 
@@ -208,6 +217,19 @@ final class UserRepository
         return array_map(static fn (array $r) => User::fromRow($r), $rows);
     }
 
+    /**
+     * Users that belong on the org chart (active, non-system).
+     *
+     * @return User[]
+     */
+    public function findOrgMembers(): array
+    {
+        return array_values(array_filter(
+            $this->findAllActive(false),
+            static fn (User $u) => !$u->isSystem
+        ));
+    }
+
     public function create(
         string $username,
         string $email,
@@ -217,6 +239,7 @@ final class UserRepository
         ?int $managerId,
         ?int $actorUserId = null,
         bool $isAdmin = false,
+        bool $isSystem = false,
     ): User {
         // role is legacy; UI no longer sets it. Keep column filled for older code paths.
         if (!in_array($role, ['manager', 'peer', 'subordinate'], true)) {
@@ -227,41 +250,46 @@ final class UserRepository
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             throw new \InvalidArgumentException('A valid email address is required.');
         }
+
+        // System accounts stay outside the reporting chart.
+        if ($isSystem) {
+            $managerId = null;
+        }
         $this->assertValidManager(null, $managerId);
 
         $hash = password_hash($plainPassword, PASSWORD_DEFAULT);
 
+        $cols = ['username', 'email', 'password_hash', 'display_name', 'role', 'manager_id'];
+        $vals = [':username', ':email', ':hash', ':display_name', ':role', ':manager_id'];
+        $params = [
+            'username' => $username,
+            'email' => $email,
+            'hash' => $hash,
+            'display_name' => $displayName,
+            'role' => $role,
+            'manager_id' => $managerId,
+        ];
         if ($this->db->columnExists('users', 'is_admin')) {
-            $this->db->execute(
-                'INSERT INTO users (username, email, password_hash, display_name, role, manager_id, is_admin)
-                 VALUES (:username, :email, :hash, :display_name, :role, :manager_id, :is_admin)',
-                [
-                    'username' => $username,
-                    'email' => $email,
-                    'hash' => $hash,
-                    'display_name' => $displayName,
-                    'role' => $role,
-                    'manager_id' => $managerId,
-                    'is_admin' => $isAdmin ? 1 : 0,
-                ]
-            );
-        } else {
-            $this->db->execute(
-                'INSERT INTO users (username, email, password_hash, display_name, role, manager_id)
-                 VALUES (:username, :email, :hash, :display_name, :role, :manager_id)',
-                [
-                    'username' => $username,
-                    'email' => $email,
-                    'hash' => $hash,
-                    'display_name' => $displayName,
-                    'role' => $role,
-                    'manager_id' => $managerId,
-                ]
-            );
+            $cols[] = 'is_admin';
+            $vals[] = ':is_admin';
+            $params['is_admin'] = $isAdmin ? 1 : 0;
+        }
+        if ($this->db->columnExists('users', 'is_system')) {
+            $cols[] = 'is_system';
+            $vals[] = ':is_system';
+            $params['is_system'] = $isSystem ? 1 : 0;
         }
 
+        $this->db->execute(
+            'INSERT INTO users (' . implode(', ', $cols) . ') VALUES (' . implode(', ', $vals) . ')',
+            $params
+        );
+
         $id = $this->db->lastInsertId();
-        $this->db->audit($actorUserId, 'create', 'users', $id, ['username' => $username]);
+        $this->db->audit($actorUserId, 'create', 'users', $id, [
+            'username' => $username,
+            'is_system' => $isSystem,
+        ]);
         $this->logger->info('User created', ['id' => $id, 'username' => $username]);
 
         if ($this->db->tableExists('user_emails')) {
@@ -286,31 +314,43 @@ final class UserRepository
         bool $isAdmin,
         ?int $actorUserId = null,
     ): User {
+        $existing = $this->find($userId);
+        if ($existing === null) {
+            throw new \InvalidArgumentException('User not found.');
+        }
+        if ($existing->isSystem) {
+            $managerId = null;
+            // System account always keeps site-admin; cannot be deactivated via org UI accidentally
+            // still allow isActive toggle for lockout, but keep isAdmin true.
+            $isAdmin = true;
+        }
         $this->assertValidManager($userId, $managerId);
 
+        $sets = [
+            'display_name = :d',
+            'manager_id = :m',
+            'is_active = :a',
+            'updated_at = CURRENT_TIMESTAMP',
+        ];
+        $params = [
+            'd' => trim($displayName),
+            'm' => $managerId,
+            'a' => $isActive ? 1 : 0,
+            'id' => $userId,
+        ];
         if ($this->db->columnExists('users', 'is_admin')) {
-            $this->db->execute(
-                'UPDATE users SET display_name = :d, manager_id = :m, is_active = :a, is_admin = :admin,
-                 updated_at = CURRENT_TIMESTAMP WHERE id = :id',
-                [
-                    'd' => trim($displayName),
-                    'm' => $managerId,
-                    'a' => $isActive ? 1 : 0,
-                    'admin' => $isAdmin ? 1 : 0,
-                    'id' => $userId,
-                ]
-            );
-        } else {
-            $this->db->execute(
-                'UPDATE users SET display_name = :d, manager_id = :m, is_active = :a,
-                 updated_at = CURRENT_TIMESTAMP WHERE id = :id',
-                [
-                    'd' => trim($displayName),
-                    'm' => $managerId,
-                    'a' => $isActive ? 1 : 0,
-                    'id' => $userId,
-                ]
-            );
+            $sets[] = 'is_admin = :admin';
+            $params['admin'] = $isAdmin ? 1 : 0;
+        }
+
+        $this->db->execute(
+            'UPDATE users SET ' . implode(', ', $sets) . ' WHERE id = :id',
+            $params
+        );
+        if ($existing->isSystem && $this->db->tableExists('user_dotted_managers')) {
+            $this->db->execute('DELETE FROM user_dotted_managers WHERE user_id = :uid OR manager_id = :uid', [
+                'uid' => $userId,
+            ]);
         }
         $this->db->audit($actorUserId, 'update', 'users', $userId, [
             'display_name' => $displayName,
@@ -402,8 +442,18 @@ final class UserRepository
         if ($user === null) {
             throw new \InvalidArgumentException('User not found.');
         }
+        if ($user->isSystem) {
+            throw new \InvalidArgumentException('The system admin account cannot have dotted-line managers.');
+        }
         if ($user->managerId !== null && isset($clean[$user->managerId])) {
             unset($clean[$user->managerId]); // solid line already covers this
+        }
+
+        foreach ($clean as $mid) {
+            $mgr = $this->find($mid);
+            if ($mgr !== null && $mgr->isSystem) {
+                unset($clean[$mid]);
+            }
         }
 
         $this->db->execute('DELETE FROM user_dotted_managers WHERE user_id = :uid', ['uid' => $userId]);
@@ -456,6 +506,9 @@ final class UserRepository
         $manager = $this->find($managerId);
         if ($manager === null || !$manager->isActive) {
             throw new \InvalidArgumentException('Selected manager was not found (or is inactive).');
+        }
+        if ($manager->isSystem) {
+            throw new \InvalidArgumentException('The system admin account is isolated and cannot be a reporting manager.');
         }
         // Prevent cycles: walk up from proposed manager; must not hit userId.
         if ($userId !== null) {

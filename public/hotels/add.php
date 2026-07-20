@@ -8,6 +8,7 @@ use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStay;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Hotels\OfficeVenueRepository;
 use NexWaypoint\Users\UserRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
 
@@ -19,7 +20,12 @@ $stayRepo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
 $userRepo = new UserRepository($app['db'], $app['logger']);
 $blockRepo = new VisibilityBlockRepository($app['db']);
 $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect();
-$walkToOfficeVenues = $propertyRepo->walkToOfficeVenuesForUser($user->id);
+$walkToOfficeVenues = array_values(array_unique(array_merge(
+    (new OfficeVenueRepository($app['db'], $app['logger']))->namesForSelect(),
+    $propertyRepo->walkToOfficeVenuesForUser($user->id),
+)));
+natcasesort($walkToOfficeVenues);
+$walkToOfficeVenues = array_values($walkToOfficeVenues);
 
 $existingProperties = $propertyRepo->findForUser($user->id);
 $otherUsers = array_values(array_filter(

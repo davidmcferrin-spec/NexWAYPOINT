@@ -99,7 +99,7 @@ if ($countryValue === '' && $property === null && $_SERVER['REQUEST_METHOD'] !==
     <input type="text" name="<?= htmlspecialchars($name('walk_to_office_notes'), ENT_QUOTES) ?>"
         list="<?= htmlspecialchars($name('walk_to_office_venues'), ENT_QUOTES) ?>"
         autocomplete="off"
-        placeholder="e.g. NewsNation bureau — type or pick a previous location"
+        placeholder="e.g. NewsNation bureau — type or pick from Site settings"
         value="<?= htmlspecialchars($val($property, 'walkToOfficeNotes', 'walk_to_office_notes'), ENT_QUOTES) ?>">
 </label>
 <?php
@@ -111,7 +111,7 @@ $walkToOfficeVenues = $walkToOfficeVenues ?? [];
         <option value="<?= htmlspecialchars($venue, ENT_QUOTES) ?>"></option>
     <?php endforeach; ?>
 </datalist>
-<p class="hint">Type a new office/venue or choose a previous one from the suggestions. Filling this in also marks the property as walkable.</p>
+<p class="hint">Pick a site office/venue or type a one-off name. Filling this in also marks the property as walkable. Admins manage the catalog under Settings → Site catalogs.</p>
 <label>Desk notes
     <input type="text" name="<?= htmlspecialchars($name('desk_notes'), ENT_QUOTES) ?>"
         value="<?= htmlspecialchars($val($property, 'deskNotes', 'desk_notes'), ENT_QUOTES) ?>">

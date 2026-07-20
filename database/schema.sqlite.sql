@@ -18,6 +18,7 @@ CREATE TABLE users (
     role            TEXT NOT NULL DEFAULT 'subordinate' CHECK (role IN ('manager','peer','subordinate')),
     manager_id      INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
     is_admin        INTEGER NOT NULL DEFAULT 0,
+    is_system       INTEGER NOT NULL DEFAULT 0,
     timezone        TEXT NOT NULL DEFAULT 'America/Chicago',
     is_active       INTEGER NOT NULL DEFAULT 1,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -116,6 +117,22 @@ INSERT INTO hotel_brands (name, sort_order, is_active) VALUES
     ('Hyatt', 40, 1),
     ('Choice Hotels', 50, 1);
 
+CREATE TABLE office_venues (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    address_line1   TEXT NULL,
+    city            TEXT NULL,
+    state_region    TEXT NULL,
+    postal_code     TEXT NULL,
+    country         TEXT NOT NULL DEFAULT 'USA',
+    latitude        REAL NULL,
+    longitude       REAL NULL,
+    notes           TEXT NULL,
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE hotel_stays (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -176,7 +193,7 @@ CREATE TABLE carriers (
     carrier_type    TEXT NOT NULL DEFAULT 'airline' CHECK (carrier_type IN ('airline','rail')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (user_id, iata_code)
+    UNIQUE (carrier_type, iata_code)
 );
 CREATE INDEX idx_carriers_user ON carriers(user_id);
 CREATE INDEX idx_carriers_name ON carriers(name);

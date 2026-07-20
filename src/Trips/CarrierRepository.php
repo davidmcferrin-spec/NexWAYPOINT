@@ -7,6 +7,10 @@ namespace NexWaypoint\Trips;
 use NexWaypoint\Core\Database;
 use NexWaypoint\Core\Logger;
 
+/**
+ * Site-wide airline / rail-operator catalog.
+ * user_id on rows is the creating user (audit), not ownership — everyone shares the list.
+ */
 final class CarrierRepository
 {
     public function __construct(
@@ -24,49 +28,61 @@ final class CarrierRepository
     /**
      * @return Carrier[]
      */
-    public function findForUser(int $userId, string $carrierType = Carrier::TYPE_AIRLINE): array
+    public function findByType(string $carrierType = Carrier::TYPE_AIRLINE): array
     {
         if ($this->hasCarrierTypeColumn()) {
             $rows = $this->db->fetchAll(
-                'SELECT * FROM carriers WHERE user_id = :user_id AND carrier_type = :type ORDER BY name ASC',
-                ['user_id' => $userId, 'type' => $carrierType]
+                'SELECT * FROM carriers WHERE carrier_type = :type ORDER BY name ASC',
+                ['type' => $carrierType]
             );
         } else {
-            // Pre-migration DBs: everything is treated as airline.
             if ($carrierType !== Carrier::TYPE_AIRLINE) {
                 return [];
             }
-            $rows = $this->db->fetchAll(
-                'SELECT * FROM carriers WHERE user_id = :user_id ORDER BY name ASC',
-                ['user_id' => $userId]
-            );
+            $rows = $this->db->fetchAll('SELECT * FROM carriers ORDER BY name ASC');
         }
         return array_map(static fn (array $row) => Carrier::fromRow($row), $rows);
     }
 
-    public function findByName(int $userId, string $name, ?string $carrierType = null): ?Carrier
+    /**
+     * @deprecated Use findByType() — carriers are site-wide.
+     * @return Carrier[]
+     */
+    public function findForUser(int $userId, string $carrierType = Carrier::TYPE_AIRLINE): array
+    {
+        unset($userId);
+        return $this->findByType($carrierType);
+    }
+
+    public function findByName(string $name, ?string $carrierType = null): ?Carrier
     {
         if ($carrierType !== null && $this->hasCarrierTypeColumn()) {
             $row = $this->db->fetchOne(
-                'SELECT * FROM carriers WHERE user_id = :user_id AND LOWER(name) = LOWER(:name)
-                 AND carrier_type = :type LIMIT 1',
-                ['user_id' => $userId, 'name' => trim($name), 'type' => $carrierType]
+                'SELECT * FROM carriers WHERE LOWER(name) = LOWER(:name) AND carrier_type = :type LIMIT 1',
+                ['name' => trim($name), 'type' => $carrierType]
             );
         } else {
             $row = $this->db->fetchOne(
-                'SELECT * FROM carriers WHERE user_id = :user_id AND LOWER(name) = LOWER(:name) LIMIT 1',
-                ['user_id' => $userId, 'name' => trim($name)]
+                'SELECT * FROM carriers WHERE LOWER(name) = LOWER(:name) LIMIT 1',
+                ['name' => trim($name)]
             );
         }
         return $row === null ? null : Carrier::fromRow($row);
     }
 
-    public function findByIata(int $userId, string $iata): ?Carrier
+    public function findByIata(string $iata, ?string $carrierType = null): ?Carrier
     {
-        $row = $this->db->fetchOne(
-            'SELECT * FROM carriers WHERE user_id = :user_id AND UPPER(iata_code) = UPPER(:iata) LIMIT 1',
-            ['user_id' => $userId, 'iata' => trim($iata)]
-        );
+        if ($carrierType !== null && $this->hasCarrierTypeColumn()) {
+            $row = $this->db->fetchOne(
+                'SELECT * FROM carriers WHERE UPPER(iata_code) = UPPER(:iata) AND carrier_type = :type LIMIT 1',
+                ['iata' => trim($iata), 'type' => $carrierType]
+            );
+        } else {
+            $row = $this->db->fetchOne(
+                'SELECT * FROM carriers WHERE UPPER(iata_code) = UPPER(:iata) LIMIT 1',
+                ['iata' => trim($iata)]
+            );
+        }
         return $row === null ? null : Carrier::fromRow($row);
     }
 
@@ -74,22 +90,52 @@ final class CarrierRepository
      * Find existing carrier by IATA or create one. Used by mail import.
      */
     public function findOrCreateByIata(
-        int $userId,
+        int $createdByUserId,
         string $iata,
         string $name,
         ?int $actorUserId = null,
         string $carrierType = Carrier::TYPE_AIRLINE,
     ): Carrier {
         $iata = strtoupper(trim($iata));
-        $existing = $this->findByIata($userId, $iata);
+        $existing = $this->findByIata($iata, $carrierType);
         if ($existing !== null) {
             return $existing;
         }
         return $this->create(new Carrier(
             id: null,
-            userId: $userId,
+            userId: $createdByUserId,
             name: trim($name) !== '' ? trim($name) : $iata,
             iataCode: $iata,
+            carrierType: $carrierType,
+        ), $actorUserId);
+    }
+
+    /**
+     * Find or create by name (rail operators often lack a stable IATA).
+     */
+    public function findOrCreateByName(
+        int $createdByUserId,
+        string $name,
+        ?string $iataCode = null,
+        ?int $actorUserId = null,
+        string $carrierType = Carrier::TYPE_RAIL,
+    ): Carrier {
+        $name = trim($name);
+        $existing = $this->findByName($name, $carrierType);
+        if ($existing !== null) {
+            return $existing;
+        }
+        if ($iataCode !== null && trim($iataCode) !== '') {
+            $byIata = $this->findByIata($iataCode, $carrierType);
+            if ($byIata !== null) {
+                return $byIata;
+            }
+        }
+        return $this->create(new Carrier(
+            id: null,
+            userId: $createdByUserId,
+            name: $name,
+            iataCode: $iataCode,
             carrierType: $carrierType,
         ), $actorUserId);
     }
@@ -99,6 +145,7 @@ final class CarrierRepository
         $requireIata = $carrier->carrierType === Carrier::TYPE_AIRLINE;
         $this->validate($carrier, requireIata: $requireIata);
         $this->assertUniqueIata($carrier);
+        $this->assertUniqueName($carrier);
 
         if ($this->hasCarrierTypeColumn()) {
             $this->db->execute(
@@ -128,7 +175,7 @@ final class CarrierRepository
         ]);
         $this->logger->info('Carrier created', [
             'id' => $id,
-            'user_id' => $carrier->userId,
+            'created_by' => $carrier->userId,
             'carrier_type' => $carrier->carrierType,
         ]);
 
@@ -147,6 +194,7 @@ final class CarrierRepository
         $requireIata = $carrier->carrierType === Carrier::TYPE_AIRLINE;
         $this->validate($carrier, requireIata: $requireIata);
         $this->assertUniqueIata($carrier);
+        $this->assertUniqueName($carrier);
 
         if ($this->hasCarrierTypeColumn()) {
             $this->db->execute(
@@ -209,10 +257,20 @@ final class CarrierRepository
         if ($carrier->iataCode === null || trim($carrier->iataCode) === '') {
             return;
         }
-        $existing = $this->findByIata($carrier->userId, $carrier->iataCode);
+        $existing = $this->findByIata($carrier->iataCode, $carrier->carrierType);
         if ($existing !== null && $existing->id !== $carrier->id) {
             throw new \InvalidArgumentException(
-                "You already have a carrier with IATA {$carrier->iataCode} ({$existing->name})."
+                "A {$carrier->carrierType} with IATA {$carrier->iataCode} already exists ({$existing->name})."
+            );
+        }
+    }
+
+    private function assertUniqueName(Carrier $carrier): void
+    {
+        $existing = $this->findByName($carrier->name, $carrier->carrierType);
+        if ($existing !== null && $existing->id !== $carrier->id) {
+            throw new \InvalidArgumentException(
+                "A {$carrier->carrierType} named '{$carrier->name}' already exists."
             );
         }
     }

@@ -3,7 +3,11 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelBrandRepository;
+use NexWaypoint\Hotels\OfficeVenueRepository;
+use NexWaypoint\Trips\Carrier;
+use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
@@ -16,27 +20,167 @@ if (!$userRepo->isAdmin($user)) {
     exit;
 }
 
-$repo = new HotelBrandRepository($app['db'], $app['logger']);
+$settingsSection = 'site';
+
+$brandRepo = new HotelBrandRepository($app['db'], $app['logger']);
+$venueRepo = new OfficeVenueRepository($app['db'], $app['logger']);
+$carrierRepo = new CarrierRepository($app['db'], $app['logger']);
+$geocoder = new Geocoder($app['logger']);
+
 $errors = [];
 $message = null;
-$schemaWarning = null;
+$brandWarning = !$brandRepo->tableReady()
+    ? 'Database is missing hotel_brands. On the server run: php scripts/migrate.php'
+    : null;
+$venueWarning = !$venueRepo->tableReady()
+    ? 'Database is missing office_venues. On the server run: php scripts/migrate.php'
+    : null;
+$carrierWarning = !$app['db']->tableExists('carriers')
+    ? 'Database is missing carriers. On the server run: php scripts/migrate.php'
+    : null;
 
-if (!$repo->tableReady()) {
-    $schemaWarning = 'Database is missing hotel_brands. On the server run: php scripts/migrate.php';
-}
+$editVenueId = isset($_GET['venue_id']) ? (int) $_GET['venue_id'] : 0;
+$editingVenue = $editVenueId > 0 ? $venueRepo->find($editVenueId) : null;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaWarning === null) {
+$nullable = static function (mixed $v): ?string {
+    $v = trim((string) ($v ?? ''));
+    return $v === '' ? null : $v;
+};
+
+$geocodeVenue = static function (
+    ?string $addressLine1,
+    ?string $city,
+    ?string $stateRegion,
+    ?string $postalCode,
+    ?string $country,
+) use ($geocoder): array {
+    $coords = null;
+    if ($addressLine1 !== null || $city !== null) {
+        $coords = $geocoder->geocode($addressLine1, $city, $stateRegion, $postalCode, $country);
+    }
+    if ($coords === null && $city !== null) {
+        $coords = $geocoder->geocodeCity($city, $stateRegion, $country);
+    }
+    return [$coords['lat'] ?? null, $coords['lon'] ?? null];
+};
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $errors[] = 'Your session expired. Please resubmit the form.';
     } else {
         $action = (string) ($_POST['action'] ?? '');
         try {
-            if ($action === 'add') {
-                $created = $repo->create((string) ($_POST['name'] ?? ''), $user->id);
+            if ($action === 'add_brand') {
+                if ($brandWarning !== null) {
+                    throw new RuntimeException($brandWarning);
+                }
+                $created = $brandRepo->create((string) ($_POST['name'] ?? ''), $user->id);
                 $message = "Added brand {$created->name}.";
-            } elseif ($action === 'remove') {
-                $repo->delete((int) ($_POST['brand_id'] ?? 0), $user->id);
+            } elseif ($action === 'remove_brand') {
+                if ($brandWarning !== null) {
+                    throw new RuntimeException($brandWarning);
+                }
+                $brandRepo->delete((int) ($_POST['brand_id'] ?? 0), $user->id);
                 $message = 'Brand removed from the dropdown (existing properties keep their stored brand).';
+            } elseif ($action === 'add_venue' || ($action === 'update_venue' && $editingVenue !== null)) {
+                if ($venueWarning !== null) {
+                    throw new RuntimeException($venueWarning);
+                }
+                $a1 = $nullable($_POST['address_line1'] ?? null);
+                $city = $nullable($_POST['city'] ?? null);
+                $state = $nullable($_POST['state_region'] ?? null);
+                $postal = $nullable($_POST['postal_code'] ?? null);
+                $country = $nullable($_POST['country'] ?? null) ?? 'USA';
+
+                if ($action === 'add_venue') {
+                    [$lat, $lon] = $geocodeVenue($a1, $city, $state, $postal, $country);
+                    $created = $venueRepo->create(
+                        (string) ($_POST['name'] ?? ''),
+                        $a1,
+                        $city,
+                        $state,
+                        $postal,
+                        $country,
+                        $nullable($_POST['notes'] ?? null),
+                        $lat,
+                        $lon,
+                        $user->id,
+                    );
+                    $geoNote = ($lat !== null) ? ' Geocoded for the map.' : ' Add a city/address to place it on the map.';
+                    $message = "Added office/venue {$created->name}." . $geoNote;
+                } else {
+                    $addressChanged = $a1 !== $editingVenue->addressLine1
+                        || $city !== $editingVenue->city
+                        || $state !== $editingVenue->stateRegion
+                        || $postal !== $editingVenue->postalCode
+                        || $country !== $editingVenue->country;
+
+                    $lat = $editingVenue->latitude;
+                    $lon = $editingVenue->longitude;
+                    if ($addressChanged || $lat === null || $lon === null) {
+                        [$lat, $lon] = $geocodeVenue($a1, $city, $state, $postal, $country);
+                    }
+
+                    $editingVenue = $venueRepo->update(
+                        $editingVenue->id,
+                        (string) ($_POST['name'] ?? ''),
+                        $a1,
+                        $city,
+                        $state,
+                        $postal,
+                        $country,
+                        $nullable($_POST['notes'] ?? null),
+                        isset($_POST['is_active']),
+                        $lat,
+                        $lon,
+                        $user->id,
+                    );
+                    $message = 'Office / venue updated.';
+                }
+            } elseif ($action === 'remove_venue') {
+                if ($venueWarning !== null) {
+                    throw new RuntimeException($venueWarning);
+                }
+                $venueRepo->deactivate((int) ($_POST['venue_id'] ?? 0), $user->id);
+                $message = 'Office / venue deactivated.';
+                if ($editingVenue !== null && $editingVenue->id === (int) ($_POST['venue_id'] ?? 0)) {
+                    $editingVenue = null;
+                }
+            } elseif ($action === 'save_carrier') {
+                if ($carrierWarning !== null) {
+                    throw new RuntimeException($carrierWarning);
+                }
+                $type = (string) ($_POST['carrier_type'] ?? Carrier::TYPE_AIRLINE);
+                if (!in_array($type, [Carrier::TYPE_AIRLINE, Carrier::TYPE_RAIL], true)) {
+                    throw new InvalidArgumentException('Invalid carrier type.');
+                }
+                $name = trim((string) ($_POST['name'] ?? ''));
+                $iata = strtoupper(trim((string) ($_POST['iata_code'] ?? '')));
+                $id = (int) ($_POST['id'] ?? 0);
+                $payload = new Carrier(
+                    id: $id > 0 ? $id : null,
+                    userId: $user->id,
+                    name: $name,
+                    iataCode: $iata !== '' ? $iata : null,
+                    carrierType: $type,
+                );
+                if ($id > 0) {
+                    $existing = $carrierRepo->find($id);
+                    if ($existing === null || $existing->carrierType !== $type) {
+                        throw new InvalidArgumentException('Carrier not found.');
+                    }
+                    $carrierRepo->update(new Carrier(
+                        id: $id,
+                        userId: $existing->userId,
+                        name: $name,
+                        iataCode: $iata !== '' ? $iata : null,
+                        carrierType: $type,
+                    ), $user->id);
+                    $message = $type === Carrier::TYPE_RAIL ? 'Rail operator updated.' : 'Carrier updated.';
+                } else {
+                    $carrierRepo->create($payload, $user->id);
+                    $message = $type === Carrier::TYPE_RAIL ? 'Rail operator added.' : 'Carrier added.';
+                }
             }
         } catch (Throwable $e) {
             $errors[] = $e->getMessage();
@@ -44,25 +188,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaWarning === null) {
     }
 }
 
-$brands = $schemaWarning === null ? $repo->findActive() : [];
+$brands = $brandWarning === null ? $brandRepo->findActive() : [];
+$venues = $venueWarning === null ? $venueRepo->findAll() : [];
+$airlines = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_AIRLINE) : [];
+$rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL) : [];
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>NexWAYPOINT &middot; Site settings</title>
+    <title>NexWAYPOINT &middot; Site catalogs</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
-    <h1>Site settings</h1>
-    <p>Shared options used across the site (not per-user).</p>
+    <?php require __DIR__ . '/_settings_nav.php'; ?>
+    <h1>Site catalogs</h1>
+    <p>Shared lists used across the site (carriers, venues, brands).</p>
 
-    <?php if ($schemaWarning !== null): ?>
-        <p class="alert alert-error"><?= htmlspecialchars($schemaWarning, ENT_QUOTES) ?></p>
-    <?php endif; ?>
     <?php foreach ($errors as $err): ?>
         <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
     <?php endforeach; ?>
@@ -70,20 +215,193 @@ $brands = $schemaWarning === null ? $repo->findActive() : [];
         <p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p>
     <?php endif; ?>
 
-    <div class="card">
-        <h3>Hotel brands</h3>
-        <p>These appear in the Brand dropdown when adding or editing a hotel property. Seeded defaults: Marriott, Hilton, IHG, Hyatt, Choice Hotels.</p>
+    <div class="card" id="airline-carriers">
+        <div class="card-header-row">
+            <h3>Airline carriers</h3>
+            <?php if ($carrierWarning === null): ?>
+                <button type="button" class="primary" data-open-modal="carrier-modal"
+                    data-carrier-type="airline" data-title="Add carrier">Add carrier</button>
+            <?php endif; ?>
+        </div>
+        <p class="hint">Shared IATA list for flight entry and mail import.</p>
+        <?php if ($carrierWarning !== null): ?>
+            <p class="alert alert-error"><?= htmlspecialchars($carrierWarning, ENT_QUOTES) ?></p>
+        <?php elseif ($airlines === []): ?>
+            <p class="empty-state">No airline carriers yet.</p>
+        <?php else: ?>
+            <table>
+                <thead><tr><th>Name</th><th>IATA</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($airlines as $c): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($c->name, ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($c->iataCode ?? '—', ENT_QUOTES) ?></td>
+                        <td>
+                            <button type="button" class="linkish" data-open-modal="carrier-modal"
+                                data-carrier-type="airline"
+                                data-title="Edit carrier"
+                                data-id="<?= (int) $c->id ?>"
+                                data-name="<?= htmlspecialchars($c->name, ENT_QUOTES) ?>"
+                                data-iata="<?= htmlspecialchars($c->iataCode ?? '', ENT_QUOTES) ?>">Edit</button>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
 
-        <?php if ($brands === []): ?>
-            <p class="empty-state">No active brands.</p>
+    <div class="card" id="rail-operators">
+        <div class="card-header-row">
+            <h3>Rail operators</h3>
+            <?php if ($carrierWarning === null): ?>
+                <button type="button" class="primary" data-open-modal="carrier-modal"
+                    data-carrier-type="rail" data-title="Add rail operator">Add operator</button>
+            <?php endif; ?>
+        </div>
+        <p class="hint">Shared list for train segments (e.g. Amtrak). Code optional.</p>
+        <?php if ($carrierWarning !== null): ?>
+            <p class="alert alert-error"><?= htmlspecialchars($carrierWarning, ENT_QUOTES) ?></p>
+        <?php elseif ($rails === []): ?>
+            <p class="empty-state">No rail operators yet.</p>
+        <?php else: ?>
+            <table>
+                <thead><tr><th>Name</th><th>Code</th><th></th></tr></thead>
+                <tbody>
+                <?php foreach ($rails as $c): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($c->name, ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($c->iataCode ?? '—', ENT_QUOTES) ?></td>
+                        <td>
+                            <button type="button" class="linkish" data-open-modal="carrier-modal"
+                                data-carrier-type="rail"
+                                data-title="Edit rail operator"
+                                data-id="<?= (int) $c->id ?>"
+                                data-name="<?= htmlspecialchars($c->name, ENT_QUOTES) ?>"
+                                data-iata="<?= htmlspecialchars($c->iataCode ?? '', ENT_QUOTES) ?>">Edit</button>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
+
+    <div class="card" id="offices-venues">
+        <div class="card-header-row">
+            <h3>Offices &amp; venues</h3>
+            <?php if ($venueWarning === null && $editingVenue === null): ?>
+                <button type="button" class="primary" data-open-modal="venue-add-modal">Add venue</button>
+            <?php endif; ?>
+        </div>
+        <p class="hint">
+            Work locations for the walk-to field and
+            <a href="/hotels/map.php">hotel map</a> pins. Edit opens a full form (address + geocode).
+        </p>
+
+        <?php if ($venueWarning !== null): ?>
+            <p class="alert alert-error"><?= htmlspecialchars($venueWarning, ENT_QUOTES) ?></p>
+        <?php elseif ($venues === []): ?>
+            <p class="empty-state">No offices/venues yet.</p>
         <?php else: ?>
             <table>
                 <thead>
                     <tr>
-                        <th>Brand</th>
+                        <th>Name</th>
+                        <th>Address</th>
+                        <th>Map</th>
+                        <th>Active</th>
                         <th></th>
                     </tr>
                 </thead>
+                <tbody>
+                <?php foreach ($venues as $venue): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($venue->name, ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($venue->placeLabel() !== '' ? $venue->placeLabel() : '—', ENT_QUOTES) ?></td>
+                        <td><?= ($venue->latitude !== null && $venue->longitude !== null) ? 'yes' : 'no' ?></td>
+                        <td><?= $venue->isActive ? 'yes' : 'no' ?></td>
+                        <td>
+                            <a href="/settings/site.php?venue_id=<?= (int) $venue->id ?>">Edit</a>
+                            <?php if ($venue->isActive && $venue->id !== null): ?>
+                                <form method="post" style="display:inline">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+                                    <input type="hidden" name="action" value="remove_venue">
+                                    <input type="hidden" name="venue_id" value="<?= (int) $venue->id ?>">
+                                    <button type="submit" class="danger">Deactivate</button>
+                                </form>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+
+        <?php if ($editingVenue !== null): ?>
+        <form method="post" class="stack" style="margin-top:1.25rem">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="update_venue">
+            <h4>Edit <?= htmlspecialchars($editingVenue->name, ENT_QUOTES) ?></h4>
+            <label>Name
+                <input type="text" name="name" required maxlength="150"
+                    value="<?= htmlspecialchars($editingVenue->name, ENT_QUOTES) ?>">
+            </label>
+            <label>Street address
+                <input type="text" name="address_line1" maxlength="255"
+                    value="<?= htmlspecialchars($editingVenue->addressLine1 ?? '', ENT_QUOTES) ?>">
+            </label>
+            <div class="checkbox-grid">
+                <label>City
+                    <input type="text" name="city" maxlength="100"
+                        value="<?= htmlspecialchars($editingVenue->city ?? '', ENT_QUOTES) ?>">
+                </label>
+                <label>State / region
+                    <input type="text" name="state_region" maxlength="100"
+                        value="<?= htmlspecialchars($editingVenue->stateRegion ?? '', ENT_QUOTES) ?>">
+                </label>
+                <label>Postal code
+                    <input type="text" name="postal_code" maxlength="20"
+                        value="<?= htmlspecialchars($editingVenue->postalCode ?? '', ENT_QUOTES) ?>">
+                </label>
+                <label>Country
+                    <input type="text" name="country" maxlength="100"
+                        value="<?= htmlspecialchars($editingVenue->country, ENT_QUOTES) ?>">
+                </label>
+            </div>
+            <label>Notes
+                <input type="text" name="notes" maxlength="255"
+                    value="<?= htmlspecialchars($editingVenue->notes ?? '', ENT_QUOTES) ?>">
+            </label>
+            <label>
+                <input type="checkbox" name="is_active" value="1" <?= $editingVenue->isActive ? 'checked' : '' ?>>
+                Active (show in suggestions and on map)
+            </label>
+            <p class="hint">Saving re-geocodes when the address changes.</p>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Save venue</button>
+                <a href="/settings/site.php#offices-venues">Cancel</a>
+            </div>
+        </form>
+        <?php endif; ?>
+    </div>
+
+    <div class="card" id="hotel-brands">
+        <div class="card-header-row">
+            <h3>Hotel brands</h3>
+            <?php if ($brandWarning === null): ?>
+                <button type="button" class="primary" data-open-modal="brand-modal">Add brand</button>
+            <?php endif; ?>
+        </div>
+        <p class="hint">Brand dropdown for hotel properties. Defaults: Marriott, Hilton, IHG, Hyatt, Choice Hotels.</p>
+
+        <?php if ($brandWarning !== null): ?>
+            <p class="alert alert-error"><?= htmlspecialchars($brandWarning, ENT_QUOTES) ?></p>
+        <?php elseif ($brands === []): ?>
+            <p class="empty-state">No active brands.</p>
+        <?php else: ?>
+            <table>
+                <thead><tr><th>Brand</th><th></th></tr></thead>
                 <tbody>
                 <?php foreach ($brands as $brand): ?>
                     <tr>
@@ -92,7 +410,7 @@ $brands = $schemaWarning === null ? $repo->findActive() : [];
                             <?php if ($brand->id !== null): ?>
                             <form method="post" style="display:inline">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-                                <input type="hidden" name="action" value="remove">
+                                <input type="hidden" name="action" value="remove_brand">
                                 <input type="hidden" name="brand_id" value="<?= (int) $brand->id ?>">
                                 <button type="submit" class="danger">Remove</button>
                             </form>
@@ -103,18 +421,86 @@ $brands = $schemaWarning === null ? $repo->findActive() : [];
                 </tbody>
             </table>
         <?php endif; ?>
-
-        <?php if ($schemaWarning === null): ?>
-        <form method="post" class="stack" style="margin-top:1rem">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-            <input type="hidden" name="action" value="add">
-            <label>Add brand
-                <input type="text" name="name" required maxlength="100" placeholder="e.g. Wyndham">
-            </label>
-            <button type="submit" class="primary">Add brand</button>
-        </form>
-        <?php endif; ?>
     </div>
 </main>
+
+<div id="carrier-modal" class="modal-backdrop" hidden>
+    <div class="modal-panel" role="dialog" aria-labelledby="carrier-modal-title">
+        <h2 id="carrier-modal-title">Add carrier</h2>
+        <form method="post" class="stack" id="carrier-modal-form">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="save_carrier">
+            <input type="hidden" name="id" id="carrier-modal-id" value="0">
+            <input type="hidden" name="carrier_type" id="carrier-modal-type" value="airline">
+            <label>Name
+                <input type="text" name="name" id="carrier-modal-name" required maxlength="100">
+            </label>
+            <label><span id="carrier-modal-iata-label-text">IATA code</span>
+                <input type="text" name="iata_code" id="carrier-modal-iata" maxlength="3" style="text-transform:uppercase">
+            </label>
+            <p class="hint" id="carrier-modal-iata-hint">Required for airlines (FlightAware ident).</p>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Save</button>
+                <button type="button" data-close-modal>Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="brand-modal" class="modal-backdrop" hidden>
+    <div class="modal-panel" role="dialog" aria-labelledby="brand-modal-title">
+        <h2 id="brand-modal-title">Add brand</h2>
+        <form method="post" class="stack">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="add_brand">
+            <label>Brand name
+                <input type="text" name="name" required maxlength="100" placeholder="e.g. Wyndham">
+            </label>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Add brand</button>
+                <button type="button" data-close-modal>Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="venue-add-modal" class="modal-backdrop" hidden>
+    <div class="modal-panel" role="dialog" aria-labelledby="venue-add-title">
+        <h2 id="venue-add-title">Add office / venue</h2>
+        <form method="post" class="stack">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="add_venue">
+            <label>Name
+                <input type="text" name="name" required maxlength="150" placeholder="e.g. NewsNation bureau — Chicago">
+            </label>
+            <label>Street address
+                <input type="text" name="address_line1" maxlength="255">
+            </label>
+            <div class="checkbox-grid">
+                <label>City
+                    <input type="text" name="city" maxlength="100">
+                </label>
+                <label>State / region
+                    <input type="text" name="state_region" maxlength="100">
+                </label>
+                <label>Postal code
+                    <input type="text" name="postal_code" maxlength="20">
+                </label>
+                <label>Country
+                    <input type="text" name="country" maxlength="100" value="USA">
+                </label>
+            </div>
+            <label>Notes
+                <input type="text" name="notes" maxlength="255" placeholder="Optional">
+            </label>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Add venue</button>
+                <button type="button" data-close-modal>Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/assets/site-settings.js" defer></script>
 </body>
 </html>

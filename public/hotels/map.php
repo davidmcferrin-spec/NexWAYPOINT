@@ -4,14 +4,20 @@ declare(strict_types=1);
 
 use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\OfficeVenueRepository;
+use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 
 $propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
+$venueRepo = new OfficeVenueRepository($app['db'], $app['logger']);
 $geocoder = new Geocoder($app['logger']);
+$userRepo = new UserRepository($app['db'], $app['logger']);
+$canManageVenues = $userRepo->isAdmin($user);
 
 $properties = $propertyRepo->findForUser($user->id);
+$venues = $venueRepo->findActive();
 
 /** Cap live Nominatim lookups per page load (cache hits are free). */
 $maxLiveLookups = 8;
@@ -27,7 +33,6 @@ foreach ($properties as $property) {
 
     if ($lat === null || $lon === null) {
         $coords = null;
-        // Prefer street-level when we have an address and budget remains.
         if ($liveLookups < $maxLiveLookups
             && $property->addressLine1 !== null
             && trim($property->addressLine1) !== ''
@@ -50,8 +55,6 @@ foreach ($properties as $property) {
                 $property->stateRegion,
                 $property->country
             );
-            // City lookups are usually cache hits after the first; only count
-            // toward the budget when we still have room (geocoder self-throttles).
             if ($liveLookups < $maxLiveLookups) {
                 $liveLookups++;
             }
@@ -87,13 +90,69 @@ foreach ($properties as $property) {
         'url' => '/hotels/edit-property.php?id=' . (int) $property->id,
     ];
 
-    // view.php might use id= — check
     if ($lat !== null && $lon !== null) {
         $mapped[] = $row;
     } else {
         $unmapped[] = $row;
     }
 }
+
+$mappedVenues = [];
+$unmappedVenues = [];
+
+foreach ($venues as $venue) {
+    $lat = $venue->latitude;
+    $lon = $venue->longitude;
+    $approx = false;
+
+    if (($lat === null || $lon === null) && $venue->id !== null) {
+        $coords = null;
+        if ($liveLookups < $maxLiveLookups
+            && $venue->addressLine1 !== null
+            && trim($venue->addressLine1) !== ''
+        ) {
+            $coords = $geocoder->geocode(
+                $venue->addressLine1,
+                $venue->city,
+                $venue->stateRegion,
+                $venue->postalCode,
+                $venue->country
+            );
+            $liveLookups++;
+        }
+        if ($coords === null && $venue->city !== null && trim($venue->city) !== '') {
+            $coords = $geocoder->geocodeCity($venue->city, $venue->stateRegion, $venue->country);
+            if ($liveLookups < $maxLiveLookups) {
+                $liveLookups++;
+            }
+            $approx = true;
+        }
+        if ($coords !== null) {
+            $lat = $coords['lat'];
+            $lon = $coords['lon'];
+            $venueRepo->updateCoordinates((int) $venue->id, $lat, $lon, $user->id);
+        }
+    }
+
+    $row = [
+        'id' => (int) $venue->id,
+        'name' => $venue->name,
+        'place' => $venue->placeLabel(),
+        'notes' => $venue->notes,
+        'lat' => $lat,
+        'lon' => $lon,
+        'approx' => $approx && $venue->latitude === null,
+        'url' => $canManageVenues ? '/settings/site.php?venue_id=' . (int) $venue->id : null,
+    ];
+
+    if ($lat !== null && $lon !== null) {
+        $mappedVenues[] = $row;
+    } else {
+        $unmappedVenues[] = $row;
+    }
+}
+
+$hasAnything = $properties !== [] || $venues !== [];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -112,27 +171,61 @@ foreach ($properties as $property) {
 <main class="container map-page">
     <h1>Hotel map</h1>
     <p class="hint">
-        Your properties on OpenStreetMap.
-        Pins use saved coordinates when available; otherwise city/address is geocoded (cached) and saved back to the property.
-        <a href="/hotels/properties.php">List view</a>
+        Your hotels (circles) and site offices/venues (squares) on OpenStreetMap.
+        Pins use saved coordinates when available; otherwise address/city is geocoded (cached) and saved.
+        <a href="/hotels/properties.php">Hotel list</a>
+        <?php if ($canManageVenues): ?>
+            ·
+            <a href="/settings/site.php">Manage offices/venues</a>
+        <?php endif; ?>
     </p>
 
-    <?php if ($properties === []): ?>
-        <p class="empty-state">No hotel properties yet. <a href="/hotels/add.php">Log a stay</a> to create one.</p>
+    <?php if (!$hasAnything): ?>
+        <p class="empty-state">
+            Nothing to map yet.
+            <a href="/hotels/add.php">Log a stay</a>
+            or add an office/venue under Settings.
+        </p>
     <?php else: ?>
-        <div id="hotel-map" class="hotel-map" role="img" aria-label="Map of hotel properties"></div>
-        <p class="hint"><?= count($mapped) ?> plotted<?php if ($unmapped !== []): ?>, <?= count($unmapped) ?> without a location yet<?php endif; ?>.</p>
+        <div id="hotel-map" class="hotel-map" role="img" aria-label="Map of hotels and offices"></div>
+        <p class="hint">
+            <?= count($mapped) ?> hotel<?= count($mapped) === 1 ? '' : 's' ?>
+            · <?= count($mappedVenues) ?> office/venue<?= count($mappedVenues) === 1 ? '' : 's' ?>
+            <?php if ($unmapped !== [] || $unmappedVenues !== []): ?>
+                · <?= count($unmapped) + count($unmappedVenues) ?> without a location yet
+            <?php endif; ?>
+        </p>
+        <p class="hint map-legend">
+            <span class="map-legend-swatch map-legend-hotel"></span> Hotel
+            <span class="map-legend-swatch map-legend-venue"></span> Office / venue
+        </p>
 
-        <?php if ($unmapped !== []): ?>
+        <?php if ($unmapped !== [] || $unmappedVenues !== []): ?>
             <div class="card">
                 <h3>Not on the map</h3>
-                <p class="hint">Add a city (and ideally an address) on the property so it can be geocoded.</p>
+                <p class="hint">Add a city (and ideally an address) so the location can be geocoded.</p>
                 <ul>
                     <?php foreach ($unmapped as $u): ?>
                         <li>
+                            Hotel:
                             <a href="/hotels/edit-property.php?id=<?= (int) $u['id'] ?>">
                                 <?= htmlspecialchars($u['name'], ENT_QUOTES) ?>
                             </a>
+                            <?php if ($u['place'] !== ''): ?>
+                                <span class="text-dim">— <?= htmlspecialchars($u['place'], ENT_QUOTES) ?></span>
+                            <?php endif; ?>
+                        </li>
+                    <?php endforeach; ?>
+                    <?php foreach ($unmappedVenues as $u): ?>
+                        <li>
+                            Office/venue:
+                            <?php if ($canManageVenues): ?>
+                            <a href="/settings/site.php?venue_id=<?= (int) $u['id'] ?>">
+                                <?= htmlspecialchars($u['name'], ENT_QUOTES) ?>
+                            </a>
+                            <?php else: ?>
+                                <?= htmlspecialchars($u['name'], ENT_QUOTES) ?>
+                            <?php endif; ?>
                             <?php if ($u['place'] !== ''): ?>
                                 <span class="text-dim">— <?= htmlspecialchars($u['place'], ENT_QUOTES) ?></span>
                             <?php endif; ?>
@@ -146,6 +239,7 @@ foreach ($properties as $property) {
 <script>
 window.NEXWAYPOINT_HOTEL_MAP = <?= json_encode([
     'hotels' => $mapped,
+    'venues' => $mappedVenues,
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 </script>
 <script src="/assets/hotel-map.js" defer></script>

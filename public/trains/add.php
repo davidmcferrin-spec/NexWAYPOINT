@@ -27,7 +27,7 @@ if (!$app['db']->tableExists('carriers')) {
     $schemaWarning = 'Database is missing the carriers table. On the server run: php scripts/migrate.php';
 } else {
     try {
-        $operators = $carrierRepo->findForUser($user->id, Carrier::TYPE_RAIL);
+        $operators = $carrierRepo->findByType(Carrier::TYPE_RAIL);
     } catch (Throwable $e) {
         $app['logger']->error('Failed loading rail operators', ['error' => $e->getMessage()]);
         $schemaWarning = 'Could not load rail operators. If you just pulled new code, run: php scripts/migrate.php';
@@ -205,7 +205,7 @@ $selectedCarrierId = (int) ($_POST['carrier_id'] ?? 0);
                 <option value="__new__">— Add New… —</option>
             </select>
         </label>
-        <p class="hint"><a href="/trains/operators.php">Manage rail operators</a></p>
+        <p class="hint">Use Add New in the list if an operator is missing.<?php if ($userRepo->isAdmin($user)): ?> Site catalog: <a href="/settings/site.php#rail-operators">Manage rail operators</a>.<?php endif; ?></p>
 
         <label>Train number<input type="text" name="train_number" required value="<?= htmlspecialchars((string) ($_POST['train_number'] ?? ''), ENT_QUOTES) ?>" placeholder="90" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
         <label>Origin (station or city)<input type="text" name="origin" required value="<?= htmlspecialchars((string) ($_POST['origin'] ?? ''), ENT_QUOTES) ?>" placeholder="New York, NY" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>

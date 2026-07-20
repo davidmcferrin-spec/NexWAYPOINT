@@ -94,9 +94,20 @@ final class CarrierRepositoryTest extends NexWaypointTestCase
         $via = $repo->create(new Carrier(null, $userId, 'VIA Rail', null, Carrier::TYPE_RAIL));
         self::assertNull($via->iataCode);
 
-        $airlines = $repo->findForUser($userId, Carrier::TYPE_AIRLINE);
-        $rails = $repo->findForUser($userId, Carrier::TYPE_RAIL);
+        $airlines = $repo->findByType(Carrier::TYPE_AIRLINE);
+        $rails = $repo->findByType(Carrier::TYPE_RAIL);
         self::assertCount(0, $airlines);
         self::assertCount(2, $rails);
+    }
+
+    public function testIataIsSiteWideNotPerUser(): void
+    {
+        $dave = $this->insertUser('dave');
+        $sara = $this->insertUser('sara');
+        $repo = new CarrierRepository($this->db, $this->logger);
+
+        $repo->create(new Carrier(null, $dave, 'Delta Air Lines', 'DL'));
+        $this->expectException(\InvalidArgumentException::class);
+        $repo->create(new Carrier(null, $sara, 'Delta Other', 'DL'));
     }
 }

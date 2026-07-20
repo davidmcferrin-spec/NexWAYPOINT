@@ -33,4 +33,35 @@ final class UserRepositoryTest extends NexWaypointTestCase
         $this->expectExceptionMessage('cycle');
         $repo->updateProfile($a, 'A', $b, true, false);
     }
+
+    public function testSystemAccountCannotBeManager(): void
+    {
+        $repo = new UserRepository($this->db, $this->logger);
+        $admin = $repo->create(
+            'admin',
+            'admin@example.com',
+            'test-password-12',
+            'Administrator',
+            'subordinate',
+            null,
+            null,
+            true,
+            true,
+        );
+        self::assertTrue($admin->isSystem);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('isolated');
+        $repo->create(
+            'dave',
+            'dave@example.com',
+            'test-password-12',
+            'Dave',
+            'subordinate',
+            $admin->id,
+            null,
+            false,
+            false,
+        );
+    }
 }

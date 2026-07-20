@@ -42,7 +42,7 @@ try {
     /** @var array{users: \NexWaypoint\Users\UserRepository} $app */
     $app = require dirname(__DIR__) . '/config/bootstrap.php';
 
-    $existing = $app['users']->findAllActive();
+    $existing = $app['users']->findAll();
     if ($existing !== []) {
         fwrite(STDOUT, "Users already exist (" . count($existing) . "); skipping admin seed.\n");
         fwrite(STDOUT, "Reset a password with: ./setup.sh reset-password\n");
@@ -73,7 +73,8 @@ try {
         'subordinate', // legacy column; site access is is_admin
         null,
         null,
-        true, // is_admin
+        true,  // is_admin
+        true,  // is_system — isolated from org chart
     );
 
     $credentialsPath = dirname(__DIR__) . '/storage/admin-credentials.txt';

@@ -27,7 +27,7 @@ if (!$app['db']->tableExists('carriers')) {
     $schemaWarning = 'Database is missing the carriers table. On the server run: php scripts/migrate.php';
 } else {
     try {
-        $carriers = $carrierRepo->findForUser($user->id, Carrier::TYPE_AIRLINE);
+        $carriers = $carrierRepo->findByType(Carrier::TYPE_AIRLINE);
     } catch (Throwable $e) {
         $app['logger']->error('Failed loading carriers for flight form', [
             'error' => $e->getMessage(),
@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($carrier === null || $carrier->userId !== $user->id) {
             $errors[] = 'Select a carrier (or Add New).';
         } elseif ($carrier->iataCode === null || $carrier->iataCode === '') {
-            $errors[] = 'Selected carrier is missing an IATA code. Edit it under Manage carriers.';
+            $errors[] = 'Selected carrier is missing an IATA code. Edit it under Settings → Site catalogs.';
         }
         if ($flightNumber === null) {
             $errors[] = 'Flight number is required.';
@@ -213,7 +213,7 @@ $selectedCarrierId = (int) ($_POST['carrier_id'] ?? 0);
                 <option value="__new__">— Add New… —</option>
             </select>
         </label>
-        <p class="hint"><a href="/flights/carriers.php">Manage carriers</a></p>
+        <p class="hint">Use Add New in the list if a carrier is missing.<?php if ($userRepo->isAdmin($user)): ?> Site catalog: <a href="/settings/site.php#airline-carriers">Manage carriers</a>.<?php endif; ?></p>
 
         <label>Flight number<input type="text" name="flight_number" required value="<?= htmlspecialchars((string) ($_POST['flight_number'] ?? ''), ENT_QUOTES) ?>" placeholder="1234" inputmode="numeric" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
         <label>Origin (airport code or city)<input type="text" name="origin" required value="<?= htmlspecialchars((string) ($_POST['origin'] ?? ''), ENT_QUOTES) ?>" placeholder="ORD" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>

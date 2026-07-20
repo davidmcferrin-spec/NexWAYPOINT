@@ -347,7 +347,7 @@ try {
                     carrier_type TEXT NOT NULL DEFAULT 'airline' CHECK (carrier_type IN ('airline','rail')),
                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    UNIQUE (user_id, iata_code)
+                    UNIQUE (carrier_type, iata_code)
                 )"
             );
             $pdo->exec('CREATE INDEX idx_carriers_user ON carriers(user_id)');
@@ -364,7 +364,7 @@ try {
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     CONSTRAINT fk_carriers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                    UNIQUE KEY uq_carrier_user_iata (user_id, iata_code),
+                    UNIQUE KEY uq_carrier_type_iata (carrier_type, iata_code),
                     INDEX idx_carriers_user (user_id),
                     INDEX idx_carriers_name (name),
                     INDEX idx_carriers_type (carrier_type)
@@ -392,6 +392,95 @@ try {
         );
         $changes++;
         fwrite(STDOUT, "Added carriers.carrier_type\n");
+    }
+
+    // Convert per-user carriers → site-wide catalog (unique by type + IATA).
+    if ($tableExists('carriers') && $columnExists('carriers', 'carrier_type')) {
+        $needsSiteWide = false;
+        if ($driver === 'mysql') {
+            $idx = $pdo->query("SHOW INDEX FROM carriers WHERE Key_name = 'uq_carrier_user_iata'")->fetchAll();
+            $needsSiteWide = $idx !== [];
+            if (!$needsSiteWide) {
+                $haveNew = $pdo->query("SHOW INDEX FROM carriers WHERE Key_name = 'uq_carrier_type_iata'")->fetchAll();
+                // Fresh installs already have the new key; legacy may lack both briefly.
+                $needsSiteWide = $haveNew === [] && $idx !== [];
+            }
+        } else {
+            $sql = (string) $pdo->query("SELECT sql FROM sqlite_master WHERE type='table' AND name='carriers'")->fetchColumn();
+            $needsSiteWide = str_contains($sql, 'UNIQUE (user_id, iata_code)')
+                || str_contains($sql, 'UNIQUE(user_id, iata_code)');
+        }
+
+        if ($needsSiteWide) {
+            $dups = $pdo->query(
+                "SELECT carrier_type, UPPER(iata_code) AS iata, MIN(id) AS keep_id
+                 FROM carriers
+                 WHERE iata_code IS NOT NULL AND TRIM(iata_code) != ''
+                 GROUP BY carrier_type, UPPER(iata_code)
+                 HAVING COUNT(*) > 1"
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            foreach ($dups as $dup) {
+                $keepId = (int) $dup['keep_id'];
+                $losers = $pdo->prepare(
+                    'SELECT id FROM carriers
+                     WHERE carrier_type = :t AND UPPER(iata_code) = :i AND id != :keep'
+                );
+                $losers->execute([
+                    't' => (string) $dup['carrier_type'],
+                    'i' => (string) $dup['iata'],
+                    'keep' => $keepId,
+                ]);
+                foreach ($losers->fetchAll(PDO::FETCH_ASSOC) as $loser) {
+                    $loserId = (int) $loser['id'];
+                    if ($tableExists('trip_segments') && $columnExists('trip_segments', 'carrier_id')) {
+                        $pdo->prepare(
+                            'UPDATE trip_segments SET carrier_id = :keep WHERE carrier_id = :old'
+                        )->execute(['keep' => $keepId, 'old' => $loserId]);
+                    }
+                    $pdo->prepare('DELETE FROM carriers WHERE id = :id')->execute(['id' => $loserId]);
+                }
+            }
+
+            if ($driver === 'mysql') {
+                try {
+                    $pdo->exec('ALTER TABLE carriers DROP INDEX uq_carrier_user_iata');
+                } catch (Throwable $e) {
+                    // already gone
+                }
+                try {
+                    $pdo->exec('ALTER TABLE carriers ADD UNIQUE KEY uq_carrier_type_iata (carrier_type, iata_code)');
+                } catch (Throwable $e) {
+                    fwrite(STDERR, 'Note: could not add uq_carrier_type_iata: ' . $e->getMessage() . "\n");
+                }
+            } else {
+                $pdo->exec('PRAGMA foreign_keys = OFF');
+                $pdo->exec(
+                    "CREATE TABLE carriers_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        iata_code TEXT NULL,
+                        carrier_type TEXT NOT NULL DEFAULT 'airline',
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        UNIQUE (carrier_type, iata_code)
+                    )"
+                );
+                $pdo->exec(
+                    'INSERT INTO carriers_new (id, user_id, name, iata_code, carrier_type, created_at, updated_at)
+                     SELECT id, user_id, name, iata_code, carrier_type, created_at, updated_at FROM carriers'
+                );
+                $pdo->exec('DROP TABLE carriers');
+                $pdo->exec('ALTER TABLE carriers_new RENAME TO carriers');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_carriers_user ON carriers(user_id)');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_carriers_name ON carriers(name)');
+                $pdo->exec('CREATE INDEX IF NOT EXISTS idx_carriers_type ON carriers(carrier_type)');
+                $pdo->exec('PRAGMA foreign_keys = ON');
+            }
+            $changes++;
+            fwrite(STDOUT, "Converted carriers to site-wide catalog\n");
+        }
     }
 
     if ($tableExists('trip_segments') && !$columnExists('trip_segments', 'carrier_id')) {
@@ -521,6 +610,25 @@ try {
         fwrite(STDOUT, "Added users.is_admin (seeded from legacy manager role)\n");
     }
 
+    if ($tableExists('users') && !$columnExists('users', 'is_system')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN is_system TINYINT(1) NOT NULL DEFAULT 0');
+        }
+        // Bootstrap account from seed_admin.php — isolated from the org chart.
+        $pdo->exec("UPDATE users SET is_system = 1, manager_id = NULL WHERE LOWER(username) = 'admin'");
+        if ($tableExists('user_dotted_managers')) {
+            $pdo->exec(
+                "DELETE FROM user_dotted_managers
+                 WHERE user_id IN (SELECT id FROM users WHERE is_system = 1)
+                    OR manager_id IN (SELECT id FROM users WHERE is_system = 1)"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.is_system (seeded admin isolated from org chart)\n");
+    }
+
     if (!$tableExists('user_dotted_managers')) {
         if ($driver === 'sqlite') {
             $pdo->exec(
@@ -591,6 +699,49 @@ try {
         }
         $changes++;
         fwrite(STDOUT, "Created hotel_brands and seeded top 5 brands\n");
+    }
+
+    if (!$tableExists('office_venues')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE office_venues (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    address_line1 TEXT NULL,
+                    city TEXT NULL,
+                    state_region TEXT NULL,
+                    postal_code TEXT NULL,
+                    country TEXT NOT NULL DEFAULT 'USA',
+                    latitude REAL NULL,
+                    longitude REAL NULL,
+                    notes TEXT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )"
+            );
+        } else {
+            $pdo->exec(
+                "CREATE TABLE office_venues (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(150) NOT NULL,
+                    address_line1 VARCHAR(255) NULL,
+                    city VARCHAR(100) NULL,
+                    state_region VARCHAR(100) NULL,
+                    postal_code VARCHAR(20) NULL,
+                    country VARCHAR(100) NOT NULL DEFAULT 'USA',
+                    latitude DECIMAL(10, 7) NULL,
+                    longitude DECIMAL(10, 7) NULL,
+                    notes VARCHAR(255) NULL,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_office_venues_name (name)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created office_venues\n");
     }
 
     if ($changes === 0) {

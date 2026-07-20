@@ -9,8 +9,9 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------------------------------------------------------
 -- users: org hierarchy via manager_id (solid line). is_admin gates site-admin
--- screens. Legacy `role` is unused by the UI; visibility uses manager_id +
--- dotted lines (user_dotted_managers).
+-- screens. is_system marks the seeded bootstrap account — isolated from the
+-- org chart / reporting lines. Legacy `role` is unused by the UI; visibility
+-- uses manager_id + dotted lines (user_dotted_managers).
 -- ----------------------------------------------------------------------------
 CREATE TABLE users (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -21,6 +22,7 @@ CREATE TABLE users (
     role            ENUM('manager','peer','subordinate') NOT NULL DEFAULT 'subordinate',
     manager_id      INT UNSIGNED NULL,
     is_admin        TINYINT(1) NOT NULL DEFAULT 0,
+    is_system       TINYINT(1) NOT NULL DEFAULT 0,
     timezone        VARCHAR(64) NOT NULL DEFAULT 'America/Chicago',
     is_active       TINYINT(1) NOT NULL DEFAULT 1,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -152,6 +154,27 @@ INSERT INTO hotel_brands (name, sort_order, is_active) VALUES
     ('Choice Hotels', 50, 1);
 
 -- ----------------------------------------------------------------------------
+-- office_venues: site-wide offices / work sites for the walk-to-venue
+-- combobox and hotel map pins. Managed under Site settings.
+-- ----------------------------------------------------------------------------
+CREATE TABLE office_venues (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name            VARCHAR(150) NOT NULL,
+    address_line1   VARCHAR(255) NULL,
+    city            VARCHAR(100) NULL,
+    state_region    VARCHAR(100) NULL,
+    postal_code     VARCHAR(20) NULL,
+    country         VARCHAR(100) NOT NULL DEFAULT 'USA',
+    latitude        DECIMAL(10, 7) NULL,
+    longitude       DECIMAL(10, 7) NULL,
+    notes           VARCHAR(255) NULL,
+    is_active       TINYINT(1) NOT NULL DEFAULT 1,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_office_venues_name (name)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
 -- hotel_stays: individual visits. Room # / bed / bath / stay_rating are
 -- stay-specific; amenities live on hotel_properties.
 -- ----------------------------------------------------------------------------
@@ -216,7 +239,7 @@ CREATE TABLE trips (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
--- carriers: reusable airlines / rail operators per user.
+-- carriers: site-wide airlines / rail operators (user_id = who created the row).
 -- Airlines require IATA for FlightAware; rail operators may omit it (Amtrak often uses 2V).
 -- ----------------------------------------------------------------------------
 CREATE TABLE carriers (
@@ -228,7 +251,7 @@ CREATE TABLE carriers (
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_carriers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    UNIQUE KEY uq_carrier_user_iata (user_id, iata_code),
+    UNIQUE KEY uq_carrier_type_iata (carrier_type, iata_code),
     INDEX idx_carriers_user (user_id),
     INDEX idx_carriers_name (name),
     INDEX idx_carriers_type (carrier_type)

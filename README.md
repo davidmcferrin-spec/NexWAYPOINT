@@ -19,7 +19,8 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
   adverse preferences (name + reason) for the same hotel/location.
 - **Reusable airline carriers** -- each carrier stores name + IATA; flight
   entry is carrier dropdown + flight number only. FlightAware enrichment
-  builds the ident as IATA + number. Manage/edit carriers at `/flights/carriers.php`.
+  builds the ident as IATA + number. Carriers and rail operators are a
+  site-wide catalog under Settings → Site catalogs (`/settings/site.php`).
 - **Travel dashboard** -- a status engine that resolves each person's
   current state (Home / Office / Remote / In Flight / Layover in X /
   Delayed / At hotel in X) from trip segments and manual overrides.
@@ -142,8 +143,8 @@ users:
 php scripts/create_user.php
 ```
 
-Site admins manage users at `/admin/users.php` (create, solid-line
-reports-to, dotted-line managers, deactivate, reset password, emails).
+Settings hub is `/settings/index.php` (emails, sharing; admins also get
+site catalogs and users/org chart at `/settings/users.php`).
 Everyone manages their own forward addresses at `/settings/emails.php`.
 
 Reset a password (prints a new random value once):
@@ -220,7 +221,7 @@ installer:
    attributes each email to a NexWAYPOINT user by matching the `From:`
    address against that user's rows in `user_emails` (primary plus any
    aliases). Add every address you send/forward from under **My emails**
-   (`/settings/emails.php`), or have a manager attach them under **Users**.
+   (`/settings/emails.php`), or have a site admin attach them under **Settings → Users**.
 4. `IMAP_PROCESSED_FOLDER`/`IMAP_FAILED_FOLDER` are created automatically
    on first connect if they don't exist.
 

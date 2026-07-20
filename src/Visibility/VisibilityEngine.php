@@ -73,6 +73,11 @@ final class VisibilityEngine
             return self::DIRECTION_UNRELATED;
         }
 
+        // Seeded system admin is outside the org chart for visibility purposes.
+        if ($subject->isSystem || $requester->isSystem) {
+            return self::DIRECTION_UNRELATED;
+        }
+
         if ($subject->managerId === $requesterId) {
             return self::DIRECTION_TOP_DOWN; // requester manages subject (solid)
         }

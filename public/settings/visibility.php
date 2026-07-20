@@ -10,6 +10,7 @@ use NexWaypoint\Visibility\VisibilityRuleRepository;
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 $db = $app['db'];
+$settingsSection = 'sharing';
 
 $userRepo = new UserRepository($db, $app['logger']);
 $ruleRepo = new VisibilityRuleRepository($db);
@@ -78,13 +79,14 @@ $panels = [
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>NexWAYPOINT &middot; Sharing Settings</title>
+    <title>NexWAYPOINT &middot; Sharing</title>
     <?php require dirname(__DIR__) . '/_head_assets.php'; ?>
 </head>
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
-    <h1>Sharing Settings</h1>
+    <?php require __DIR__ . '/_settings_nav.php'; ?>
+    <h1>Sharing</h1>
     <?php if ($message !== null): ?><p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p><?php endif; ?>
 
     <?php foreach ($panels as $direction => $panel): ?>

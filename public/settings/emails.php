@@ -12,6 +12,7 @@ $repo = new UserRepository($app['db'], $app['logger']);
 $errors = [];
 $message = null;
 $schemaWarning = null;
+$settingsSection = 'emails';
 
 if (!$app['db']->tableExists('user_emails')) {
     $schemaWarning = 'Database is missing user_emails. On the server run: php scripts/migrate.php';
@@ -51,6 +52,7 @@ $emails = $schemaWarning === null ? $repo->emailsForUser($user->id) : [];
 <body>
 <?php require dirname(__DIR__) . '/_nav.php'; ?>
 <main class="container">
+    <?php require __DIR__ . '/_settings_nav.php'; ?>
     <h1>My email addresses</h1>
     <p>
         When you forward a hotel or airline confirmation into the travel mailbox,

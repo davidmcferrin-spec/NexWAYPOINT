@@ -6,6 +6,7 @@ use NexWaypoint\Core\Csrf;
 use NexWaypoint\Hotels\HotelBrandRepository;
 use NexWaypoint\Hotels\HotelProperty;
 use NexWaypoint\Hotels\HotelPropertyRepository;
+use NexWaypoint\Hotels\OfficeVenueRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
@@ -21,7 +22,12 @@ if ($property === null || $property->userId !== $user->id) {
 }
 
 $hotelBrandNames = (new HotelBrandRepository($app['db'], $app['logger']))->namesForSelect($property->brand);
-$walkToOfficeVenues = $repo->walkToOfficeVenuesForUser($user->id);
+$walkToOfficeVenues = array_values(array_unique(array_merge(
+    (new OfficeVenueRepository($app['db'], $app['logger']))->namesForSelect(),
+    $repo->walkToOfficeVenuesForUser($user->id),
+)));
+natcasesort($walkToOfficeVenues);
+$walkToOfficeVenues = array_values($walkToOfficeVenues);
 
 $errors = [];
 $message = null;
