@@ -73,6 +73,12 @@ All PHP files pass `php -l`.
   apt-capable Debian/Ubuntu hosts and managed DreamHost environments without
   root. It never overwrites an existing `.env`, skips an existing schema, and
   only installs cron jobs for services whose credentials are configured.
+- **Production host layout is split clone vs web root.** Code lives at
+  `/home/dh_w9tij7/NexWAYPOINT`; the public site is
+  `https://nexwaypoint.area51consulting.com` with DreamHost document root
+  `/home/dh_w9tij7/nexwaypoint.area51consulting.com` symlinked to
+  `NexWAYPOINT/public`. Storage and secrets stay under the clone, never
+  under the web-facing directory.
 
 ## Things to watch out for
 

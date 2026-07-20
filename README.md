@@ -80,41 +80,59 @@ flagged here instead of silently guessed.
 
 ## Setup
 
-On a Debian/Ubuntu or DreamHost VPS, create an empty MySQL database and
-database user in the hosting panel, then run:
+### Production host (DreamHost)
+
+| What | Path / URL |
+|---|---|
+| Public site | https://nexwaypoint.area51consulting.com |
+| Git clone | `/home/dh_w9tij7/NexWAYPOINT` |
+| Web document root | `/home/dh_w9tij7/nexwaypoint.area51consulting.com` → symlink to `NexWAYPOINT/public` |
+
+Keep the clone outside the web root so `config/`, `src/`, `.env`, and
+`storage/` are never HTTP-accessible. `setup.sh` can create the symlink.
+
+1. Create an empty MySQL database + user in the DreamHost panel.
+2. Clone and install:
 
 ```bash
+cd /home/dh_w9tij7
 git clone <repository-url> NexWAYPOINT
 cd NexWAYPOINT
 bash setup.sh
 ```
 
-The interactive installer can install PHP 8.1+, required extensions,
-MariaDB client, and Composer when `apt-get` and root/`sudo` are available.
-On managed DreamHost plans without package privileges, it verifies the PHP
-environment supplied by DreamHost instead. It then:
+The installer defaults the web-root prompt to
+`/home/dh_w9tij7/nexwaypoint.area51consulting.com` and links it to
+`public/`. It can install PHP/extensions when `apt-get` and root/`sudo`
+are available; on managed DreamHost without package privileges, it
+verifies the PHP environment DreamHost already provides. It then:
 
 - creates `.env` without overwriting an existing one;
-- generates the session secret and fills absolute storage paths;
+- generates the session secret and fills absolute storage paths under
+  `/home/dh_w9tij7/NexWAYPOINT/storage/...`;
 - prompts for MySQL/SQLite, optional IMAP, and optional FlightAware settings;
 - creates writable storage directories and installs the database schema;
-- securely creates the first local user; and
+- securely creates the first local user;
+- wires the DreamHost document root via symlink; and
 - optionally installs the configured mail/flight cron jobs.
 
-It is safe to rerun. Use `bash setup.sh --help` for options. To add another
+It is safe to rerun. Use `bash setup.sh --help` for options
+(`--skip-web-root`, `--skip-user`, `--skip-packages`). To add another
 local user later:
 
 ```bash
 php scripts/create_user.php
 ```
 
-Finally, point Nginx/Apache's document root at `public/` and require HTTPS.
-Everything outside `public/` (config, src, storage) must not be web-accessible.
-If cron must be configured through the DreamHost panel, use:
+Force HTTPS for the subdomain in the DreamHost panel, then open
+https://nexwaypoint.area51consulting.com/login.php.
+
+If cron must be configured through the DreamHost panel instead of the
+installer:
 
 ```cron
-*/10 * * * * php /path/to/NexWAYPOINT/cron/poll_mail.php >> /path/to/NexWAYPOINT/storage/logs/cron.log 2>&1
-*/10 * * * * php /path/to/NexWAYPOINT/cron/enrich_flights.php >> /path/to/NexWAYPOINT/storage/logs/cron.log 2>&1
+*/10 * * * * php /home/dh_w9tij7/NexWAYPOINT/cron/poll_mail.php >> /home/dh_w9tij7/NexWAYPOINT/storage/logs/cron.log 2>&1
+*/10 * * * * php /home/dh_w9tij7/NexWAYPOINT/cron/enrich_flights.php >> /home/dh_w9tij7/NexWAYPOINT/storage/logs/cron.log 2>&1
 ```
 
 ### DreamHost IMAP one-time setup

@@ -6,6 +6,16 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
 SKIP_PACKAGES=false
 SKIP_USER=false
+SKIP_WEB_ROOT=false
+
+# Production layout on DreamHost:
+#   code: /home/dh_w9tij7/NexWAYPOINT
+#   web:  /home/dh_w9tij7/nexwaypoint.area51consulting.com  ->  .../NexWAYPOINT/public
+DEFAULT_SITE_HOST="nexwaypoint.area51consulting.com"
+DEFAULT_SITE_URL="https://${DEFAULT_SITE_HOST}"
+DEFAULT_WEB_ROOT="/home/dh_w9tij7/${DEFAULT_SITE_HOST}"
+SITE_URL="${DEFAULT_SITE_URL}"
+WEB_ROOT=""
 
 usage() {
     cat <<'EOF'
@@ -16,10 +26,16 @@ Usage: ./setup.sh [options]
 Options:
   --skip-packages  Do not attempt to install system packages
   --skip-user      Do not offer to create a local login
+  --skip-web-root  Do not offer to wire the DreamHost document root
   --help           Show this help
 
 The script is safe to rerun: it preserves an existing .env file, skips an
 installed database schema, and does not create users without confirmation.
+
+DreamHost production layout:
+  clone:    /home/dh_w9tij7/NexWAYPOINT
+  web root: /home/dh_w9tij7/nexwaypoint.area51consulting.com
+            (symlink to NexWAYPOINT/public)
 EOF
 }
 
@@ -310,10 +326,87 @@ install_cron_jobs() {
     echo "Cron jobs installed."
 }
 
+directory_is_effectively_empty() {
+    local path="$1"
+    local entry
+    local count=0
+
+    shopt -s nullglob dotglob
+    for entry in "${path}"/*; do
+        local base
+        base="$(basename -- "${entry}")"
+        case "${base}" in
+            .|..|index.html|index.htm|favicon.ico|.htaccess|dh_error_pages)
+                continue
+                ;;
+        esac
+        count=$((count + 1))
+    done
+    shopt -u nullglob dotglob
+    (( count == 0 ))
+}
+
+configure_web_root() {
+    local public_dir="${ROOT_DIR}/public"
+    local target
+    local backup
+    local current_target
+
+    if [[ "${SKIP_WEB_ROOT}" == true ]]; then
+        return
+    fi
+    if [[ ! -d "${public_dir}" ]]; then
+        echo "Missing public/ directory at ${public_dir}; cannot wire web root." >&2
+        exit 1
+    fi
+
+    WEB_ROOT="$(prompt_value "DreamHost web document root" "${DEFAULT_WEB_ROOT}")"
+    SITE_URL="$(prompt_value "Public site URL" "${DEFAULT_SITE_URL}")"
+
+    if [[ -L "${WEB_ROOT}" ]]; then
+        current_target="$(readlink -f -- "${WEB_ROOT}" 2>/dev/null || true)"
+        if [[ "${current_target}" == "$(readlink -f -- "${public_dir}")" ]]; then
+            echo "Web root already points at ${public_dir}."
+            return
+        fi
+        if ! ask_yes_no "Replace existing symlink ${WEB_ROOT} with a link to ${public_dir}?" "y"; then
+            return
+        fi
+        rm -- "${WEB_ROOT}"
+    elif [[ -e "${WEB_ROOT}" ]]; then
+        if [[ -d "${WEB_ROOT}" ]] && directory_is_effectively_empty "${WEB_ROOT}"; then
+            if ! ask_yes_no "Replace DreamHost web directory ${WEB_ROOT} with a symlink to ${public_dir}?" "y"; then
+                return
+            fi
+            backup="${WEB_ROOT}.bak.$(date +%Y%m%d%H%M%S)"
+            mv -- "${WEB_ROOT}" "${backup}"
+            echo "Moved previous web directory to ${backup}."
+        else
+            echo "Web document root already exists and is not empty: ${WEB_ROOT}" >&2
+            echo "Move/rename it manually, then rerun setup, or use --skip-web-root." >&2
+            return
+        fi
+    else
+        if ! ask_yes_no "Create symlink ${WEB_ROOT} -> ${public_dir}?" "y"; then
+            return
+        fi
+    fi
+
+    mkdir -p "$(dirname -- "${WEB_ROOT}")"
+    ln -s "${public_dir}" "${WEB_ROOT}"
+    target="$(readlink -f -- "${WEB_ROOT}" 2>/dev/null || true)"
+    if [[ "${target}" != "$(readlink -f -- "${public_dir}")" ]]; then
+        echo "Failed to create web-root symlink at ${WEB_ROOT}." >&2
+        exit 1
+    fi
+    echo "Web root linked: ${WEB_ROOT} -> ${public_dir}"
+}
+
 while (( $# > 0 )); do
     case "$1" in
         --skip-packages) SKIP_PACKAGES=true ;;
         --skip-user) SKIP_USER=true ;;
+        --skip-web-root) SKIP_WEB_ROOT=true ;;
         --help)
             usage
             exit 0
@@ -358,20 +451,29 @@ if [[ "${SKIP_USER}" == false ]] && ask_yes_no "Create a local login now?" "y"; 
     php "${ROOT_DIR}/scripts/create_user.php"
 fi
 
+configure_web_root
 install_cron_jobs
 
 if command -v composer >/dev/null 2>&1 && ask_yes_no "Install development/test dependencies?" "n"; then
     composer install --working-dir="${ROOT_DIR}" --no-interaction --prefer-dist
 fi
 
+if [[ -z "${WEB_ROOT}" ]]; then
+    WEB_ROOT="${DEFAULT_WEB_ROOT}"
+fi
+
 cat <<EOF
 
 Setup complete.
 
+Site: ${SITE_URL}
+Code: ${ROOT_DIR}
+Web:  ${WEB_ROOT}  (should symlink to ${ROOT_DIR}/public)
+
 Next:
-  1. Point the domain's document root at ${ROOT_DIR}/public
-  2. Require HTTPS before signing in
-  3. Open https://your-domain.example/login.php
+  1. Confirm HTTPS is forced for ${DEFAULT_SITE_HOST} in the DreamHost panel
+  2. Open ${SITE_URL}/login.php
+  3. Forward travel confirmations to the dedicated IMAP mailbox once configured
 
 Application logs: ${ROOT_DIR}/storage/logs/app.log
 EOF
