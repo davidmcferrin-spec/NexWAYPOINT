@@ -738,6 +738,7 @@ cmd_update() {
     if [[ -f "${ENV_FILE}" ]]; then
         verify_database_extension
         php "${ROOT_DIR}/scripts/init_database.php"
+    php "${ROOT_DIR}/scripts/migrate.php"
     else
         echo "No .env found after update; run ./setup.sh install next."
     fi
@@ -846,6 +847,7 @@ run_install() {
 
     verify_database_extension
     php "${ROOT_DIR}/scripts/init_database.php"
+    php "${ROOT_DIR}/scripts/migrate.php"
 
     if [[ "${SKIP_USER}" == false ]]; then
         echo

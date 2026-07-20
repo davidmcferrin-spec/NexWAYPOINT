@@ -47,58 +47,85 @@ CREATE TABLE user_status_overrides (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
--- hotel_stays: the hotel tracker/rating module. Independent of trip_segments;
--- a segment can optionally link to a hotel_stays row once the user confirms
--- a parsed hotel confirmation as a logged stay (see trip_segments.hotel_stay_id).
+-- hotel_properties: reusable property identity + amenities per user.
+-- Overall rating is AVG(stay_rating) from linked hotel_stays.
+-- ----------------------------------------------------------------------------
+CREATE TABLE hotel_properties (
+    id                      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id                 INT UNSIGNED NOT NULL,
+    hotel_name              VARCHAR(200) NOT NULL,
+    brand                   VARCHAR(100) NULL,
+    address_line1           VARCHAR(200) NULL,
+    address_line2           VARCHAR(200) NULL,
+    city                    VARCHAR(120) NULL,
+    state_region            VARCHAR(120) NULL,
+    postal_code             VARCHAR(20) NULL,
+    country                 VARCHAR(80) NULL,
+    latitude                DECIMAL(10,7) NULL,
+    longitude               DECIMAL(10,7) NULL,
+    has_desk                TINYINT(1) NOT NULL DEFAULT 0,
+    desk_notes              VARCHAR(255) NULL,
+    has_pool                TINYINT(1) NOT NULL DEFAULT 0,
+    has_hot_tub             TINYINT(1) NOT NULL DEFAULT 0,
+    has_breakfast           TINYINT(1) NOT NULL DEFAULT 0,
+    breakfast_notes         VARCHAR(255) NULL,
+    has_gym                 TINYINT(1) NOT NULL DEFAULT 0,
+    has_free_parking        TINYINT(1) NOT NULL DEFAULT 0,
+    has_airport_shuttle     TINYINT(1) NOT NULL DEFAULT 0,
+    has_ev_charging         TINYINT(1) NOT NULL DEFAULT 0,
+    has_onsite_restaurant   TINYINT(1) NOT NULL DEFAULT 0,
+    has_offsite_gym         TINYINT(1) NOT NULL DEFAULT 0,
+    walk_to_office          TINYINT(1) NOT NULL DEFAULT 0,
+    walk_to_office_notes    VARCHAR(255) NULL,
+    wifi_quality            TINYINT UNSIGNED NULL,
+    noise_level             TINYINT UNSIGNED NULL,
+    unique_features         TEXT NULL,
+    is_blacklisted          TINYINT(1) NOT NULL DEFAULT 0,
+    blacklist_reason        TEXT NULL,
+    overall_rating          DECIMAL(3,2) NULL,
+    created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_hotel_properties_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT chk_prop_wifi CHECK (wifi_quality IS NULL OR wifi_quality BETWEEN 1 AND 5),
+    CONSTRAINT chk_prop_noise CHECK (noise_level IS NULL OR noise_level BETWEEN 1 AND 5),
+    CONSTRAINT chk_prop_overall CHECK (overall_rating IS NULL OR (overall_rating >= 1 AND overall_rating <= 5)),
+    INDEX idx_prop_user (user_id),
+    INDEX idx_prop_city (city),
+    INDEX idx_prop_blacklist (is_blacklisted),
+    INDEX idx_prop_name (hotel_name)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- hotel_stays: individual visits. Room # / bed / bath / stay_rating are
+-- stay-specific; amenities live on hotel_properties.
 -- ----------------------------------------------------------------------------
 CREATE TABLE hotel_stays (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id             INT UNSIGNED NOT NULL,
-    hotel_name          VARCHAR(200) NOT NULL,
-    brand               VARCHAR(100) NULL,
-    address_line1       VARCHAR(200) NULL,
-    address_line2       VARCHAR(200) NULL,
-    city                VARCHAR(120) NULL,
-    state_region        VARCHAR(120) NULL,
-    postal_code         VARCHAR(20) NULL,
-    country             VARCHAR(80) NULL,
-    latitude            DECIMAL(10,7) NULL,
-    longitude           DECIMAL(10,7) NULL,
+    hotel_property_id   INT UNSIGNED NOT NULL,
     room_number         VARCHAR(20) NULL,
+    bed_type            ENUM('king','queen','dual_queen') NULL,
+    bathroom_type       ENUM('tub','walk_in_shower') NULL,
     stay_start          DATE NOT NULL,
     stay_end            DATE NOT NULL,
-    rating              TINYINT UNSIGNED NULL,
-    has_desk            TINYINT(1) NOT NULL DEFAULT 0,
-    desk_notes          VARCHAR(255) NULL,
-    has_pool            TINYINT(1) NOT NULL DEFAULT 0,
-    has_hot_tub         TINYINT(1) NOT NULL DEFAULT 0,
-    has_breakfast       TINYINT(1) NOT NULL DEFAULT 0,
-    breakfast_notes     VARCHAR(255) NULL,
-    has_gym             TINYINT(1) NOT NULL DEFAULT 0,
-    has_free_parking    TINYINT(1) NOT NULL DEFAULT 0,
-    has_airport_shuttle TINYINT(1) NOT NULL DEFAULT 0,
-    wifi_quality        TINYINT UNSIGNED NULL,
-    noise_level         TINYINT UNSIGNED NULL,
-    unique_features     TEXT NULL,
-    is_blacklisted      TINYINT(1) NOT NULL DEFAULT 0,
-    blacklist_reason    TEXT NULL,
+    stay_rating         TINYINT UNSIGNED NULL,
     last_stay_price     DECIMAL(10,2) NULL,
     currency            CHAR(3) NOT NULL DEFAULT 'USD',
     booking_source      VARCHAR(100) NULL,
     confirmation_code   VARCHAR(100) NULL,
     would_return        TINYINT(1) NULL,
     notes               TEXT NULL,
+    is_private          TINYINT(1) NOT NULL DEFAULT 0,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_hotel_stays_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT chk_hotel_rating CHECK (rating IS NULL OR rating BETWEEN 1 AND 5),
-    CONSTRAINT chk_hotel_wifi CHECK (wifi_quality IS NULL OR wifi_quality BETWEEN 1 AND 5),
-    CONSTRAINT chk_hotel_noise CHECK (noise_level IS NULL OR noise_level BETWEEN 1 AND 5),
+    CONSTRAINT fk_hotel_stays_property FOREIGN KEY (hotel_property_id) REFERENCES hotel_properties(id) ON DELETE CASCADE,
+    CONSTRAINT chk_stay_rating CHECK (stay_rating IS NULL OR stay_rating BETWEEN 1 AND 5),
     CONSTRAINT chk_hotel_dates CHECK (stay_end >= stay_start),
     INDEX idx_hotel_user (user_id),
-    INDEX idx_hotel_city (city),
-    INDEX idx_hotel_blacklist (is_blacklisted),
-    INDEX idx_hotel_name (hotel_name)
+    INDEX idx_hotel_property (hotel_property_id),
+    INDEX idx_hotel_private (is_private),
+    INDEX idx_hotel_dates (stay_start)
 ) ENGINE=InnoDB;
 
 CREATE TABLE hotel_photos (
@@ -222,6 +249,25 @@ CREATE TABLE visibility_rules (
     UNIQUE KEY uq_vis_rule (subject_user_id, target_user_id, direction, field_name),
     INDEX idx_vis_subject (subject_user_id),
     INDEX idx_vis_target (target_user_id)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- visibility_blocks: hide a specific hotel stay or trip from selected users
+-- while leaving org-default sharing intact for everyone else. is_private on
+-- the resource itself hides it from everyone.
+-- ----------------------------------------------------------------------------
+CREATE TABLE visibility_blocks (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_user_id   INT UNSIGNED NOT NULL,
+    resource_type   ENUM('hotel_stay','trip') NOT NULL,
+    resource_id     INT UNSIGNED NOT NULL,
+    blocked_user_id INT UNSIGNED NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vis_block_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_vis_block_target FOREIGN KEY (blocked_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_vis_block (resource_type, resource_id, blocked_user_id),
+    INDEX idx_vis_block_resource (resource_type, resource_id),
+    INDEX idx_vis_block_owner (owner_user_id)
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------

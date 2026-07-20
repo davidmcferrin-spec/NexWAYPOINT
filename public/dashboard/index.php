@@ -6,6 +6,7 @@ use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\UserRepository;
+use NexWaypoint\Visibility\VisibilityBlockRepository;
 use NexWaypoint\Visibility\VisibilityEngine;
 use NexWaypoint\Visibility\VisibilityRuleRepository;
 
@@ -18,6 +19,7 @@ $userRepo = new UserRepository($db, $logger);
 $tripRepo = new TripRepository($db, $logger);
 $statusEngine = new TripStatusEngine($tripRepo, $logger);
 $visibilityEngine = new VisibilityEngine($userRepo, new VisibilityRuleRepository($db));
+$blockRepo = new VisibilityBlockRepository($db);
 $notifications = new NotificationRepository($db);
 
 $myStatus = $statusEngine->resolveForUser($user->id);
@@ -28,7 +30,8 @@ $unreadCount = $notifications->unreadCount($user->id);
  * Manual work-state statuses (home/office/remote/unavailable) are always
  * shown team-wide -- they aren't trip data and aren't covered by the
  * visibility_rules field list. Trip-derived detail (destination city,
- * carrier, etc.) IS gated per VisibilityEngine, per-viewer.
+ * carrier, etc.) IS gated per VisibilityEngine, per-viewer. Private trips
+ * and per-user hide lists suppress travel detail entirely.
  */
 $alwaysVisibleStatuses = ['home', 'office', 'remote', 'unavailable'];
 
@@ -44,19 +47,34 @@ foreach ($userRepo->findAllActive() as $teammate) {
     $displayLabel = $status['label'];
     if (!in_array($status['status'], $alwaysVisibleStatuses, true) && $tripId !== null) {
         $trip = $tripRepo->find((int) $tripId);
-        $tripIsPrivate = $trip !== null && $trip->isPrivate;
-        $visibility = $visibilityEngine->getVisibleFields($user->id, $teammate->id, $tripIsPrivate);
+        $hidden = $trip !== null && $blockRepo->isHiddenFromViewer(
+            $teammate->id,
+            $user->id,
+            $trip->isPrivate,
+            VisibilityBlockRepository::TYPE_TRIP,
+            $trip->id
+        );
 
-        if (!in_array('destination_city', $visibility['visible_fields'], true)) {
-            // Collapse to a status-only label with no city/route detail.
+        if ($hidden) {
             $displayLabel = match ($status['status']) {
-                'en_route' => 'Traveling',
-                'layover' => 'Traveling (layover)',
-                'delayed' => 'Traveling (delayed)',
-                'at_hotel' => 'Traveling',
+                'en_route', 'layover', 'delayed', 'at_hotel' => 'Traveling',
                 'cancelled' => 'Travel disrupted',
-                default => $status['label'],
+                default => 'Unavailable',
             };
+        } else {
+            $tripIsPrivate = $trip !== null && $trip->isPrivate;
+            $visibility = $visibilityEngine->getVisibleFields($user->id, $teammate->id, $tripIsPrivate);
+
+            if (!in_array('destination_city', $visibility['visible_fields'], true)) {
+                $displayLabel = match ($status['status']) {
+                    'en_route' => 'Traveling',
+                    'layover' => 'Traveling (layover)',
+                    'delayed' => 'Traveling (delayed)',
+                    'at_hotel' => 'Traveling',
+                    'cancelled' => 'Travel disrupted',
+                    default => $status['label'],
+                };
+            }
         }
     }
 
@@ -88,6 +106,7 @@ function statusBadgeClass(string $status): string
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/hotels/list.php">Hotels</a>
         <a href="/hotels/add.php">+ Log a stay</a>
+        <a href="/flights/add.php">+ Add a flight</a>
         <a href="/settings/visibility.php">Sharing</a>
         <a href="/logout.php">Sign out (<?= htmlspecialchars($user->displayName, ENT_QUOTES) ?>) <?php if ($unreadCount > 0): ?>&middot; <?= $unreadCount ?> new<?php endif; ?></a>
     </div>
@@ -119,13 +138,28 @@ function statusBadgeClass(string $status): string
 
     <h2>Your upcoming trips</h2>
     <?php if ($myUpcomingTrips === []): ?>
-        <p class="empty-state">Nothing on the books. <a href="/hotels/add.php">Log a hotel stay</a> or add a trip.</p>
+        <p class="empty-state">Nothing on the books. <a href="/flights/add.php">Add a flight</a> or <a href="/hotels/add.php">log a hotel stay</a>.</p>
     <?php else: ?>
         <?php foreach ($myUpcomingTrips as $trip): ?>
             <div class="card">
                 <h3><?= htmlspecialchars($trip->destinationCity, ENT_QUOTES) ?> <?php if ($trip->isPrivate): ?><span class="badge badge-blacklist">Private</span><?php endif; ?></h3>
                 <p><?= htmlspecialchars($trip->startDate, ENT_QUOTES) ?> &rarr; <?= htmlspecialchars($trip->endDate, ENT_QUOTES) ?></p>
                 <?php if ($trip->tripPurpose !== null): ?><p><?= htmlspecialchars($trip->tripPurpose, ENT_QUOTES) ?></p><?php endif; ?>
+                <?php
+                $segments = $tripRepo->segmentsForTrip((int) $trip->id);
+                foreach ($segments as $segment):
+                    if ($segment->segmentType !== 'flight') {
+                        continue;
+                    }
+                    ?>
+                    <p>
+                        <?= htmlspecialchars(trim(($segment->carrier ?? '') . ' ' . ($segment->flightNumber ?? '')), ENT_QUOTES) ?>
+                        · <?= htmlspecialchars(($segment->origin ?? '?') . ' → ' . ($segment->destination ?? '?'), ENT_QUOTES) ?>
+                        <?php if ($segment->departDt !== null): ?>
+                            · <?= htmlspecialchars($segment->departDt, ENT_QUOTES) ?>
+                        <?php endif; ?>
+                    </p>
+                <?php endforeach; ?>
             </div>
         <?php endforeach; ?>
     <?php endif; ?>

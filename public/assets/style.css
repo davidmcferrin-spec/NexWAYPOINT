@@ -53,12 +53,15 @@ th { color: var(--text-dim); font-weight: 600; font-size: 0.85rem; text-transfor
 form.stack { display: flex; flex-direction: column; gap: 0.75rem; max-width: 640px; }
 form.stack label { font-size: 0.85rem; color: var(--text-dim); }
 form.stack input[type=text], form.stack input[type=number], form.stack input[type=date],
+form.stack input[type=datetime-local],
 form.stack textarea, form.stack select {
     width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border);
     background: var(--bg); color: var(--text);
 }
 .checkbox-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem; }
 .checkbox-grid label { display: flex; align-items: center; gap: 0.4rem; color: var(--text); }
+.hint { font-size: 0.85rem; color: var(--text-dim); margin: 0.4rem 0; }
+.privacy-fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; }
 button.primary { padding: 0.6rem 1.2rem; border: none; border-radius: 4px; background: var(--accent); color: #04121f; font-weight: 600; cursor: pointer; align-self: flex-start; }
 
 .empty-state { color: var(--text-dim); padding: 2rem 0; text-align: center; }

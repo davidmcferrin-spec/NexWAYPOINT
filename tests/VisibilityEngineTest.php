@@ -28,31 +28,31 @@ final class VisibilityEngineTest extends NexWaypointTestCase
         self::assertSame(VisibilityEngine::ALL_FIELDS, $result['visible_fields']);
     }
 
-    public function testTopDownDefaultsToCityAndDatesOnly(): void
+    public function testTopDownDefaultsToAllFields(): void
     {
         $managerId = $this->insertUser('manager', null, 'manager');
         $subordinateId = $this->insertUser('sub', $managerId, 'subordinate');
         $engine = $this->makeEngine();
 
-        // Manager viewing subordinate's data.
+        // Manager viewing subordinate's data -- full exposure by default.
         $result = $engine->getVisibleFields($managerId, $subordinateId);
 
         self::assertSame(VisibilityEngine::DIRECTION_TOP_DOWN, $result['direction']);
-        sort($result['visible_fields']);
-        self::assertSame(['destination_city', 'travel_dates'], $result['visible_fields']);
+        self::assertEqualsCanonicalizing(VisibilityEngine::ALL_FIELDS, $result['visible_fields']);
     }
 
-    public function testBottomUpDefaultsToAllFields(): void
+    public function testBottomUpDefaultsToCityAndDatesOnly(): void
     {
         $managerId = $this->insertUser('manager', null, 'manager');
         $subordinateId = $this->insertUser('sub', $managerId, 'subordinate');
         $engine = $this->makeEngine();
 
-        // Subordinate viewing manager's data.
+        // Subordinate viewing manager's data -- limited exposure by default.
         $result = $engine->getVisibleFields($subordinateId, $managerId);
 
         self::assertSame(VisibilityEngine::DIRECTION_BOTTOM_UP, $result['direction']);
-        self::assertEqualsCanonicalizing(VisibilityEngine::ALL_FIELDS, $result['visible_fields']);
+        sort($result['visible_fields']);
+        self::assertSame(['destination_city', 'travel_dates'], $result['visible_fields']);
     }
 
     public function testLateralDefaultsToAllFields(): void
@@ -89,8 +89,8 @@ final class VisibilityEngineTest extends NexWaypointTestCase
         $subordinateId = $this->insertUser('sub', $managerId, 'subordinate');
         $engine = $this->makeEngine();
 
-        // Bottom-up would normally be "all fields" -- but the trip is private.
-        $result = $engine->getVisibleFields($subordinateId, $managerId, tripIsPrivate: true);
+        // Top-down would normally be all fields -- but the trip is private.
+        $result = $engine->getVisibleFields($managerId, $subordinateId, tripIsPrivate: true);
 
         self::assertSame([], $result['visible_fields']);
     }
@@ -102,11 +102,11 @@ final class VisibilityEngineTest extends NexWaypointTestCase
         $rules = new VisibilityRuleRepository($this->db);
         $engine = $this->makeEngine();
 
-        // Subject (subordinate) grants their manager the flight_number field too,
-        // on top of the top-down default of city+dates.
-        $rules->upsert($subordinateId, $managerId, VisibilityEngine::DIRECTION_USER_USER, 'flight_number', true);
+        // Subject (manager) grants a subordinate the flight_number field too,
+        // on top of the bottom-up default of city+dates.
+        $rules->upsert($managerId, $subordinateId, VisibilityEngine::DIRECTION_USER_USER, 'flight_number', true);
 
-        $result = $engine->getVisibleFields($managerId, $subordinateId);
+        $result = $engine->getVisibleFields($subordinateId, $managerId);
 
         self::assertTrue($result['overrides_applied']);
         self::assertContains('flight_number', $result['visible_fields']);
@@ -120,10 +120,10 @@ final class VisibilityEngineTest extends NexWaypointTestCase
         $rules = new VisibilityRuleRepository($this->db);
         $engine = $this->makeEngine();
 
-        // Subordinate broadens the TOP_DOWN default to include trip_purpose for all managers.
-        $rules->upsert($subordinateId, null, VisibilityEngine::DIRECTION_TOP_DOWN, 'trip_purpose', true);
+        // Manager broadens the BOTTOM_UP default to include trip_purpose for all subordinates.
+        $rules->upsert($managerId, null, VisibilityEngine::DIRECTION_BOTTOM_UP, 'trip_purpose', true);
 
-        $result = $engine->getVisibleFields($managerId, $subordinateId);
+        $result = $engine->getVisibleFields($subordinateId, $managerId);
 
         self::assertContains('trip_purpose', $result['visible_fields']);
     }

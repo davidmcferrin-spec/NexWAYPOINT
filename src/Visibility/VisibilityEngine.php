@@ -14,8 +14,8 @@ use NexWaypoint\Users\UserRepository;
  *
  * Direction, per NexWAYPOINT's org model (Manager -> Team Member):
  *   SELF        subject == requester                    -> all fields
- *   TOP_DOWN    requester is subject's manager           -> city + dates only by default
- *   BOTTOM_UP   requester is subordinate of subject       -> all fields by default
+ *   TOP_DOWN    requester is subject's manager           -> all fields by default
+ *   BOTTOM_UP   requester is subordinate of subject       -> city + dates only by default
  *   LATERAL     requester and subject share a manager     -> all fields by default
  *   USER_USER   n/a as a *resolved* direction -- this is the override
  *               channel available regardless of hierarchy relationship
@@ -25,16 +25,10 @@ use NexWaypoint\Users\UserRepository;
  * override (subject's own default for that whole direction) < per-viewer
  * override (direction-specific or explicit user_user grant).
  *
- * NOTE ON A REAL AMBIGUITY IN THE SOURCE REQUIREMENTS: the free-text project
- * brief said "managers can see most if not all... default for subordinates
- * is visible unless marked private" (implying TOP_DOWN defaults to full
- * visibility). The structured "Org hierarchy" spec block and the detailed
- * Phase 2 spec pasted in the same request both say TOP_DOWN defaults to
- * city+date only. Those two structured blocks agree with each other and are
- * more precise than the one free-text sentence, so this implementation
- * follows them: TOP_DOWN = city+date by default, BOTTOM_UP = full by
- * default. If that's not what you actually want, it's a one-line change in
- * DIRECTION_DEFAULTS below -- flagging it here rather than guessing silently.
+ * Defaults: managers get full exposure of subordinate travel (TOP_DOWN =
+ * all fields). Subordinates get limited exposure of manager travel
+ * (BOTTOM_UP = city+dates). Per-item is_private / visibility_blocks can
+ * still hide a hotel or flight from everyone or from selected users.
  */
 final class VisibilityEngine
 {
@@ -105,7 +99,7 @@ final class VisibilityEngine
             return ['direction' => $direction, 'visible_fields' => self::ALL_FIELDS, 'overrides_applied' => false];
         }
 
-        $defaultFields = in_array($direction, [self::DIRECTION_TOP_DOWN, self::DIRECTION_UNRELATED], true)
+        $defaultFields = in_array($direction, [self::DIRECTION_BOTTOM_UP, self::DIRECTION_UNRELATED], true)
             ? self::RESTRICTED_FIELDS
             : self::ALL_FIELDS;
 

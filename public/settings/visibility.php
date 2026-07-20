@@ -59,9 +59,18 @@ $fieldLabels = [
 ];
 
 $panels = [
-    VisibilityEngine::DIRECTION_TOP_DOWN => ['title' => 'My manager (top-down)', 'default' => ['destination_city', 'travel_dates']],
-    VisibilityEngine::DIRECTION_BOTTOM_UP => ['title' => 'My subordinates (bottom-up)', 'default' => VisibilityEngine::ALL_FIELDS],
-    VisibilityEngine::DIRECTION_LATERAL => ['title' => 'My peers (lateral)', 'default' => VisibilityEngine::ALL_FIELDS],
+    VisibilityEngine::DIRECTION_TOP_DOWN => [
+        'title' => 'What my manager sees of me (top-down)',
+        'default' => VisibilityEngine::ALL_FIELDS,
+    ],
+    VisibilityEngine::DIRECTION_BOTTOM_UP => [
+        'title' => 'What my subordinates see of me (bottom-up)',
+        'default' => ['destination_city', 'travel_dates'],
+    ],
+    VisibilityEngine::DIRECTION_LATERAL => [
+        'title' => 'What my peers see of me (lateral)',
+        'default' => VisibilityEngine::ALL_FIELDS,
+    ],
 ];
 ?>
 <!DOCTYPE html>
@@ -77,6 +86,8 @@ $panels = [
     <div>
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/hotels/list.php">Hotels</a>
+        <a href="/hotels/add.php">+ Log a stay</a>
+        <a href="/flights/add.php">+ Add a flight</a>
         <a href="/settings/visibility.php">Sharing</a>
         <a href="/logout.php">Sign out</a>
     </div>

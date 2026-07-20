@@ -15,6 +15,7 @@ try {
     $expectedTables = [
         'users',
         'user_status_overrides',
+        'hotel_properties',
         'hotel_stays',
         'hotel_photos',
         'trips',
@@ -22,6 +23,7 @@ try {
         'flight_status',
         'parse_log',
         'visibility_rules',
+        'visibility_blocks',
         'aeroapi_usage_log',
         'audit_log',
         'notifications',
@@ -38,13 +40,22 @@ try {
     }
 
     $existingTables = $statement->fetchAll(PDO::FETCH_COLUMN);
-    $installedTables = array_intersect($expectedTables, $existingTables);
-    if (count($installedTables) === count($expectedTables)) {
+    $coreTables = array_values(array_filter(
+        $expectedTables,
+        static fn (string $t) => !in_array($t, ['visibility_blocks'], true)
+    ));
+    $installedCore = array_intersect($coreTables, $existingTables);
+    if (count($installedCore) === count($coreTables)) {
         fwrite(STDOUT, "Database schema is already installed.\n");
         exit(0);
     }
-    if ($installedTables !== []) {
-        $missingTables = array_diff($expectedTables, $existingTables);
+    if ($installedCore !== []) {
+        // Legacy installs may lack hotel_properties until migrate runs.
+        $missingTables = array_diff($coreTables, $existingTables);
+        if ($missingTables === ['hotel_properties'] || $missingTables === []) {
+            fwrite(STDOUT, "Database schema is already installed (pending migrate for hotel_properties).\n");
+            exit(0);
+        }
         throw new RuntimeException(
             'Database schema is only partially installed. Missing tables: ' . implode(', ', $missingTables)
         );

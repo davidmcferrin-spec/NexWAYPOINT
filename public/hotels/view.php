@@ -3,12 +3,14 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
 
-$repo = new HotelStayRepository($app['db'], $app['logger']);
+$propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
+$repo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
 
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $stay = $repo->find($id);
@@ -19,7 +21,13 @@ if ($stay === null || $stay->userId !== $user->id) {
     exit;
 }
 
-$deleted = false;
+$property = $propertyRepo->find($stay->hotelPropertyId);
+if ($property === null) {
+    http_response_code(404);
+    echo 'Property not found.';
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
     if (Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $repo->delete($stay->id, $user->id);
@@ -30,35 +38,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 
 $photos = $repo->photosFor($stay->id);
 
+$bedLabels = ['king' => 'King', 'queen' => 'Queen', 'dual_queen' => 'Dual queen'];
+$bathLabels = ['tub' => 'Tub', 'walk_in_shower' => 'Walk-in shower'];
+
 $rows = [
-    'Brand' => $stay->brand,
-    'Address' => trim(implode(', ', array_filter([$stay->addressLine1, $stay->addressLine2, $stay->city, $stay->stateRegion, $stay->postalCode, $stay->country]))) ?: null,
+    'Brand' => $property->brand,
+    'Address' => trim(implode(', ', array_filter([
+        $property->addressLine1,
+        $property->addressLine2,
+        $property->city,
+        $property->stateRegion,
+        $property->postalCode,
+        $property->country,
+    ]))) ?: null,
+    'Overall property rating' => $property->overallRating !== null
+        ? number_format($property->overallRating, 1) . '★ (average of stay ratings)'
+        : null,
     'Room number' => $stay->roomNumber,
+    'Bed type' => $stay->bedType !== null ? ($bedLabels[$stay->bedType] ?? $stay->bedType) : null,
+    'Bathroom' => $stay->bathroomType !== null ? ($bathLabels[$stay->bathroomType] ?? $stay->bathroomType) : null,
     'Dates' => $stay->stayStart . ' to ' . $stay->stayEnd,
-    'Rating' => $stay->rating !== null ? str_repeat('★', $stay->rating) . str_repeat('☆', 5 - $stay->rating) : null,
-    'WiFi quality' => $stay->wifiQuality,
-    'Noise level' => $stay->noiseLevel,
-    'Last stay price' => $stay->lastStayPrice !== null ? "{$stay->currency} " . number_format($stay->lastStayPrice, 2) : null,
+    'This stay rating' => $stay->stayRating !== null
+        ? str_repeat('★', $stay->stayRating) . str_repeat('☆', 5 - $stay->stayRating)
+        : null,
+    'WiFi quality' => $property->wifiQuality,
+    'Noise level' => $property->noiseLevel,
+    'Walk to office/venue' => $property->walkToOffice
+        ? ('Yes' . ($property->walkToOfficeNotes ? ' — ' . $property->walkToOfficeNotes : ''))
+        : null,
+    'Last stay price' => $stay->lastStayPrice !== null
+        ? "{$stay->currency} " . number_format($stay->lastStayPrice, 2)
+        : null,
     'Booking source' => $stay->bookingSource,
     'Confirmation code' => $stay->confirmationCode,
     'Would return' => $stay->wouldReturn === null ? null : ($stay->wouldReturn ? 'Yes' : 'No'),
 ];
 
 $amenities = array_filter([
-    $stay->hasDesk ? 'Desk' : null,
-    $stay->hasPool ? 'Pool' : null,
-    $stay->hasHotTub ? 'Hot tub' : null,
-    $stay->hasBreakfast ? 'Breakfast' : null,
-    $stay->hasGym ? 'Gym' : null,
-    $stay->hasFreeParking ? 'Free parking' : null,
-    $stay->hasAirportShuttle ? 'Airport shuttle' : null,
+    $property->hasDesk ? 'Desk' : null,
+    $property->hasPool ? 'Pool' : null,
+    $property->hasHotTub ? 'Hot tub' : null,
+    $property->hasBreakfast ? 'Breakfast' : null,
+    $property->hasGym ? 'On-site gym' : null,
+    $property->hasOffsiteGym ? 'Off-site gym' : null,
+    $property->hasFreeParking ? 'Free parking' : null,
+    $property->hasAirportShuttle ? 'Airport shuttle' : null,
+    $property->hasEvCharging ? 'EV charging' : null,
+    $property->hasOnsiteRestaurant ? 'On-site restaurant' : null,
+    $property->walkToOffice ? 'Walk to office' : null,
 ]);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>NexWAYPOINT &middot; <?= htmlspecialchars($stay->hotelName, ENT_QUOTES) ?></title>
+    <title>NexWAYPOINT &middot; <?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?></title>
     <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
@@ -68,19 +102,23 @@ $amenities = array_filter([
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/hotels/list.php">Hotels</a>
         <a href="/hotels/add.php">+ Log a stay</a>
+        <a href="/flights/add.php">+ Add a flight</a>
         <a href="/logout.php">Sign out</a>
     </div>
 </nav>
 <main class="container">
     <p><a href="/hotels/list.php">&larr; Back to hotels</a></p>
     <h1>
-        <?= htmlspecialchars($stay->hotelName, ENT_QUOTES) ?>
-        <?php if ($stay->isBlacklisted): ?><span class="badge badge-blacklist">Blacklisted</span><?php endif; ?>
+        <?= htmlspecialchars($property->hotelName, ENT_QUOTES) ?>
+        <?php if ($property->isBlacklisted): ?><span class="badge badge-blacklist">Blacklisted</span><?php endif; ?>
+        <?php if ($stay->isPrivate): ?><span class="badge badge-blacklist">Private</span><?php endif; ?>
     </h1>
 
-    <?php if ($stay->isBlacklisted): ?>
-        <p class="alert alert-error"><?= htmlspecialchars($stay->blacklistReason ?? 'No reason recorded.', ENT_QUOTES) ?></p>
+    <?php if ($property->isBlacklisted): ?>
+        <p class="alert alert-error"><?= htmlspecialchars($property->blacklistReason ?? 'No reason recorded.', ENT_QUOTES) ?></p>
     <?php endif; ?>
+
+    <p><a href="/hotels/add.php?property_id=<?= (int) $property->id ?>">Log another stay at this property</a></p>
 
     <div class="card">
         <table>
@@ -95,12 +133,12 @@ $amenities = array_filter([
         </table>
     </div>
 
-    <?php if ($stay->uniqueFeatures !== null): ?>
-        <div class="card"><h3>Unique features</h3><p><?= nl2br(htmlspecialchars($stay->uniqueFeatures, ENT_QUOTES)) ?></p></div>
+    <?php if ($property->uniqueFeatures !== null): ?>
+        <div class="card"><h3>Unique features</h3><p><?= nl2br(htmlspecialchars($property->uniqueFeatures, ENT_QUOTES)) ?></p></div>
     <?php endif; ?>
 
     <?php if ($stay->notes !== null): ?>
-        <div class="card"><h3>Notes</h3><p><?= nl2br(htmlspecialchars($stay->notes, ENT_QUOTES)) ?></p></div>
+        <div class="card"><h3>Stay notes</h3><p><?= nl2br(htmlspecialchars($stay->notes, ENT_QUOTES)) ?></p></div>
     <?php endif; ?>
 
     <?php if ($photos !== []): ?>

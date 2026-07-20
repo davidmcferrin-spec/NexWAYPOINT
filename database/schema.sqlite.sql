@@ -35,51 +35,72 @@ CREATE TABLE user_status_overrides (
 );
 CREATE INDEX idx_status_user_date ON user_status_overrides(user_id, effective_date);
 
+CREATE TABLE hotel_properties (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id                 INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    hotel_name              TEXT NOT NULL,
+    brand                   TEXT NULL,
+    address_line1           TEXT NULL,
+    address_line2           TEXT NULL,
+    city                    TEXT NULL,
+    state_region            TEXT NULL,
+    postal_code             TEXT NULL,
+    country                 TEXT NULL,
+    latitude                REAL NULL,
+    longitude               REAL NULL,
+    has_desk                INTEGER NOT NULL DEFAULT 0,
+    desk_notes              TEXT NULL,
+    has_pool                INTEGER NOT NULL DEFAULT 0,
+    has_hot_tub             INTEGER NOT NULL DEFAULT 0,
+    has_breakfast           INTEGER NOT NULL DEFAULT 0,
+    breakfast_notes         TEXT NULL,
+    has_gym                 INTEGER NOT NULL DEFAULT 0,
+    has_free_parking        INTEGER NOT NULL DEFAULT 0,
+    has_airport_shuttle     INTEGER NOT NULL DEFAULT 0,
+    has_ev_charging         INTEGER NOT NULL DEFAULT 0,
+    has_onsite_restaurant   INTEGER NOT NULL DEFAULT 0,
+    has_offsite_gym         INTEGER NOT NULL DEFAULT 0,
+    walk_to_office          INTEGER NOT NULL DEFAULT 0,
+    walk_to_office_notes    TEXT NULL,
+    wifi_quality            INTEGER NULL CHECK (wifi_quality IS NULL OR wifi_quality BETWEEN 1 AND 5),
+    noise_level             INTEGER NULL CHECK (noise_level IS NULL OR noise_level BETWEEN 1 AND 5),
+    unique_features         TEXT NULL,
+    is_blacklisted          INTEGER NOT NULL DEFAULT 0,
+    blacklist_reason        TEXT NULL,
+    overall_rating          REAL NULL CHECK (overall_rating IS NULL OR (overall_rating >= 1 AND overall_rating <= 5)),
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_prop_user ON hotel_properties(user_id);
+CREATE INDEX idx_prop_city ON hotel_properties(city);
+CREATE INDEX idx_prop_blacklist ON hotel_properties(is_blacklisted);
+CREATE INDEX idx_prop_name ON hotel_properties(hotel_name);
+
 CREATE TABLE hotel_stays (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    hotel_name          TEXT NOT NULL,
-    brand               TEXT NULL,
-    address_line1       TEXT NULL,
-    address_line2       TEXT NULL,
-    city                TEXT NULL,
-    state_region        TEXT NULL,
-    postal_code         TEXT NULL,
-    country             TEXT NULL,
-    latitude            REAL NULL,
-    longitude           REAL NULL,
+    hotel_property_id   INTEGER NOT NULL REFERENCES hotel_properties(id) ON DELETE CASCADE,
     room_number         TEXT NULL,
+    bed_type            TEXT NULL CHECK (bed_type IS NULL OR bed_type IN ('king','queen','dual_queen')),
+    bathroom_type       TEXT NULL CHECK (bathroom_type IS NULL OR bathroom_type IN ('tub','walk_in_shower')),
     stay_start          TEXT NOT NULL,
     stay_end            TEXT NOT NULL,
-    rating              INTEGER NULL CHECK (rating IS NULL OR rating BETWEEN 1 AND 5),
-    has_desk            INTEGER NOT NULL DEFAULT 0,
-    desk_notes          TEXT NULL,
-    has_pool            INTEGER NOT NULL DEFAULT 0,
-    has_hot_tub         INTEGER NOT NULL DEFAULT 0,
-    has_breakfast       INTEGER NOT NULL DEFAULT 0,
-    breakfast_notes     TEXT NULL,
-    has_gym             INTEGER NOT NULL DEFAULT 0,
-    has_free_parking    INTEGER NOT NULL DEFAULT 0,
-    has_airport_shuttle INTEGER NOT NULL DEFAULT 0,
-    wifi_quality        INTEGER NULL CHECK (wifi_quality IS NULL OR wifi_quality BETWEEN 1 AND 5),
-    noise_level         INTEGER NULL CHECK (noise_level IS NULL OR noise_level BETWEEN 1 AND 5),
-    unique_features     TEXT NULL,
-    is_blacklisted      INTEGER NOT NULL DEFAULT 0,
-    blacklist_reason    TEXT NULL,
+    stay_rating         INTEGER NULL CHECK (stay_rating IS NULL OR stay_rating BETWEEN 1 AND 5),
     last_stay_price     REAL NULL,
     currency            TEXT NOT NULL DEFAULT 'USD',
     booking_source      TEXT NULL,
     confirmation_code   TEXT NULL,
     would_return        INTEGER NULL,
     notes               TEXT NULL,
+    is_private          INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
     CHECK (stay_end >= stay_start)
 );
 CREATE INDEX idx_hotel_user ON hotel_stays(user_id);
-CREATE INDEX idx_hotel_city ON hotel_stays(city);
-CREATE INDEX idx_hotel_blacklist ON hotel_stays(is_blacklisted);
-CREATE INDEX idx_hotel_name ON hotel_stays(hotel_name);
+CREATE INDEX idx_hotel_property ON hotel_stays(hotel_property_id);
+CREATE INDEX idx_hotel_private ON hotel_stays(is_private);
+CREATE INDEX idx_hotel_dates ON hotel_stays(stay_start);
 
 CREATE TABLE hotel_photos (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +200,18 @@ CREATE TABLE visibility_rules (
 );
 CREATE INDEX idx_vis_subject ON visibility_rules(subject_user_id);
 CREATE INDEX idx_vis_target ON visibility_rules(target_user_id);
+
+CREATE TABLE visibility_blocks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_type   TEXT NOT NULL CHECK (resource_type IN ('hotel_stay','trip')),
+    resource_id     INTEGER NOT NULL,
+    blocked_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (resource_type, resource_id, blocked_user_id)
+);
+CREATE INDEX idx_vis_block_resource ON visibility_blocks(resource_type, resource_id);
+CREATE INDEX idx_vis_block_owner ON visibility_blocks(owner_user_id);
 
 CREATE TABLE aeroapi_usage_log (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,

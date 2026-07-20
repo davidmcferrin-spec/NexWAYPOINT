@@ -6,6 +6,8 @@ namespace NexWaypoint\Mail;
 
 use NexWaypoint\Core\Env;
 use NexWaypoint\Core\Logger;
+use NexWaypoint\Hotels\HotelProperty;
+use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStay;
 use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Mail\Parsers\GenericHotelConfirmationParser;
@@ -31,6 +33,7 @@ final class MailPoller
         private readonly string $sourceName,
         private readonly EmailConfirmationDetector $detector,
         private readonly UserRepository $users,
+        private readonly HotelPropertyRepository $hotelProperties,
         private readonly HotelStayRepository $hotelStays,
         private readonly NotificationRepository $notifications,
         private readonly ParseLogRepository $parseLog,
@@ -124,37 +127,53 @@ final class MailPoller
             return false;
         }
 
+        $property = $this->hotelProperties->findByNameCity($owner->id, $extracted['property_name'], null);
+        if ($property === null) {
+            $property = $this->hotelProperties->create(new HotelProperty(
+                id: null,
+                userId: $owner->id,
+                hotelName: $extracted['property_name'],
+                brand: null,
+                addressLine1: $extracted['address'],
+                addressLine2: null,
+                city: null,
+                stateRegion: null,
+                postalCode: null,
+                country: null,
+                latitude: null,
+                longitude: null,
+                hasDesk: false,
+                deskNotes: null,
+                hasPool: false,
+                hasHotTub: false,
+                hasBreakfast: false,
+                breakfastNotes: null,
+                hasGym: false,
+                hasFreeParking: false,
+                hasAirportShuttle: false,
+                hasEvCharging: false,
+                hasOnsiteRestaurant: false,
+                hasOffsiteGym: false,
+                walkToOffice: false,
+                walkToOfficeNotes: null,
+                wifiQuality: null,
+                noiseLevel: null,
+                uniqueFeatures: $extracted['room_type'],
+                isBlacklisted: false,
+                blacklistReason: null,
+            ), $owner->id);
+        }
+
         $stay = new HotelStay(
             id: null,
             userId: $owner->id,
-            hotelName: $extracted['property_name'],
-            brand: null,
-            addressLine1: $extracted['address'],
-            addressLine2: null,
-            city: null,
-            stateRegion: null,
-            postalCode: null,
-            country: null,
-            latitude: null,
-            longitude: null,
+            hotelPropertyId: (int) $property->id,
             roomNumber: null,
+            bedType: null,
+            bathroomType: null,
             stayStart: $extracted['check_in'],
             stayEnd: $extracted['check_out'],
-            rating: null,
-            hasDesk: false,
-            deskNotes: null,
-            hasPool: false,
-            hasHotTub: false,
-            hasBreakfast: false,
-            breakfastNotes: null,
-            hasGym: false,
-            hasFreeParking: false,
-            hasAirportShuttle: false,
-            wifiQuality: null,
-            noiseLevel: null,
-            uniqueFeatures: $extracted['room_type'],
-            isBlacklisted: false,
-            blacklistReason: null,
+            stayRating: null,
             lastStayPrice: null,
             currency: 'USD',
             bookingSource: 'email_import',
@@ -169,7 +188,7 @@ final class MailPoller
             $owner->id,
             null,
             'hotel_import',
-            "We found a hotel stay at {$created->hotelName} ({$created->stayStart} to {$created->stayEnd}). Review it in Hotel Stays."
+            "We found a hotel stay at {$property->hotelName} ({$created->stayStart} to {$created->stayEnd}). Review it in Hotel Stays."
         );
 
         $this->source->markProcessed($message->uid);

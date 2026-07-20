@@ -12,15 +12,15 @@ namespace NexWaypoint\Hotels;
  * road):
  *
  *   1. A curated master list of criteria that frequent business travelers
- *      commonly care about but that aren't yet columns in hotel_stays.
- *      These are suggestions for fields to start tracking, not a schema
- *      migration -- if a suggestion earns its keep, promote it to a real
- *      column later.
- *   2. Keyword-frequency scanning of free-text notes/unique_features across
- *      a user's own stay history: if the same theme keeps showing up in
- *      prose (e.g. "thin walls" mentioned 3 times), that's a signal to
- *      formalize it as a structured field instead of re-typing it.
- */
+     *      commonly care about but that aren't yet columns in hotel_properties.
+     *      These are suggestions for fields to start tracking, not a schema
+     *      migration -- if a suggestion earns its keep, promote it to a real
+     *      column later.
+     *   2. Keyword-frequency scanning of free-text notes across a user's own
+     *      stay history: if the same theme keeps showing up in prose
+     *      (e.g. "thin walls" mentioned 3 times), that's a signal to
+     *      formalize it as a structured field instead of re-typing it.
+     */
 final class CriteriaSuggestionEngine
 {
     /**
@@ -78,7 +78,7 @@ final class CriteriaSuggestionEngine
         $counts = array_fill_keys(array_keys(self::NOTE_KEYWORDS), 0);
 
         foreach ($stays as $stay) {
-            $haystack = strtolower(trim(($stay->notes ?? '') . ' ' . ($stay->uniqueFeatures ?? '')));
+            $haystack = strtolower(trim((string) ($stay->notes ?? '')));
             if ($haystack === '') {
                 continue;
             }
@@ -86,7 +86,7 @@ final class CriteriaSuggestionEngine
                 foreach ($keywords as $keyword) {
                     if (str_contains($haystack, $keyword)) {
                         $counts[$theme]++;
-                        break; // count each stay once per theme
+                        break;
                     }
                 }
             }

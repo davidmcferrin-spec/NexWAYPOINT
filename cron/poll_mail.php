@@ -11,6 +11,7 @@ declare(strict_types=1);
  */
 
 use NexWaypoint\Core\Env;
+use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Mail\DreamHostImapSource;
 use NexWaypoint\Mail\EmailConfirmationDetector;
@@ -37,12 +38,14 @@ $source = match ($sourceName) {
 };
 
 /** @var MailSourceInterface $source */
+$propertyRepo = new HotelPropertyRepository($db, $logger);
 $poller = new MailPoller(
     $source,
     $sourceName,
     new EmailConfirmationDetector(),
     new UserRepository($db, $logger),
-    new HotelStayRepository($db, $logger),
+    $propertyRepo,
+    new HotelStayRepository($db, $logger, $propertyRepo),
     new NotificationRepository($db),
     new ParseLogRepository($db),
     $logger,

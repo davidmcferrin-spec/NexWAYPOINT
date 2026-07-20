@@ -11,30 +11,28 @@ time, based in Huntsville, AL. Builds his own tools: Python/PHP/MySQL or
 SQLite, self-hosted, reliability and low-maintenance-while-traveling over
 feature breadth. Prefers direct technical pushback over agreement.
 
-## Status as of this build (2026-07-18)
+## Status as of this build (2026-07-19)
 
-v1 scaffold is complete and passes lint + tests: hotel stay tracker (full
-CRUD + blacklist + criteria suggestions + photo upload), mail ingestion
-(DreamHost IMAP working end-to-end, Gmail/M365 interfaces defined but
-throw `NotImplementedException`), a generic hotel-confirmation parser,
-FlightAware AeroAPI client with rate limiting + caching, trip status
-engine, alert evaluator + notifications, and the visibility/sharing
-engine covering all five directions with override precedence. Basic
-server-rendered PHP UI exists for login, hotel list/add/view, dashboard,
-and sharing settings. VPS deployment is bootstrapped by an idempotent
-`setup.sh` that installs/verifies dependencies, creates `.env`, initializes
-MySQL or SQLite, creates the first local user, and configures eligible cron
-jobs. Additional users can be created with `scripts/create_user.php`. Install
-auto-seeds `admin` with a random password when the database has no users;
-`setup.sh reset-password` generates a new one.
+v1 scaffold is complete and passes lint + tests: hotel tracker split into
+`hotel_properties` (identity, amenities including EV/restaurant/off-site
+gym/walk-to-office, blacklist, overall rating) and `hotel_stays` (dates,
+room/bed/bath, stay rating, price/privacy); add form can reuse a prior
+property; mail ingestion (DreamHost IMAP working end-to-end, Gmail/M365
+interfaces defined but throw `NotImplementedException`), a generic
+hotel-confirmation parser, FlightAware AeroAPI client with rate limiting
++ caching, trip status engine, alert evaluator + notifications, and the
+visibility/sharing engine covering all five directions with override
+precedence. Basic server-rendered PHP UI exists for login, hotel
+list/add/view, dashboard, and sharing settings. VPS deployment is
+bootstrapped by an idempotent `setup.sh`. Additional users via
+`scripts/create_user.php`. Install auto-seeds `admin` with a random
+password; `setup.sh reset-password` regenerates. Existing DBs need
+`php scripts/migrate.php` after pull.
 
 **Not started:** flight/train/car email parsers (only hotel), Azure AD
 SSO, map view, PWA/offline, push notifications, hotel-stay edit page,
 approval UI for auto-imported stays (currently auto-creates + notifies
 instead of a pending-confirmation flow).
-
-24 PHPUnit tests / 56 assertions passing against an in-memory SQLite DB.
-All PHP files pass `php -l`.
 
 ## Key architecture decisions (and why)
 
@@ -57,13 +55,16 @@ All PHP files pass `php -l`.
   said M365/Graph integration "would be cool in the future," implying it
   isn't a v1 blocker. Local auth unblocks everything else without an
   enterprise app registration in the loop.
-- **Visibility defaults resolved a real contradiction in the brief.** See
-  the "A note on the visibility defaults" section in README.md --
-  TOP_DOWN (manager viewing subordinate) defaults to city+date only,
-  BOTTOM_UP (subordinate viewing manager) defaults to full visibility.
-  This follows the two structured spec blocks the user pasted, not the
-  one looser free-text sentence that seemed to say the opposite. If this
-  is wrong, it's a one-line fix in `VisibilityEngine::getVisibleFields()`.
+- **Visibility defaults:** TOP_DOWN (manager viewing subordinate) defaults
+  to full visibility; BOTTOM_UP (subordinate viewing manager) defaults to
+  city+date only. Managers get total exposure of team travel; subordinates
+  have limited exposure of managers. Per-hotel / per-trip `is_private` and
+  `visibility_blocks` can hide an item from everyone or from selected users.
+- **Hotels are properties vs stays.** Property identity/amenities/blacklist
+  live on `hotel_properties`; visit-specific room/bed/bath/`stay_rating`
+  live on `hotel_stays`. `overall_rating` on the property is
+  `AVG(stay_rating)` recomputed on stay create/update/delete. Add-stay UI
+  can pick a prior property or create a new one.
 - **Auto-import creates the hotel stay directly + notifies**, rather than
   a pending-approval queue the user has to click through. The original
   "We found a trip... Confirm?" flow from the pasted spec is more UI than
@@ -99,14 +100,15 @@ All PHP files pass `php -l`.
   tests passed a fictional date to the engine).
 - `hotel_stays` and `trip_segments` are intentionally decoupled --
   `trip_segments.hotel_stay_id` is a nullable FK, not a required link.
-  MailPoller currently only writes `hotel_stays`, not `trips`/
-  `trip_segments`, for parsed hotel confirmations (see README gap list).
-- Value objects (`HotelStay`, `Trip`, `TripSegment`, `User`) use readonly
-  properties with named-argument construction. `toArray()`/`fromRow()` use
-  **snake_case** keys (DB column names); constructors use **camelCase**
-  parameter names. Don't spread `toArray()` output directly into the
-  constructor -- go through `fromRow()` instead (a test caught this exact
-  mistake -- see the comment in `tests/HotelStayRepositoryTest.php::testUpdateChangesFields`).
+  MailPoller currently find-or-creates `hotel_properties` then writes
+  `hotel_stays`, not `trips`/`trip_segments`, for parsed hotel
+  confirmations (see README gap list).
+- Value objects (`HotelProperty`, `HotelStay`, `Trip`, `TripSegment`,
+  `User`) use readonly properties with named-argument construction.
+  `toArray()`/`fromRow()` use **snake_case** keys (DB column names);
+  constructors use **camelCase** parameter names. Don't spread `toArray()`
+  output directly into the constructor -- go through `fromRow()` instead
+  (see `tests/HotelStayRepositoryTest.php::testUpdateStayRatingUpdatesOverall`).
 - The sandbox this was built in has no PHP preinstalled and no root
   access; PHP 8.1 + extensions + PHPUnit were pulled via `apt-get download`
   (no `apt-get install`) and extracted with `dpkg-deb -x` into a scratch

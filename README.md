@@ -7,18 +7,23 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
 
 ## What's built (v1)
 
-- **Hotel stay tracker** -- log stays with room number, desk/pool/hot tub/
-  breakfast/gym/parking/shuttle, WiFi and noise ratings, unique features,
-  last price, blacklist flag + reason, photos. Warns you before you book
-  somewhere you've already blacklisted. Suggests criteria you might not be
-  tracking yet, and flags recurring themes in your free-text notes.
+- **Hotel property + stay tracker** -- properties hold identity/amenities
+  (desk/pool/hot tub/breakfast/gym/off-site gym/parking/shuttle/EV charging/
+  on-site restaurant/walk-to-office, WiFi and noise, blacklist). Stays hold
+  visit-specific data (dates, room number, bed/bathroom type, this stay's
+  1–5 rating, price, photos). Overall property rating is the average of
+  stay ratings. When logging a stay you can pick a prior property or create
+  a new one. Warns before you book somewhere you've blacklisted. Suggests
+  criteria you might not be tracking yet, and flags recurring themes in
+  free-text notes.
 - **Travel dashboard** -- a status engine that resolves each person's
   current state (Home / Office / Remote / In Flight / Layover in X /
   Delayed / At hotel in X) from trip segments and manual overrides.
 - **Mail ingestion** -- DreamHost IMAP polling, sender/subject-based
   confirmation detection, and a generic hotel-confirmation parser. Parsed
-  stays auto-create a draft `hotel_stays` row and notify the owner to
-  review it. Flight/train/car parsers are not built yet (see Roadmap).
+  stays find-or-create a `hotel_properties` row, then create a draft
+  `hotel_stays` row and notify the owner to review it. Flight/train/car
+  parsers are not built yet (see Roadmap).
 - **FlightAware AeroAPI client** -- flight lookup, live track, airport
   delays, with a file-backed rate limiter and a 10-minute cache so you
   don't burn through your AeroAPI budget on every dashboard refresh.
@@ -55,18 +60,17 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
 
 ## A note on the visibility defaults
 
-The free-text project brief said "managers can see most if not all...
-default for subordinates is visible unless marked private" -- which reads
-like manager-viewing-subordinate (top-down) should default to full
-visibility. But the structured "Org hierarchy" spec block in the same
-message, and the detailed Phase 2 spec pasted alongside it, both
-explicitly say TOP-DOWN defaults to city+date only and BOTTOM-UP defaults
-to full visibility. Those two structured, precise statements agree with
-each other and are more specific than the one loosely-worded sentence, so
-`VisibilityEngine::DIRECTION_TOP_DOWN` implements city+date-only by
-default. If that's not actually what you want, it's a one-line change in
-`src/Visibility/VisibilityEngine.php` (`$defaultFields` assignment) --
-flagged here instead of silently guessed.
+Managers default to **full exposure** of subordinate travel (TOP_DOWN =
+all fields). Subordinates default to **limited exposure** of manager travel
+(BOTTOM_UP = city + dates only). Lateral/peer sharing defaults to full
+fields. Unrelated users get city+dates only.
+
+Separately, any hotel stay or trip/flight can be marked **Private** (hidden
+from everyone) or hidden from **selected users** via `visibility_blocks`,
+without changing the org-wide field defaults above.
+
+If you need to change the direction defaults, edit the `$defaultFields`
+assignment in `src/Visibility/VisibilityEngine.php`.
 
 ## Requirements
 
@@ -264,11 +268,11 @@ composer test              # or: vendor/bin/phpunit
 
 Tests build a fresh in-memory SQLite database per test from
 `database/schema.sqlite.sql` -- no external DB or network access required.
-Current coverage: hotel stay repository (CRUD + validation + blacklist
-matching), visibility engine (all five directions + override precedence),
-trip status engine (home/in-flight/layover/manual override), and the
-generic hotel parser (5 synthetic fixtures). 24 tests, 56 assertions,
-all passing as of this build.
+Current coverage: hotel property + stay repositories (CRUD, property reuse,
+stay rating → overall average, amenity/room validation, blacklist matching),
+visibility engine (all five directions + override precedence), trip status
+engine (home/in-flight/layover/manual override), and the generic hotel
+parser (5 synthetic fixtures).
 
 ## Project layout
 
@@ -278,7 +282,7 @@ database/schema.sql       MySQL schema (production)
 database/schema.sqlite.sql SQLite schema (dev/test)
 src/Core/                 Env, Database, Logger, Auth, Csrf, exceptions
 src/Users/                User model + repository
-src/Hotels/               Hotel stay tracker
+src/Hotels/               Hotel properties + stays
 src/Trips/                Trips, segments, status engine, FlightAware, alerts
 src/Visibility/           Sharing/visibility engine
 src/Mail/                 Mail sources, parsers, poller
@@ -293,10 +297,10 @@ storage/                  Logs, uploads, cache -- must be writable, must NOT be 
 - Raw email bodies are never written to the database -- only structured
   fields extracted by a parser. `parse_log` stores metadata (from/subject/
   status/confidence) for audit purposes, never body content.
-- Every write to `hotel_stays`, `trips`, `trip_segments`, `users`, and
-  `visibility_rules` goes through `Database::audit()`, which logs to
-  `audit_log`. A DB administrator can see *that* something changed and
-  *who* did it, without that requiring inbox access.
+- Every write to `hotel_properties`, `hotel_stays`, `trips`, `trip_segments`,
+  `users`, and `visibility_rules` goes through `Database::audit()`, which
+  logs to `audit_log`. A DB administrator can see *that* something changed
+  and *who* did it, without that requiring inbox access.
 - CSRF tokens are required on every state-changing form (`Csrf::token()`/
   `Csrf::verify()`).
 - Session cookies are `httponly`, `SameSite=Strict`, and `secure` when
