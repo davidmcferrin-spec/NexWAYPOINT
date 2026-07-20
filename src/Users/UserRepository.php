@@ -153,6 +153,86 @@ final class UserRepository
     }
 
     /**
+     * Change the account's primary email (users.email + primary user_emails row).
+     * May promote an existing alias on the same account.
+     */
+    public function updatePrimaryEmail(int $userId, string $email, ?int $actorUserId = null): void
+    {
+        $email = strtolower(trim($email));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new \InvalidArgumentException('A valid email address is required.');
+        }
+
+        $user = $this->find($userId);
+        if ($user === null) {
+            throw new \InvalidArgumentException('User not found.');
+        }
+        if (strcasecmp($user->email, $email) === 0) {
+            return;
+        }
+
+        $takenUser = $this->db->fetchOne(
+            'SELECT id FROM users WHERE LOWER(email) = LOWER(:e) AND id != :uid LIMIT 1',
+            ['e' => $email, 'uid' => $userId]
+        );
+        if ($takenUser !== null) {
+            throw new \InvalidArgumentException('That email is already the primary address of another account.');
+        }
+
+        if ($this->db->tableExists('user_emails')) {
+            $other = $this->db->fetchOne(
+                'SELECT user_id, is_primary FROM user_emails WHERE LOWER(email) = LOWER(:e) LIMIT 1',
+                ['e' => $email]
+            );
+            if ($other !== null && (int) $other['user_id'] !== $userId) {
+                throw new \InvalidArgumentException('That email is already linked to another account.');
+            }
+
+            $alias = $this->db->fetchOne(
+                'SELECT id, is_primary FROM user_emails WHERE user_id = :uid AND LOWER(email) = LOWER(:e) LIMIT 1',
+                ['uid' => $userId, 'e' => $email]
+            );
+            $primary = $this->db->fetchOne(
+                'SELECT id FROM user_emails WHERE user_id = :uid AND is_primary = 1 LIMIT 1',
+                ['uid' => $userId]
+            );
+
+            if ($alias !== null && empty($alias['is_primary'])) {
+                if ($primary !== null) {
+                    $this->db->execute(
+                        "UPDATE user_emails SET is_primary = 0, label = COALESCE(NULLIF(label, ''), 'Former primary') WHERE id = :id",
+                        ['id' => (int) $primary['id']]
+                    );
+                }
+                $this->db->execute(
+                    "UPDATE user_emails SET is_primary = 1, label = 'Primary', email = :email WHERE id = :id",
+                    ['email' => $email, 'id' => (int) $alias['id']]
+                );
+            } elseif ($primary !== null) {
+                $this->db->execute(
+                    "UPDATE user_emails SET email = :email, label = 'Primary' WHERE id = :id",
+                    ['email' => $email, 'id' => (int) $primary['id']]
+                );
+            } else {
+                $this->db->execute(
+                    'INSERT INTO user_emails (user_id, email, label, is_primary) VALUES (:uid, :email, :label, 1)',
+                    ['uid' => $userId, 'email' => $email, 'label' => 'Primary']
+                );
+            }
+        }
+
+        $this->db->execute(
+            'UPDATE users SET email = :email, updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+            ['email' => $email, 'id' => $userId]
+        );
+        $this->db->audit($actorUserId, 'update_primary_email', 'users', $userId, [
+            'email' => $email,
+            'previous' => $user->email,
+        ]);
+        $this->logger->info('User primary email updated', ['user_id' => $userId, 'email' => $email]);
+    }
+
+    /**
      * Row including password_hash -- only used internally by auth, never
      * returned as part of a User value object.
      *

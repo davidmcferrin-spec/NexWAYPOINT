@@ -19,7 +19,12 @@ $settingsSection = 'users';
 
 $errors = [];
 $message = null;
-$editId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
+$editId = 0;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_id'])) {
+    $editId = (int) $_POST['user_id'];
+} elseif (isset($_GET['id'])) {
+    $editId = (int) $_GET['id'];
+}
 $editing = $editId > 0 ? $repo->find($editId) : null;
 
 $parseManagerId = static function (): ?int {
@@ -64,7 +69,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $repo->setDottedManagers((int) $created->id, $parseDotted(), $user->id);
                 }
                 $message = "Created user {$created->username} (ID {$created->id}).";
-            } elseif ($action === 'update' && $editing !== null) {
+                $editing = null;
+                $editId = 0;
+            } elseif ($action === 'update') {
+                if ($editing === null) {
+                    throw new InvalidArgumentException('User not found.');
+                }
                 $repo->updateProfile(
                     $editing->id,
                     trim((string) ($_POST['display_name'] ?? '')),
@@ -78,11 +88,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $message = 'User updated.';
                 $editing = $repo->find($editing->id);
-            } elseif ($action === 'reset_password' && $editing !== null) {
+            } elseif ($action === 'reset_password') {
+                if ($editing === null) {
+                    throw new InvalidArgumentException('User not found.');
+                }
                 $plain = (string) ($_POST['password'] ?? '');
                 $repo->updatePassword($editing->id, $plain, $user->id);
                 $message = 'Password updated.';
-            } elseif ($action === 'add_email' && $editing !== null) {
+            } elseif ($action === 'update_primary_email') {
+                if ($editing === null) {
+                    throw new InvalidArgumentException('User not found.');
+                }
+                $repo->updatePrimaryEmail($editing->id, (string) ($_POST['email'] ?? ''), $user->id);
+                $message = 'Primary email updated.';
+                $editing = $repo->find($editing->id);
+            } elseif ($action === 'add_email') {
+                if ($editing === null) {
+                    throw new InvalidArgumentException('User not found.');
+                }
                 $label = trim((string) ($_POST['label'] ?? ''));
                 $repo->addEmail(
                     $editing->id,
@@ -91,7 +114,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $user->id,
                 );
                 $message = 'Email alias added.';
-            } elseif ($action === 'remove_email' && $editing !== null) {
+            } elseif ($action === 'remove_email') {
+                if ($editing === null) {
+                    throw new InvalidArgumentException('User not found.');
+                }
                 $repo->removeEmail($editing->id, (int) ($_POST['email_id'] ?? 0), $user->id);
                 $message = 'Email alias removed.';
             }
@@ -202,9 +228,12 @@ $renderOrgNode = static function ($node, int $depth = 0) use (&$renderOrgNode, $
     </p>
 
     <?php foreach ($errors as $err): ?>
+        <?php if ($editing !== null) {
+            continue;
+        } ?>
         <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
     <?php endforeach; ?>
-    <?php if ($message !== null): ?>
+    <?php if ($message !== null && $editing === null): ?>
         <p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p>
     <?php endif; ?>
 
@@ -297,14 +326,24 @@ $renderOrgNode = static function ($node, int $depth = 0) use (&$renderOrgNode, $
     </div>
 
     <?php if ($editing !== null): ?>
-    <div class="card">
-        <h3>Edit <?= htmlspecialchars($editing->displayName, ENT_QUOTES) ?></h3>
+<div id="user-edit-modal" class="modal-backdrop" <?= $errors !== [] || $message !== null || isset($_GET['id']) ? '' : 'hidden' ?>
+     data-auto-open="1">
+    <div class="modal-panel" role="dialog" aria-labelledby="user-edit-modal-title" style="max-width: 40rem; max-height: 90vh; overflow: auto;">
+        <h2 id="user-edit-modal-title">Edit <?= htmlspecialchars($editing->displayName, ENT_QUOTES) ?></h2>
+        <?php foreach ($errors as $err): ?>
+            <p class="alert alert-error"><?= htmlspecialchars($err, ENT_QUOTES) ?></p>
+        <?php endforeach; ?>
+        <?php if ($message !== null): ?>
+            <p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p>
+        <?php endif; ?>
         <?php if ($editing->isSystem): ?>
             <p class="hint">System account — isolated from the org chart. Reporting lines do not apply.</p>
         <?php endif; ?>
+
         <form method="post" class="stack">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
             <input type="hidden" name="action" value="update">
+            <input type="hidden" name="user_id" value="<?= (int) $editing->id ?>">
             <label>Display name
                 <input type="text" name="display_name" required value="<?= htmlspecialchars($editing->displayName, ENT_QUOTES) ?>">
             </label>
@@ -355,14 +394,27 @@ $renderOrgNode = static function ($node, int $depth = 0) use (&$renderOrgNode, $
                 Site admin (Settings → Users / Site catalogs)
             </label>
             <?php endif; ?>
-            <button type="submit" class="primary">Save user</button>
-            <a href="/settings/users.php">Close</a>
+            <div class="modal-actions">
+                <button type="submit" class="primary">Save user</button>
+            </div>
         </form>
-    </div>
 
-    <div class="card">
-        <h3>Forward-from emails</h3>
-        <p>Mail import matches <code>From:</code> against these addresses.</p>
+        <hr style="border: none; border-top: 1px solid var(--border); margin: 1.25rem 0;">
+
+        <h3>Primary email</h3>
+        <p class="hint">Used for account identity and mail-import matching.</p>
+        <form method="post" class="stack">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="update_primary_email">
+            <input type="hidden" name="user_id" value="<?= (int) $editing->id ?>">
+            <label>Primary email
+                <input type="email" name="email" required value="<?= htmlspecialchars($editing->email, ENT_QUOTES) ?>">
+            </label>
+            <button type="submit" class="primary">Update primary email</button>
+        </form>
+
+        <h3 style="margin-top: 1.25rem;">Forward-from aliases</h3>
+        <p class="hint">Additional addresses that map mail to this account.</p>
         <?php if ($editEmails === []): ?>
             <p class="empty-state">No aliases (run migrate if table is missing).</p>
         <?php else: ?>
@@ -378,6 +430,7 @@ $renderOrgNode = static function ($node, int $depth = 0) use (&$renderOrgNode, $
                                 <form method="post" style="display:inline">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
                                     <input type="hidden" name="action" value="remove_email">
+                                    <input type="hidden" name="user_id" value="<?= (int) $editing->id ?>">
                                     <input type="hidden" name="email_id" value="<?= (int) $row['id'] ?>">
                                     <button type="submit" class="danger">Remove</button>
                                 </form>
@@ -393,7 +446,8 @@ $renderOrgNode = static function ($node, int $depth = 0) use (&$renderOrgNode, $
         <form method="post" class="stack" style="margin-top:1rem">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
             <input type="hidden" name="action" value="add_email">
-            <label>Add email
+            <input type="hidden" name="user_id" value="<?= (int) $editing->id ?>">
+            <label>Add alias
                 <input type="email" name="email" required>
             </label>
             <label>Label
@@ -401,19 +455,36 @@ $renderOrgNode = static function ($node, int $depth = 0) use (&$renderOrgNode, $
             </label>
             <button type="submit" class="primary">Add email</button>
         </form>
-    </div>
 
-    <div class="card">
-        <h3>Reset password</h3>
+        <h3 style="margin-top: 1.25rem;">Reset password</h3>
         <form method="post" class="stack">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
             <input type="hidden" name="action" value="reset_password">
+            <input type="hidden" name="user_id" value="<?= (int) $editing->id ?>">
             <label>New password (min 12)
                 <input type="password" name="password" required minlength="12" autocomplete="new-password">
             </label>
             <button type="submit" class="primary">Set password</button>
         </form>
+
+        <div class="modal-actions" style="margin-top: 1.25rem;">
+            <a href="/settings/users.php">Close</a>
+        </div>
     </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var modal = document.getElementById('user-edit-modal');
+    if (!modal) return;
+    modal.hidden = false;
+    document.body.classList.add('modal-open');
+    modal.addEventListener('click', function (ev) {
+        if (ev.target === modal) {
+            window.location.href = '/settings/users.php';
+        }
+    });
+});
+</script>
     <?php endif; ?>
 
     <div class="card">

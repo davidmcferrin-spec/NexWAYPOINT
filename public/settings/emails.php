@@ -32,6 +32,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaWarning === null) {
             } elseif ($action === 'remove') {
                 $repo->removeEmail($user->id, (int) ($_POST['email_id'] ?? 0), $user->id);
                 $message = 'Email address removed.';
+            } elseif ($action === 'update_primary') {
+                $repo->updatePrimaryEmail($user->id, (string) ($_POST['email'] ?? ''), $user->id);
+                $message = 'Primary email updated.';
+                // Refresh session user if Auth caches email — reload from DB for display
+                $fresh = $repo->find($user->id);
+                if ($fresh !== null) {
+                    $user = $fresh;
+                }
             }
         } catch (Throwable $e) {
             $errors[] = $e->getMessage();
@@ -40,6 +48,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaWarning === null) {
 }
 
 $emails = $schemaWarning === null ? $repo->emailsForUser($user->id) : [];
+$primaryEmail = $user->email;
+foreach ($emails as $row) {
+    if (!empty($row['is_primary'])) {
+        $primaryEmail = $row['email'];
+        break;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -69,6 +84,21 @@ $emails = $schemaWarning === null ? $repo->emailsForUser($user->id) : [];
     <?php endforeach; ?>
     <?php if ($message !== null): ?>
         <p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p>
+    <?php endif; ?>
+
+    <?php if ($schemaWarning === null): ?>
+    <div class="card">
+        <h3>Primary email</h3>
+        <p class="hint">Account identity and default mail-import address. You can change it anytime.</p>
+        <form method="post" class="stack">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="update_primary">
+            <label>Primary email
+                <input type="email" name="email" required value="<?= htmlspecialchars($primaryEmail, ENT_QUOTES) ?>">
+            </label>
+            <button type="submit" class="primary">Save primary email</button>
+        </form>
+    </div>
     <?php endif; ?>
 
     <div class="card">
