@@ -20,7 +20,9 @@ use NexWaypoint\Mail\M365GraphSource;
 use NexWaypoint\Mail\MailPoller;
 use NexWaypoint\Mail\MailSourceInterface;
 use NexWaypoint\Mail\ParseLogRepository;
+use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Users\UserRepository;
 
 $app = require dirname(__DIR__) . '/config/bootstrap.php';
@@ -46,6 +48,8 @@ $poller = new MailPoller(
     new UserRepository($db, $logger),
     $propertyRepo,
     new HotelStayRepository($db, $logger, $propertyRepo),
+    new TripRepository($db, $logger),
+    new CarrierRepository($db, $logger),
     new NotificationRepository($db),
     new ParseLogRepository($db),
     $logger,

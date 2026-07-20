@@ -99,7 +99,7 @@ try {
         walkToOffice: $bool('walk_to_office'),
         walkToOfficeNotes: $nullable($data['walk_to_office_notes'] ?? null),
         hasDestinationFee: $bool('has_destination_fee'),
-        destinationFeeNotes: $nullable($data['destination_fee_notes'] ?? null),
+        destinationFeeNotes: null,
         wifiQuality: isset($data['wifi_quality']) && $data['wifi_quality'] !== '' ? (int) $data['wifi_quality'] : null,
         noiseLevel: isset($data['noise_level']) && $data['noise_level'] !== '' ? (int) $data['noise_level'] : null,
         uniqueFeatures: $nullable($data['unique_features'] ?? null),

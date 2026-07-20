@@ -18,21 +18,22 @@ v1 scaffold is complete and passes lint + tests: hotel tracker split into
 gym/walk-to-office, blacklist, overall rating) and `hotel_stays` (dates,
 room/bed/bath, stay rating, price/privacy); add form can reuse a prior
 property; mail ingestion (DreamHost IMAP working end-to-end, Gmail/M365
-interfaces defined but throw `NotImplementedException`), a generic
-hotel-confirmation parser, FlightAware AeroAPI client with rate limiting
-+ caching, trip status engine, alert evaluator + notifications, and the
-visibility/sharing engine covering all five directions with override
-precedence. Basic server-rendered PHP UI exists for login, hotel
-list/add/view, dashboard, and sharing settings. VPS deployment is
-bootstrapped by an idempotent `setup.sh`. Additional users via
-`scripts/create_user.php`. Install auto-seeds `admin` with a random
+interfaces defined but throw `NotImplementedException`), airline/hotel/train
+parsers (AA/Delta/United/Breeze, Hilton/Marriott/generic hotel, Amtrak)
+with PNR/confirmation upsert + cancel, FlightAware AeroAPI client with
+rate limiting + caching, trip status engine, alert evaluator +
+notifications, and the visibility/sharing engine covering all five
+directions with override precedence. Basic server-rendered PHP UI exists
+for login, hotel list/add/view, dashboard, and sharing settings. VPS
+deployment is bootstrapped by an idempotent `setup.sh`. Additional users
+via `scripts/create_user.php`. Install auto-seeds `admin` with a random
 password; `setup.sh reset-password` regenerates. Existing DBs need
 `php scripts/migrate.php` after pull.
 
-**Not started:** flight/train/car email parsers (only hotel), Azure AD
-SSO, map view, PWA/offline, push notifications, hotel-stay edit page,
-approval UI for auto-imported stays (currently auto-creates + notifies
-instead of a pending-confirmation flow).
+**Not started:** car/rideshare email parsers, Azure AD SSO, map view,
+PWA/offline, push notifications, hotel-stay edit page, approval UI for
+auto-imported stays (currently auto-creates + notifies instead of a
+pending-confirmation flow).
 
 ## Key architecture decisions (and why)
 
@@ -70,10 +71,13 @@ instead of a pending-confirmation flow).
   `trip_segments.carrier_id` links flights. Flight form asks for flight
   number only; enrichment builds FlightAware ident as IATA+number.
   Manage at `public/flights/carriers.php`.
-- **Auto-import creates the hotel stay directly + notifies**, rather than
-  a pending-approval queue the user has to click through. The original
-  "We found a trip... Confirm?" flow from the pasted spec is more UI than
-  this pass covers. Documented as a gap, not silently dropped.
+- **Auto-import creates the hotel stay / trip segments directly + notifies**,
+  rather than a pending-approval queue the user has to click through. The
+  original "We found a trip... Confirm?" flow from the pasted spec is more
+  UI than this pass covers. Documented as a gap, not silently dropped.
+  Flights/trains upsert by confirmation/PNR (replace legs on change;
+  cancel marks segments cancelled). Hotels upsert by confirmation code;
+  Hilton cancels without the original conf # match on property name + dates.
 - **Rate limiting for FlightAware is a file-backed token bucket**, not
   in-memory, because each cron invocation is a fresh PHP process with no
   persistent state between runs.
@@ -122,11 +126,9 @@ instead of a pending-confirmation flow).
 
 ## Immediate next steps (suggested, not started)
 
-1. Flight confirmation parsers (Delta/United minimum) -- highest-value
-   next addition since it unlocks real dashboard auto-population.
+1. Car/rideshare email parsers (Enterprise/Hertz/Uber airport).
 2. Hotel-stay edit page (currently add/view/delete only).
-3. Wire `trip_segments` creation into `MailPoller` for hotel confirmations
-   so a parsed stay also shows up on the travel dashboard, not just the
-   hotel tracker.
+3. Tighten Delta/United/Hilton parsers against more live fixtures (trip
+   details / multi-leg United / Hilton cancel without original conf #).
 4. Decide whether the pending-approval UI ("we found a trip, confirm?")
    is worth building vs. the current auto-create-and-notify approach.

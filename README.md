@@ -23,11 +23,14 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
 - **Travel dashboard** -- a status engine that resolves each person's
   current state (Home / Office / Remote / In Flight / Layover in X /
   Delayed / At hotel in X) from trip segments and manual overrides.
-- **Mail ingestion** -- DreamHost IMAP polling, sender/subject-based
-  confirmation detection, and a generic hotel-confirmation parser. Parsed
-  stays find-or-create a `hotel_properties` row, then create a draft
-  `hotel_stays` row and notify the owner to review it. Flight/train/car
-  parsers are not built yet (see Roadmap).
+- **Mail ingestion** -- DreamHost IMAP polling with domain-suffix +
+  forwarded-body vendor detection. Parsers for AA / Delta / United /
+  Breeze flights, Amtrak, Hilton / Marriott, plus the generic hotel
+  fallback. Confirmations upsert by PNR/confirmation code (find-or-create
+  carriers and hotel properties); change emails replace legs; cancels
+  mark trip segments cancelled or remove email-imported stays. Folio /
+  bag-receipt / status mail is ignored. FlightAware AeroAPI is separate
+  (live enrichment), not the importer.
 - **FlightAware AeroAPI client** -- flight lookup, live track, airport
   delays, with a file-backed rate limiter and a 10-minute cache so you
   don't burn through your AeroAPI budget on every dashboard refresh.
@@ -44,10 +47,8 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
 
 ## What's NOT built yet (be aware before you rely on this)
 
-- Flight, train, and rideshare/car-rental email parsers (only the generic
-  hotel parser exists). `MailPoller` already routes those types to the
-  PARSE_FAILED review queue with a clear reason rather than pretending to
-  handle them.
+- Rideshare / car-rental email parsers. Flight, train, and hotel brand
+  parsers above are live; car still routes to PARSE_FAILED.
 - Gmail API and Microsoft 365 Graph mail sources. Both classes exist and
   satisfy `MailSourceInterface` so swapping `MAIL_SOURCE` is a one-line
   config change once built, but every method currently throws
@@ -235,13 +236,12 @@ See `.env.example` for the full list with inline comments. Highlights:
    `NexWaypoint\Mail\ParserBase` and implementing `parse(EmailMessage $message): ?array`.
    Use `$this->extractPattern()` / `extractFirstMatch()` / `parseFlexibleDate()`
    from the base class -- they track confidence automatically.
-2. Add the sender's domain to `EmailConfirmationDetector::SENDER_DOMAINS`
-   under the right type (`flight`, `hotel`, `train`, `car`).
-3. Wire it into `MailPoller::processOne()` -- right now that method
-   hardcodes `GenericHotelConfirmationParser` for `type === 'hotel'`; for a
-   new type, add a `match ($detection['type'])` branch that selects the
-   right parser and maps its output onto either `trip_segments` (flights/
-   trains/cars) or `hotel_stays` (a new hotel brand parser).
+2. Add the sender's domain (and a content hint if forwards are expected) to
+   `EmailConfirmationDetector` under the right type (`flight`, `hotel`,
+   `train`, `car`).
+3. Wire the parser into `MailPoller::resolveParser()` so detection routes to
+   the right parser; output maps onto `trip_segments` (flights/trains) or
+   `hotel_stays` with upsert/cancel by confirmation code.
 4. Write at least 5 unit tests with synthetic (not real) fixture emails
    covering: a clean match, an alternate date format, missing optional
    fields, a non-matching email (expect `null`), and a low-confidence

@@ -58,6 +58,54 @@ final class HotelStayRepository
         return array_map(static fn (array $row) => HotelStay::fromRow($row), $rows);
     }
 
+    public function findByConfirmationCode(int $userId, string $confirmationCode): ?HotelStay
+    {
+        $row = $this->db->fetchOne(
+            'SELECT * FROM hotel_stays
+             WHERE user_id = :user_id AND UPPER(confirmation_code) = UPPER(:code)
+             ORDER BY id DESC LIMIT 1',
+            ['user_id' => $userId, 'code' => trim($confirmationCode)]
+        );
+        return $row === null ? null : HotelStay::fromRow($row);
+    }
+
+    /**
+     * Match a cancel notice that may only have hotel name + dates (Hilton).
+     */
+    public function findForCancelMatch(
+        int $userId,
+        ?string $propertyName,
+        ?string $checkIn,
+        ?string $checkOut
+    ): ?HotelStay {
+        if ($propertyName !== null && $checkIn !== null) {
+            $rows = $this->db->fetchAll(
+                'SELECT hs.* FROM hotel_stays hs
+                 INNER JOIN hotel_properties hp ON hp.id = hs.hotel_property_id
+                 WHERE hs.user_id = :user_id
+                   AND hs.stay_start = :start
+                   AND LOWER(hp.hotel_name) LIKE LOWER(:name)
+                 ORDER BY hs.id DESC LIMIT 5',
+                [
+                    'user_id' => $userId,
+                    'start' => $checkIn,
+                    'name' => '%' . trim($propertyName) . '%',
+                ]
+            );
+            if ($rows !== []) {
+                if ($checkOut !== null) {
+                    foreach ($rows as $row) {
+                        if (($row['stay_end'] ?? null) === $checkOut) {
+                            return HotelStay::fromRow($row);
+                        }
+                    }
+                }
+                return HotelStay::fromRow($rows[0]);
+            }
+        }
+        return null;
+    }
+
     public function create(HotelStay $stay, ?int $actorUserId = null): HotelStay
     {
         $this->validate($stay);
@@ -93,6 +141,110 @@ final class HotelStayRepository
             throw new \RuntimeException('Hotel stay insert succeeded but row could not be re-read.');
         }
         return $created;
+    }
+
+    /**
+     * Insert or update a stay keyed by confirmation_code when present.
+     *
+     * @return array{stay: HotelStay, created: bool}
+     */
+    public function upsertFromImport(HotelStay $stay, ?int $actorUserId = null): array
+    {
+        if ($stay->confirmationCode !== null && trim($stay->confirmationCode) !== '') {
+            $existing = $this->findByConfirmationCode($stay->userId, $stay->confirmationCode);
+            if ($existing !== null) {
+                $updated = $this->update(new HotelStay(
+                    id: $existing->id,
+                    userId: $existing->userId,
+                    hotelPropertyId: $stay->hotelPropertyId,
+                    roomNumber: $existing->roomNumber,
+                    bedType: $existing->bedType,
+                    bathroomType: $existing->bathroomType,
+                    stayStart: $stay->stayStart,
+                    stayEnd: $stay->stayEnd,
+                    stayRating: $existing->stayRating,
+                    lastStayPrice: $existing->lastStayPrice,
+                    currency: $existing->currency,
+                    bookingSource: $existing->bookingSource ?? $stay->bookingSource,
+                    confirmationCode: $stay->confirmationCode,
+                    wouldReturn: $existing->wouldReturn,
+                    notes: $this->mergeImportNotes($existing->notes, $stay->notes),
+                    isPrivate: $existing->isPrivate,
+                ), $actorUserId);
+                return ['stay' => $updated, 'created' => false];
+            }
+        }
+
+        return ['stay' => $this->create($stay, $actorUserId), 'created' => true];
+    }
+
+    /**
+     * Cancel a stay found by confirmation code, or by hotel name + dates
+     * (Hilton cancellation emails use a different cancellation #).
+     *
+     * Email-imported stays are deleted; manually entered stays get a
+     * [CANCELLED] note prefix so history is preserved.
+     */
+    public function cancelFromImport(
+        int $userId,
+        ?string $confirmationCode,
+        ?string $propertyName,
+        ?string $checkIn,
+        ?string $checkOut,
+        ?int $actorUserId = null,
+    ): ?HotelStay {
+        $stay = null;
+        if ($confirmationCode !== null && trim($confirmationCode) !== '') {
+            $stay = $this->findByConfirmationCode($userId, $confirmationCode);
+        }
+        if ($stay === null) {
+            $stay = $this->findForCancelMatch($userId, $propertyName, $checkIn, $checkOut);
+        }
+        if ($stay === null) {
+            return null;
+        }
+
+        if (($stay->bookingSource ?? '') === 'email_import') {
+            $this->delete((int) $stay->id, $actorUserId);
+            return $stay;
+        }
+
+        $notes = $stay->notes ?? '';
+        if (!str_starts_with($notes, '[CANCELLED]')) {
+            $notes = '[CANCELLED via email] ' . $notes;
+        }
+        return $this->update(new HotelStay(
+            id: $stay->id,
+            userId: $stay->userId,
+            hotelPropertyId: $stay->hotelPropertyId,
+            roomNumber: $stay->roomNumber,
+            bedType: $stay->bedType,
+            bathroomType: $stay->bathroomType,
+            stayStart: $stay->stayStart,
+            stayEnd: $stay->stayEnd,
+            stayRating: $stay->stayRating,
+            lastStayPrice: $stay->lastStayPrice,
+            currency: $stay->currency,
+            bookingSource: $stay->bookingSource,
+            confirmationCode: $stay->confirmationCode,
+            wouldReturn: $stay->wouldReturn,
+            notes: trim($notes),
+            isPrivate: $stay->isPrivate,
+        ), $actorUserId);
+    }
+
+    private function mergeImportNotes(?string $existing, ?string $incoming): ?string
+    {
+        if ($incoming === null || trim($incoming) === '') {
+            return $existing;
+        }
+        if ($existing === null || trim($existing) === '') {
+            return $incoming;
+        }
+        if (str_contains($existing, $incoming)) {
+            return $existing;
+        }
+        return $existing;
     }
 
     public function update(HotelStay $stay, ?int $actorUserId = null): HotelStay

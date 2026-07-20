@@ -91,6 +91,34 @@ final class TripRepository
         $this->db->audit($actorUserId, 'update_privacy', 'trips', $tripId, ['is_private' => $isPrivate]);
     }
 
+    public function update(Trip $trip, ?int $actorUserId = null): Trip
+    {
+        if ($trip->id === null) {
+            throw new \InvalidArgumentException('Cannot update a Trip without an id.');
+        }
+        $data = $trip->toArray();
+        $id = (int) $data['id'];
+        unset($data['id']);
+        $data['is_private'] = !empty($data['is_private']) ? 1 : 0;
+        $assignments = implode(', ', array_map(static fn (string $c) => "{$c} = :{$c}", array_keys($data)));
+        $data['id'] = $id;
+
+        $this->db->execute(
+            "UPDATE trips SET {$assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = :id",
+            $data
+        );
+        $this->db->audit($actorUserId, 'update', 'trips', $id, [
+            'destination_city' => $trip->destinationCity,
+            'status' => $trip->status,
+        ]);
+
+        $updated = $this->find($id);
+        if ($updated === null) {
+            throw new \RuntimeException('Trip update succeeded but row could not be re-read.');
+        }
+        return $updated;
+    }
+
     public function addSegment(TripSegment $segment, ?int $actorUserId = null): TripSegment
     {
         $data = $segment->toArray();
@@ -111,6 +139,229 @@ final class TripRepository
             throw new \RuntimeException('Trip segment insert succeeded but row could not be re-read.');
         }
         return TripSegment::fromRow($row);
+    }
+
+    /**
+     * @return TripSegment[]
+     */
+    public function findSegmentsByConfirmation(int $ownerId, string $confirmationCode): array
+    {
+        $rows = $this->db->fetchAll(
+            'SELECT ts.* FROM trip_segments ts
+             INNER JOIN trips t ON t.id = ts.trip_id
+             WHERE t.owner_id = :owner_id
+               AND UPPER(ts.confirmation_code) = UPPER(:code)
+             ORDER BY ts.depart_dt ASC, ts.id ASC',
+            ['owner_id' => $ownerId, 'code' => trim($confirmationCode)]
+        );
+        return array_map(static fn (array $r) => TripSegment::fromRow($r), $rows);
+    }
+
+    /**
+     * Create or replace flight/train legs for a confirmation/PNR.
+     *
+     * @param list<array{
+     *   segment_type?: string,
+     *   carrier_id?: ?int,
+     *   carrier?: ?string,
+     *   flight_number?: ?string,
+     *   origin?: ?string,
+     *   destination?: ?string,
+     *   depart_dt?: ?string,
+     *   arrive_dt?: ?string,
+     *   confirmation_code?: ?string
+     * }> $legs
+     * @return array{trip: Trip, segments: TripSegment[], created: bool}
+     */
+    public function upsertItineraryByConfirmation(
+        int $ownerId,
+        string $confirmationCode,
+        array $legs,
+        ?string $destinationCity = null,
+        ?int $actorUserId = null,
+        ?int $sourceParseLogId = null,
+    ): array {
+        $code = strtoupper(trim($confirmationCode));
+        if ($code === '' || $legs === []) {
+            throw new \InvalidArgumentException('Confirmation code and at least one leg are required.');
+        }
+
+        $existing = $this->findSegmentsByConfirmation($ownerId, $code);
+        $trip = null;
+        $created = false;
+
+        if ($existing !== []) {
+            $trip = $this->find($existing[0]->tripId);
+            foreach ($existing as $seg) {
+                if ($seg->id !== null) {
+                    $this->db->execute('DELETE FROM trip_segments WHERE id = :id', ['id' => $seg->id]);
+                }
+            }
+        }
+
+        $dates = $this->dateBoundsFromLegs($legs);
+        $dest = $destinationCity
+            ?? $this->inferDestinationCity($legs)
+            ?? 'Travel';
+
+        if ($trip === null) {
+            $trip = $this->create(new Trip(
+                id: null,
+                ownerId: $ownerId,
+                destinationCity: $dest,
+                startDate: $dates['start'],
+                endDate: $dates['end'],
+                status: 'planned',
+                tripPurpose: null,
+                notes: 'Auto-imported from email confirmation ' . $code,
+                isPrivate: false,
+            ), $actorUserId);
+            $created = true;
+        } else {
+            $trip = $this->update(new Trip(
+                id: $trip->id,
+                ownerId: $trip->ownerId,
+                destinationCity: $dest,
+                startDate: $dates['start'],
+                endDate: $dates['end'],
+                status: $trip->status === 'cancelled' ? 'planned' : $trip->status,
+                tripPurpose: $trip->tripPurpose,
+                notes: $trip->notes,
+                isPrivate: $trip->isPrivate,
+            ), $actorUserId);
+        }
+
+        $segments = [];
+        foreach ($legs as $leg) {
+            $segments[] = $this->addSegment(new TripSegment(
+                id: null,
+                tripId: (int) $trip->id,
+                segmentType: (string) ($leg['segment_type'] ?? 'flight'),
+                segmentSubtype: null,
+                carrierId: isset($leg['carrier_id']) ? (int) $leg['carrier_id'] : null,
+                carrier: $leg['carrier'] ?? null,
+                flightNumber: isset($leg['flight_number']) ? (string) $leg['flight_number'] : null,
+                confirmationCode: $code,
+                origin: $leg['origin'] ?? null,
+                destination: $leg['destination'] ?? null,
+                departDt: $this->normalizeDateTime($leg['depart_dt'] ?? null),
+                arriveDt: $this->normalizeDateTime($leg['arrive_dt'] ?? null),
+                hotelStayId: null,
+                status: 'scheduled',
+                sourceParseLogId: $sourceParseLogId,
+            ), $actorUserId);
+        }
+
+        $this->logger->info('Itinerary upserted from email', [
+            'trip_id' => $trip->id,
+            'confirmation_code' => $code,
+            'legs' => count($segments),
+            'created' => $created,
+        ]);
+
+        return ['trip' => $trip, 'segments' => $segments, 'created' => $created];
+    }
+
+    /**
+     * Mark all segments for a PNR cancelled; cancel the trip if no active legs remain.
+     *
+     * @return int Number of segments cancelled
+     */
+    public function cancelByConfirmation(int $ownerId, string $confirmationCode, ?int $actorUserId = null): int
+    {
+        $segments = $this->findSegmentsByConfirmation($ownerId, $confirmationCode);
+        if ($segments === []) {
+            return 0;
+        }
+
+        $tripIds = [];
+        foreach ($segments as $seg) {
+            if ($seg->id === null) {
+                continue;
+            }
+            $this->updateSegmentStatus($seg->id, 'cancelled', $actorUserId);
+            $tripIds[$seg->tripId] = true;
+        }
+
+        foreach (array_keys($tripIds) as $tripId) {
+            $remaining = $this->db->fetchOne(
+                "SELECT COUNT(*) AS c FROM trip_segments
+                 WHERE trip_id = :trip_id AND status NOT IN ('cancelled','completed')",
+                ['trip_id' => $tripId]
+            );
+            if ((int) ($remaining['c'] ?? 0) === 0) {
+                $trip = $this->find($tripId);
+                if ($trip !== null) {
+                    $this->update(new Trip(
+                        id: $trip->id,
+                        ownerId: $trip->ownerId,
+                        destinationCity: $trip->destinationCity,
+                        startDate: $trip->startDate,
+                        endDate: $trip->endDate,
+                        status: 'cancelled',
+                        tripPurpose: $trip->tripPurpose,
+                        notes: $trip->notes,
+                        isPrivate: $trip->isPrivate,
+                    ), $actorUserId);
+                }
+            }
+        }
+
+        return count($segments);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $legs
+     * @return array{start: string, end: string}
+     */
+    private function dateBoundsFromLegs(array $legs): array
+    {
+        $dates = [];
+        foreach ($legs as $leg) {
+            foreach (['depart_dt', 'arrive_dt'] as $key) {
+                $raw = $leg[$key] ?? null;
+                if (!is_string($raw) || trim($raw) === '') {
+                    continue;
+                }
+                $dt = $this->normalizeDateTime($raw);
+                if ($dt !== null) {
+                    $dates[] = substr($dt, 0, 10);
+                }
+            }
+        }
+        if ($dates === []) {
+            $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+            return ['start' => $today, 'end' => $today];
+        }
+        sort($dates);
+        return ['start' => $dates[0], 'end' => $dates[count($dates) - 1]];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $legs
+     */
+    private function inferDestinationCity(array $legs): ?string
+    {
+        $last = $legs[count($legs) - 1];
+        $dest = $last['destination'] ?? null;
+        return is_string($dest) && trim($dest) !== '' ? trim($dest) : null;
+    }
+
+    private function normalizeDateTime(?string $value): ?string
+    {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+        $value = trim($value);
+        try {
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
+                return $value . ' 00:00:00';
+            }
+            $dt = new \DateTimeImmutable($value);
+            return $dt->format('Y-m-d H:i:s');
+        } catch (\Exception) {
+            return null;
+        }
     }
 
     /**

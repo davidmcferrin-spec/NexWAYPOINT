@@ -159,6 +159,55 @@ final class Database
         }
     }
 
+    public function tableExists(string $table): bool
+    {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $table)) {
+            return false;
+        }
+
+        if ($this->driver === 'sqlite') {
+            $row = $this->pdo->query(
+                "SELECT 1 AS hit FROM sqlite_master WHERE type = 'table' AND name = " . $this->pdo->quote($table)
+            )->fetch();
+            return $row !== false && $row !== null;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT 1 AS hit FROM information_schema.tables
+             WHERE table_schema = DATABASE() AND table_name = :table LIMIT 1'
+        );
+        $stmt->execute(['table' => $table]);
+        return $stmt->fetch() !== false;
+    }
+
+    public function columnExists(string $table, string $column): bool
+    {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $table)
+            || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $column)) {
+            return false;
+        }
+
+        if ($this->driver === 'sqlite') {
+            $stmt = $this->pdo->query('PRAGMA table_info(' . $table . ')');
+            if ($stmt === false) {
+                return false;
+            }
+            while ($row = $stmt->fetch()) {
+                if (($row['name'] ?? '') === $column) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT 1 AS hit FROM information_schema.columns
+             WHERE table_schema = DATABASE() AND table_name = :table AND column_name = :column LIMIT 1'
+        );
+        $stmt->execute(['table' => $table, 'column' => $column]);
+        return $stmt->fetch() !== false;
+    }
+
     /**
      * Explicit audit-log write. Repositories call this after every insert/
      * update/delete on a record that matters (hotel_stays, trips,

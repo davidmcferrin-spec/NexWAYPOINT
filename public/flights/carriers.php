@@ -12,16 +12,30 @@ $user = $app['auth']->requireAuth();
 $repo = new CarrierRepository($app['db'], $app['logger']);
 $errors = [];
 $message = null;
+$schemaWarning = null;
+
+if (!$app['db']->tableExists('carriers')) {
+    $schemaWarning = 'Database is missing the carriers table. On the server run: php scripts/migrate.php';
+}
 
 $editId = isset($_GET['id']) ? (int) $_GET['id'] : (int) ($_POST['id'] ?? 0);
-$editing = $editId > 0 ? $repo->find($editId) : null;
-if ($editing !== null && $editing->userId !== $user->id) {
-    $editing = null;
-    $editId = 0;
+$editing = null;
+if ($schemaWarning === null && $editId > 0) {
+    try {
+        $editing = $repo->find($editId);
+    } catch (Throwable $e) {
+        $schemaWarning = 'Could not load carriers. Run: php scripts/migrate.php';
+    }
+    if ($editing !== null && $editing->userId !== $user->id) {
+        $editing = null;
+        $editId = 0;
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
+    if ($schemaWarning !== null) {
+        $errors[] = $schemaWarning;
+    } elseif (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $errors[] = 'Your session expired. Please resubmit the form.';
     } else {
         try {
@@ -55,11 +69,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } catch (InvalidArgumentException $e) {
             $errors[] = $e->getMessage();
+        } catch (Throwable $e) {
+            $errors[] = $e->getMessage();
         }
     }
 }
 
-$carriers = $repo->findForUser($user->id);
+$carriers = [];
+if ($schemaWarning === null) {
+    try {
+        $carriers = $repo->findForUser($user->id);
+    } catch (Throwable $e) {
+        $schemaWarning = 'Could not load carriers. Run: php scripts/migrate.php';
+        $errors[] = $e->getMessage();
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -85,6 +109,10 @@ $carriers = $repo->findForUser($user->id);
     <h1>Airline carriers</h1>
     <p class="hint">Each carrier stores an IATA code so flight entry only needs the flight number.</p>
 
+    <?php if ($schemaWarning !== null): ?>
+        <p class="alert alert-error"><?= htmlspecialchars($schemaWarning, ENT_QUOTES) ?></p>
+    <?php endif; ?>
+
     <?php foreach ($errors as $error): ?>
         <p class="alert alert-error"><?= htmlspecialchars($error, ENT_QUOTES) ?></p>
     <?php endforeach; ?>
@@ -98,16 +126,16 @@ $carriers = $repo->findForUser($user->id);
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
             <input type="hidden" name="id" value="<?= (int) $editId ?>">
             <label>Airline name
-                <input type="text" name="name" required
+                <input type="text" name="name" required <?= $schemaWarning !== null ? 'disabled' : '' ?>
                     value="<?= htmlspecialchars($editing->name ?? (string) ($_POST['name'] ?? ''), ENT_QUOTES) ?>">
             </label>
             <label>IATA code
-                <input type="text" name="iata_code" required maxlength="3"
+                <input type="text" name="iata_code" required maxlength="3" <?= $schemaWarning !== null ? 'disabled' : '' ?>
                     value="<?= htmlspecialchars($editing->iataCode ?? (string) ($_POST['iata_code'] ?? ''), ENT_QUOTES) ?>"
                     style="text-transform:uppercase">
             </label>
             <div class="modal-actions">
-                <button type="submit" class="primary"><?= $editing !== null ? 'Save changes' : 'Add carrier' ?></button>
+                <button type="submit" class="primary" <?= $schemaWarning !== null ? 'disabled' : '' ?>><?= $editing !== null ? 'Save changes' : 'Add carrier' ?></button>
                 <?php if ($editing !== null): ?>
                     <a class="secondary" href="/flights/carriers.php" style="display:inline-block;padding:0.6rem 1.2rem;text-decoration:none;border:1px solid var(--border);border-radius:4px;">Cancel</a>
                 <?php endif; ?>

@@ -37,6 +37,15 @@ if (!Csrf::verify((string) ($data['csrf_token'] ?? ''))) {
 
 $repo = new CarrierRepository($app['db'], $app['logger']);
 
+if (!$app['db']->tableExists('carriers')) {
+    http_response_code(503);
+    echo json_encode([
+        'ok' => false,
+        'error' => 'Database is missing the carriers table. Run: php scripts/migrate.php',
+    ]);
+    exit;
+}
+
 try {
     $name = trim((string) ($data['name'] ?? ''));
     $iata = strtoupper(trim((string) ($data['iata_code'] ?? '')));

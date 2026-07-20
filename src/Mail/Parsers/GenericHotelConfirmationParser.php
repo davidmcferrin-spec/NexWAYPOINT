@@ -68,9 +68,14 @@ final class GenericHotelConfirmationParser extends ParserBase
         }
 
         return [
+            'kind' => 'hotel',
+            'event' => 'confirm',
             'confirmation_code' => $confirmationCode,
             'property_name' => $propertyName,
+            'brand' => null,
             'address' => $address,
+            'city' => null,
+            'state_region' => null,
             'check_in' => $checkIn,
             'check_out' => $checkOut,
             'room_type' => $roomType,

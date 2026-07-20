@@ -43,7 +43,7 @@ $amenities = [
     'has_ev_charging' => ['hasEvCharging', 'EV charging'],
     'has_onsite_restaurant' => ['hasOnsiteRestaurant', 'On-site restaurant'],
     'walk_to_office' => ['walkToOffice', 'Walking distance to office/venue'],
-    'has_destination_fee' => ['hasDestinationFee', 'Charges a destination fee'],
+    'has_destination_fee' => ['hasDestinationFee', 'Destination charge'],
 ];
 ?>
 <label>Hotel name<input type="text" name="<?= htmlspecialchars($name('hotel_name'), ENT_QUOTES) ?>" required
@@ -78,11 +78,6 @@ $amenities = [
 <label>Which office / venue (if walking distance)
     <input type="text" name="<?= htmlspecialchars($name('walk_to_office_notes'), ENT_QUOTES) ?>"
         value="<?= htmlspecialchars($val($property, 'walkToOfficeNotes', 'walk_to_office_notes'), ENT_QUOTES) ?>">
-</label>
-<label>Destination fee notes (amount / how charged)
-    <input type="text" name="<?= htmlspecialchars($name('destination_fee_notes'), ENT_QUOTES) ?>"
-        value="<?= htmlspecialchars($val($property, 'destinationFeeNotes', 'destination_fee_notes'), ENT_QUOTES) ?>"
-        placeholder="$35/night, resort fee, etc.">
 </label>
 <label>Desk notes
     <input type="text" name="<?= htmlspecialchars($name('desk_notes'), ENT_QUOTES) ?>"

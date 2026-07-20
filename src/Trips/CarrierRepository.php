@@ -51,6 +51,24 @@ final class CarrierRepository
         return $row === null ? null : Carrier::fromRow($row);
     }
 
+    /**
+     * Find existing carrier by IATA or create one. Used by mail import.
+     */
+    public function findOrCreateByIata(int $userId, string $iata, string $name, ?int $actorUserId = null): Carrier
+    {
+        $iata = strtoupper(trim($iata));
+        $existing = $this->findByIata($userId, $iata);
+        if ($existing !== null) {
+            return $existing;
+        }
+        return $this->create(new Carrier(
+            id: null,
+            userId: $userId,
+            name: trim($name) !== '' ? trim($name) : $iata,
+            iataCode: $iata,
+        ), $actorUserId);
+    }
+
     public function create(Carrier $carrier, ?int $actorUserId = null): Carrier
     {
         $this->validate($carrier, requireIata: true);

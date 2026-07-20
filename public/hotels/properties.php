@@ -92,11 +92,11 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
             <label>State / region
                 <input type="text" name="state_region" value="<?= htmlspecialchars($filters['state_region'], ENT_QUOTES) ?>">
             </label>
-            <label>Destination fee
+            <label>Destination charge
                 <select name="destination_fee">
                     <option value="">Any</option>
-                    <option value="1" <?= $filters['destination_fee'] === '1' ? 'selected' : '' ?>>Has fee</option>
-                    <option value="0" <?= $filters['destination_fee'] === '0' ? 'selected' : '' ?>>No fee</option>
+                    <option value="1" <?= $filters['destination_fee'] === '1' ? 'selected' : '' ?>>Has charge</option>
+                    <option value="0" <?= $filters['destination_fee'] === '0' ? 'selected' : '' ?>>No charge</option>
                 </select>
             </label>
             <label>My blacklist
@@ -137,7 +137,7 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'hotel_name']), ENT_QUOTES) ?>">Hotel</a></th>
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'city']), ENT_QUOTES) ?>">Location</a></th>
                     <th><a href="<?= htmlspecialchars($queryBase(['sort' => 'overall_rating']), ENT_QUOTES) ?>">Overall</a></th>
-                    <th>Fees</th>
+                    <th>Charge</th>
                     <th>Flags</th>
                     <th></th>
                 </tr>
@@ -158,10 +158,7 @@ $queryBase = static function (array $overrides = []) use ($filters, $sort): stri
                         </td>
                         <td>
                             <?php if ($property->hasDestinationFee): ?>
-                                Destination fee
-                                <?php if ($property->destinationFeeNotes): ?>
-                                    <span class="hint"><?= htmlspecialchars($property->destinationFeeNotes, ENT_QUOTES) ?></span>
-                                <?php endif; ?>
+                                Yes
                             <?php else: ?>
                                 —
                             <?php endif; ?>

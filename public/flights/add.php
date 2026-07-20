@@ -19,8 +19,23 @@ $tripRepo = new TripRepository($app['db'], $app['logger']);
 $carrierRepo = new CarrierRepository($app['db'], $app['logger']);
 $blockRepo = new VisibilityBlockRepository($app['db']);
 
-$carriers = $carrierRepo->findForUser($user->id);
 $errors = [];
+$schemaWarning = null;
+$carriers = [];
+
+if (!$app['db']->tableExists('carriers')) {
+    $schemaWarning = 'Database is missing the carriers table. On the server run: php scripts/migrate.php';
+} else {
+    try {
+        $carriers = $carrierRepo->findForUser($user->id);
+    } catch (Throwable $e) {
+        $app['logger']->error('Failed loading carriers for flight form', [
+            'error' => $e->getMessage(),
+        ]);
+        $schemaWarning = 'Could not load carriers. If you just pulled new code, run: php scripts/migrate.php';
+    }
+}
+
 $otherUsers = array_values(array_filter(
     $userRepo->findAllActive(),
     static fn ($u) => $u->id !== $user->id
@@ -36,7 +51,9 @@ function nullableTrimFlight(?string $value): ?string
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
+    if ($schemaWarning !== null) {
+        $errors[] = $schemaWarning;
+    } elseif (!Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $errors[] = 'Your session expired. Please resubmit the form.';
     } else {
         $carrierId = (int) ($_POST['carrier_id'] ?? 0);
@@ -87,6 +104,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($errors === [] && $carrier !== null) {
             try {
+                if (!$app['db']->columnExists('trip_segments', 'carrier_id')) {
+                    throw new RuntimeException(
+                        'Database is missing trip_segments.carrier_id. Run: php scripts/migrate.php'
+                    );
+                }
+
                 $startDate = substr((string) $departDt, 0, 10);
                 $endDate = $arriveDt !== null ? substr($arriveDt, 0, 10) : $startDate;
                 if ($endDate < $startDate) {
@@ -180,6 +203,10 @@ $selectedCarrierId = (int) ($_POST['carrier_id'] ?? 0);
     <h1>Add a Flight</h1>
     <p class="hint">Pick a carrier (IATA is stored on the carrier). Enter only the flight number, e.g. <code>1234</code> not <code>DL1234</code>.</p>
 
+    <?php if ($schemaWarning !== null): ?>
+        <p class="alert alert-error"><?= htmlspecialchars($schemaWarning, ENT_QUOTES) ?></p>
+    <?php endif; ?>
+
     <?php foreach ($errors as $error): ?>
         <p class="alert alert-error"><?= htmlspecialchars($error, ENT_QUOTES) ?></p>
     <?php endforeach; ?>
@@ -188,7 +215,7 @@ $selectedCarrierId = (int) ($_POST['carrier_id'] ?? 0);
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
 
         <label>Carrier
-            <select name="carrier_id" id="carrier_id" required>
+            <select name="carrier_id" id="carrier_id" required <?= $schemaWarning !== null ? 'disabled' : '' ?>>
                 <option value="">— Select carrier —</option>
                 <?php foreach ($carriers as $c): ?>
                     <option value="<?= (int) $c->id ?>" <?= $selectedCarrierId === $c->id ? 'selected' : '' ?>>
@@ -200,21 +227,21 @@ $selectedCarrierId = (int) ($_POST['carrier_id'] ?? 0);
         </label>
         <p class="hint"><a href="/flights/carriers.php">Manage carriers</a></p>
 
-        <label>Flight number<input type="text" name="flight_number" required value="<?= htmlspecialchars((string) ($_POST['flight_number'] ?? ''), ENT_QUOTES) ?>" placeholder="1234" inputmode="numeric"></label>
-        <label>Origin (airport code or city)<input type="text" name="origin" required value="<?= htmlspecialchars((string) ($_POST['origin'] ?? ''), ENT_QUOTES) ?>" placeholder="ORD"></label>
-        <label>Destination (airport code or city)<input type="text" name="destination" required value="<?= htmlspecialchars((string) ($_POST['destination'] ?? ''), ENT_QUOTES) ?>" placeholder="ATL"></label>
-        <label>Departure<input type="datetime-local" name="depart_dt" required value="<?= htmlspecialchars((string) ($_POST['depart_dt'] ?? ''), ENT_QUOTES) ?>"></label>
-        <label>Arrival (optional)<input type="datetime-local" name="arrive_dt" value="<?= htmlspecialchars((string) ($_POST['arrive_dt'] ?? ''), ENT_QUOTES) ?>"></label>
-        <label>Confirmation code<input type="text" name="confirmation_code" value="<?= htmlspecialchars((string) ($_POST['confirmation_code'] ?? ''), ENT_QUOTES) ?>"></label>
-        <label>Trip purpose<input type="text" name="trip_purpose" value="<?= htmlspecialchars((string) ($_POST['trip_purpose'] ?? ''), ENT_QUOTES) ?>"></label>
-        <label>Notes<textarea name="notes" rows="3"><?= htmlspecialchars((string) ($_POST['notes'] ?? ''), ENT_QUOTES) ?></textarea></label>
+        <label>Flight number<input type="text" name="flight_number" required value="<?= htmlspecialchars((string) ($_POST['flight_number'] ?? ''), ENT_QUOTES) ?>" placeholder="1234" inputmode="numeric" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
+        <label>Origin (airport code or city)<input type="text" name="origin" required value="<?= htmlspecialchars((string) ($_POST['origin'] ?? ''), ENT_QUOTES) ?>" placeholder="ORD" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
+        <label>Destination (airport code or city)<input type="text" name="destination" required value="<?= htmlspecialchars((string) ($_POST['destination'] ?? ''), ENT_QUOTES) ?>" placeholder="ATL" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
+        <label>Departure<input type="datetime-local" name="depart_dt" required value="<?= htmlspecialchars((string) ($_POST['depart_dt'] ?? ''), ENT_QUOTES) ?>" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
+        <label>Arrival (optional)<input type="datetime-local" name="arrive_dt" value="<?= htmlspecialchars((string) ($_POST['arrive_dt'] ?? ''), ENT_QUOTES) ?>" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
+        <label>Confirmation code<input type="text" name="confirmation_code" value="<?= htmlspecialchars((string) ($_POST['confirmation_code'] ?? ''), ENT_QUOTES) ?>" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
+        <label>Trip purpose<input type="text" name="trip_purpose" value="<?= htmlspecialchars((string) ($_POST['trip_purpose'] ?? ''), ENT_QUOTES) ?>" <?= $schemaWarning !== null ? 'disabled' : '' ?>></label>
+        <label>Notes<textarea name="notes" rows="3" <?= $schemaWarning !== null ? 'disabled' : '' ?>><?= htmlspecialchars((string) ($_POST['notes'] ?? ''), ENT_QUOTES) ?></textarea></label>
 
         <?php
         $legend = 'Privacy';
         require __DIR__ . '/../_privacy_fieldset.php';
         ?>
 
-        <button type="submit" class="primary">Save flight</button>
+        <button type="submit" class="primary" <?= $schemaWarning !== null ? 'disabled' : '' ?>>Save flight</button>
     </form>
 </main>
 

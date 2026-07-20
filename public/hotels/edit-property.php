@@ -75,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 walkToOffice: $checkbox('walk_to_office'),
                 walkToOfficeNotes: $nullable($_POST['walk_to_office_notes'] ?? null),
                 hasDestinationFee: $checkbox('has_destination_fee'),
-                destinationFeeNotes: $nullable($_POST['destination_fee_notes'] ?? null),
+                destinationFeeNotes: null,
                 wifiQuality: $_POST['wifi_quality'] !== '' ? (int) $_POST['wifi_quality'] : null,
                 noiseLevel: $_POST['noise_level'] !== '' ? (int) $_POST['noise_level'] : null,
                 uniqueFeatures: $nullable($_POST['unique_features'] ?? null),

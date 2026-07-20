@@ -10,23 +10,38 @@ use NexWaypoint\Hotels\HotelProperty;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStay;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Mail\Parsers\AmericanAirlinesParser;
+use NexWaypoint\Mail\Parsers\AmtrakParser;
+use NexWaypoint\Mail\Parsers\BreezeAirlinesParser;
+use NexWaypoint\Mail\Parsers\DeltaAirlinesParser;
 use NexWaypoint\Mail\Parsers\GenericHotelConfirmationParser;
+use NexWaypoint\Mail\Parsers\HiltonHotelParser;
+use NexWaypoint\Mail\Parsers\MarriottHotelParser;
+use NexWaypoint\Mail\Parsers\UnitedAirlinesParser;
+use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Users\UserRepository;
 
 /**
- * Orchestrates one polling pass: fetch unseen mail -> detect type -> match
- * owner by From: address -> parse -> either create a draft record + notify
- * the owner, or route to the PARSE_FAILED queue for manual review.
+ * Orchestrates one polling pass: fetch unseen mail -> detect type/event ->
+ * match owner by From: -> parse -> upsert/cancel trips or hotel stays.
  *
- * v1 parser coverage: hotel confirmations only (GenericHotelConfirmationParser).
- * Flight/train/car parsers are a documented next step (README roadmap) --
- * MailPoller already routes those types to the review queue with a clear
- * "no parser for this type yet" reason rather than silently dropping them.
+ * Supported: AA / Delta / United / Breeze flights, Amtrak, Hilton / Marriott /
+ * generic hotel confirmations. Folio / bag-receipt / status mail is ignored.
  */
 final class MailPoller
 {
     private const MIN_CONFIDENCE_DEFAULT = 0.75;
+
+    /** @var array<string, string> */
+    private const CARRIER_NAMES = [
+        'AA' => 'American Airlines',
+        'DL' => 'Delta Air Lines',
+        'UA' => 'United Airlines',
+        'MX' => 'Breeze Airways',
+        '2V' => 'Amtrak',
+    ];
 
     public function __construct(
         private readonly MailSourceInterface $source,
@@ -35,6 +50,8 @@ final class MailPoller
         private readonly UserRepository $users,
         private readonly HotelPropertyRepository $hotelProperties,
         private readonly HotelStayRepository $hotelStays,
+        private readonly TripRepository $trips,
+        private readonly CarrierRepository $carriers,
         private readonly NotificationRepository $notifications,
         private readonly ParseLogRepository $parseLog,
         private readonly Logger $logger,
@@ -102,42 +119,110 @@ final class MailPoller
             return false;
         }
 
-        if ($detection['type'] !== 'hotel') {
-            $reason = $detection['type'] === 'unknown'
-                ? 'Unrecognized sender/subject pattern'
-                : "No parser implemented yet for type '{$detection['type']}' (see README roadmap)";
-            $this->fail($message, $detection['type'], $reason, $owner->id);
+        if (in_array($detection['event'], ['ignore', 'status'], true)) {
+            return $this->ignore($message, $detection['type'], 'Detector marked event as ' . $detection['event'], $owner->id);
+        }
+
+        if ($detection['type'] === 'unknown') {
+            $this->fail($message, 'unknown', 'Unrecognized sender/subject pattern', $owner->id);
             return false;
         }
 
-        $parser = new GenericHotelConfirmationParser();
+        if ($detection['type'] === 'car') {
+            $this->fail($message, 'car', "No parser implemented yet for type 'car' (see README roadmap)", $owner->id);
+            return false;
+        }
+
+        $parser = $this->resolveParser($detection['type'], $detection['matched_domain'] ?? '');
+        if ($parser === null) {
+            $this->fail($message, $detection['type'], "No parser for type '{$detection['type']}'", $owner->id);
+            return false;
+        }
+
         $extracted = $parser->parse($message);
         $confidence = $parser->confidenceScore();
+        $event = is_array($extracted) ? (string) ($extracted['event'] ?? $detection['event']) : $detection['event'];
 
-        if ($extracted === null || $confidence < $minConfidence) {
+        if (is_array($extracted) && $event === 'ignore') {
+            return $this->ignore($message, $detection['type'], 'Parser marked message as ignore', $owner->id, $confidence);
+        }
+
+        if ($extracted === null || ($event !== 'cancel' && $confidence < $minConfidence)) {
             $reason = $extracted === null
-                ? 'Parser found no confirmation code or property name'
+                ? 'Parser could not extract a usable confirmation'
                 : sprintf('Parse confidence %.2f below threshold %.2f', $confidence, $minConfidence);
-            $this->fail($message, 'hotel', $reason, $owner->id, $confidence);
+            $this->fail($message, $detection['type'], $reason, $owner->id, $confidence);
             return false;
         }
 
-        if ($extracted['check_in'] === null || $extracted['check_out'] === null || $extracted['property_name'] === null) {
-            $this->fail($message, 'hotel', 'Missing required field (property_name/check_in/check_out) after parse', $owner->id, $confidence);
+        $kind = (string) ($extracted['kind'] ?? $detection['type']);
+
+        if ($kind === 'hotel') {
+            return $this->handleHotel($message, $owner->id, $extracted, $event, $confidence);
+        }
+
+        if ($kind === 'flight' || $kind === 'train') {
+            return $this->handleItinerary($message, $owner->id, $extracted, $event, $confidence, $kind);
+        }
+
+        $this->fail($message, $detection['type'], "Unsupported parsed kind '{$kind}'", $owner->id, $confidence);
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $extracted
+     */
+    private function handleHotel(
+        EmailMessage $message,
+        int $userId,
+        array $extracted,
+        string $event,
+        float $confidence,
+    ): bool {
+        if ($event === 'cancel') {
+            $cancelled = $this->hotelStays->cancelFromImport(
+                $userId,
+                isset($extracted['confirmation_code']) ? (string) $extracted['confirmation_code'] : null,
+                isset($extracted['property_name']) ? (string) $extracted['property_name'] : null,
+                isset($extracted['check_in']) ? (string) $extracted['check_in'] : null,
+                isset($extracted['check_out']) ? (string) $extracted['check_out'] : null,
+                $userId,
+            );
+            if ($cancelled === null) {
+                $this->fail($message, 'hotel', 'Cancel email matched no existing hotel stay', $userId, $confidence);
+                return false;
+            }
+            $this->notifications->create(
+                $userId,
+                null,
+                'hotel_import',
+                'A hotel stay was cancelled from an email notice. Confirmation was '
+                . ($cancelled->confirmationCode ?? 'unknown') . '.'
+            );
+            return $this->succeed($message, 'hotel', $confidence, $userId, null, 'Hotel stay cancelled from email');
+        }
+
+        if (($extracted['check_in'] ?? null) === null
+            || ($extracted['check_out'] ?? null) === null
+            || ($extracted['property_name'] ?? null) === null
+        ) {
+            $this->fail($message, 'hotel', 'Missing required field (property_name/check_in/check_out) after parse', $userId, $confidence);
             return false;
         }
 
-        $property = $this->hotelProperties->findByNameCity($owner->id, $extracted['property_name'], null);
+        $propertyName = (string) $extracted['property_name'];
+        $city = isset($extracted['city']) && is_string($extracted['city']) ? $extracted['city'] : null;
+        $property = $this->hotelProperties->findByNameCity($userId, $propertyName, $city);
         if ($property === null) {
             $property = $this->hotelProperties->create(new HotelProperty(
                 id: null,
-                userId: $owner->id,
-                hotelName: $extracted['property_name'],
-                brand: null,
-                addressLine1: $extracted['address'],
+                userId: $userId,
+                hotelName: $propertyName,
+                brand: isset($extracted['brand']) && is_string($extracted['brand']) ? $extracted['brand'] : null,
+                addressLine1: isset($extracted['address']) && is_string($extracted['address']) ? $extracted['address'] : null,
                 addressLine2: null,
-                city: null,
-                stateRegion: null,
+                city: $city,
+                stateRegion: isset($extracted['state_region']) && is_string($extracted['state_region']) ? $extracted['state_region'] : null,
                 postalCode: null,
                 country: null,
                 phone: null,
@@ -161,39 +246,208 @@ final class MailPoller
                 destinationFeeNotes: null,
                 wifiQuality: null,
                 noiseLevel: null,
-                uniqueFeatures: $extracted['room_type'],
+                uniqueFeatures: isset($extracted['room_type']) && is_string($extracted['room_type']) ? $extracted['room_type'] : null,
                 isBlacklisted: false,
                 blacklistReason: null,
-            ), $owner->id);
+            ), $userId);
         }
 
-        $stay = new HotelStay(
+        $result = $this->hotelStays->upsertFromImport(new HotelStay(
             id: null,
-            userId: $owner->id,
+            userId: $userId,
             hotelPropertyId: (int) $property->id,
             roomNumber: null,
             bedType: null,
             bathroomType: null,
-            stayStart: $extracted['check_in'],
-            stayEnd: $extracted['check_out'],
+            stayStart: (string) $extracted['check_in'],
+            stayEnd: (string) $extracted['check_out'],
             stayRating: null,
             lastStayPrice: null,
             currency: 'USD',
             bookingSource: 'email_import',
-            confirmationCode: $extracted['confirmation_code'],
+            confirmationCode: isset($extracted['confirmation_code']) ? (string) $extracted['confirmation_code'] : null,
             wouldReturn: null,
             notes: 'Auto-imported from a forwarded confirmation email. Review and fill in amenities/rating.',
-        );
+        ), $userId);
 
-        $created = $this->hotelStays->create($stay, $owner->id);
-
+        $verb = $result['created'] ? 'found' : 'updated';
         $this->notifications->create(
-            $owner->id,
+            $userId,
             null,
             'hotel_import',
-            "We found a hotel stay at {$property->hotelName} ({$created->stayStart} to {$created->stayEnd}). Review it in Hotel Stays."
+            "We {$verb} a hotel stay at {$property->hotelName} ({$result['stay']->stayStart} to {$result['stay']->stayEnd}). Review it in Hotel Stays."
         );
 
+        return $this->succeed(
+            $message,
+            'hotel',
+            $confidence,
+            $userId,
+            null,
+            'Hotel stay imported'
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $extracted
+     */
+    private function handleItinerary(
+        EmailMessage $message,
+        int $userId,
+        array $extracted,
+        string $event,
+        float $confidence,
+        string $kind,
+    ): bool {
+        $code = isset($extracted['confirmation_code']) ? strtoupper(trim((string) $extracted['confirmation_code'])) : '';
+        if ($code === '') {
+            $this->fail($message, $kind, 'Missing confirmation/PNR code', $userId, $confidence);
+            return false;
+        }
+
+        if ($event === 'cancel') {
+            $count = $this->trips->cancelByConfirmation($userId, $code, $userId);
+            if ($count === 0) {
+                $this->fail($message, $kind, "Cancel email matched no segments for confirmation {$code}", $userId, $confidence);
+                return false;
+            }
+            $this->notifications->create(
+                $userId,
+                null,
+                'trip_import',
+                "Itinerary {$code} was cancelled from an email notice ({$count} segment(s))."
+            );
+            return $this->succeed($message, $kind, $confidence, $userId, null, 'Itinerary cancelled');
+        }
+
+        /** @var list<array<string, mixed>> $rawSegments */
+        $rawSegments = is_array($extracted['segments'] ?? null) ? $extracted['segments'] : [];
+        if ($rawSegments === []) {
+            $this->fail($message, $kind, 'No flight/train segments extracted', $userId, $confidence);
+            return false;
+        }
+
+        $legs = [];
+        foreach ($rawSegments as $seg) {
+            if (!is_array($seg)) {
+                continue;
+            }
+            $iata = isset($seg['carrier_iata']) && is_string($seg['carrier_iata']) && $seg['carrier_iata'] !== ''
+                ? strtoupper($seg['carrier_iata'])
+                : null;
+            $carrierName = isset($seg['carrier_name']) && is_string($seg['carrier_name'])
+                ? $seg['carrier_name']
+                : null;
+
+            if ($iata === null && $kind === 'train') {
+                $iata = '2V';
+                $carrierName = $carrierName ?? 'Amtrak';
+            }
+
+            $carrierId = null;
+            $displayName = $carrierName;
+            if ($iata !== null) {
+                $carrier = $this->carriers->findOrCreateByIata(
+                    $userId,
+                    $iata,
+                    $carrierName ?? (self::CARRIER_NAMES[$iata] ?? $iata),
+                    $userId,
+                );
+                $carrierId = $carrier->id;
+                $displayName = $carrier->name;
+            }
+
+            $flightNumber = $seg['flight_number'] ?? null;
+            if (is_string($flightNumber) && $iata !== null) {
+                // Store digits-only when possible; keep train numbers as-is.
+                $normalized = preg_replace('/[^0-9]/', '', $flightNumber);
+                if ($normalized !== null && $normalized !== '' && $kind === 'flight') {
+                    $flightNumber = ltrim($normalized, '0') ?: '0';
+                }
+            }
+
+            $legs[] = [
+                'segment_type' => (string) ($seg['segment_type'] ?? ($kind === 'train' ? 'train' : 'flight')),
+                'carrier_id' => $carrierId,
+                'carrier' => $displayName,
+                'flight_number' => is_string($flightNumber) || is_int($flightNumber) ? (string) $flightNumber : null,
+                'origin' => isset($seg['origin']) && is_string($seg['origin']) ? $seg['origin'] : null,
+                'destination' => isset($seg['destination']) && is_string($seg['destination']) ? $seg['destination'] : null,
+                'depart_dt' => isset($seg['depart_dt']) && is_string($seg['depart_dt']) ? $seg['depart_dt'] : null,
+                'arrive_dt' => isset($seg['arrive_dt']) && is_string($seg['arrive_dt']) ? $seg['arrive_dt'] : null,
+                'confirmation_code' => $code,
+            ];
+        }
+
+        if ($legs === []) {
+            $this->fail($message, $kind, 'No usable segments after carrier resolution', $userId, $confidence);
+            return false;
+        }
+
+        $result = $this->trips->upsertItineraryByConfirmation($userId, $code, $legs, null, $userId, null);
+        $verb = $result['created'] ? 'imported' : 'updated';
+        $dest = $result['trip']->destinationCity;
+        $this->notifications->create(
+            $userId,
+            $result['segments'][0]->id ?? null,
+            'trip_import',
+            "We {$verb} itinerary {$code} to {$dest} (" . count($result['segments']) . ' segment(s)).'
+        );
+
+        return $this->succeed(
+            $message,
+            $kind,
+            $confidence,
+            $userId,
+            $result['segments'][0]->id ?? null,
+            "Itinerary {$verb}"
+        );
+    }
+
+    private function resolveParser(string $type, string $domain): ?ParserInterface
+    {
+        $domain = strtolower($domain);
+
+        if ($type === 'flight') {
+            if (str_ends_with($domain, 'aa.com')) {
+                return new AmericanAirlinesParser();
+            }
+            if (str_ends_with($domain, 'united.com')) {
+                return new UnitedAirlinesParser();
+            }
+            if (str_ends_with($domain, 'delta.com')) {
+                return new DeltaAirlinesParser();
+            }
+            if (str_ends_with($domain, 'flybreeze.com')) {
+                return new BreezeAirlinesParser();
+            }
+            return null;
+        }
+
+        if ($type === 'hotel') {
+            if (str_ends_with($domain, 'hilton.com')) {
+                return new HiltonHotelParser();
+            }
+            if (str_ends_with($domain, 'marriott.com')) {
+                return new MarriottHotelParser();
+            }
+            return new GenericHotelConfirmationParser();
+        }
+
+        if ($type === 'train') {
+            return new AmtrakParser();
+        }
+
+        return null;
+    }
+
+    private function ignore(
+        EmailMessage $message,
+        string $detectedType,
+        string $reason,
+        ?int $matchedUserId = null,
+        ?float $confidence = null,
+    ): bool {
         $this->source->markProcessed($message->uid);
         $this->parseLog->record(
             $message->receivedAt,
@@ -201,15 +455,40 @@ final class MailPoller
             $message->subject,
             $message->uid,
             $this->sourceName,
-            'hotel',
+            $detectedType,
+            'ignored',
+            $reason,
+            $confidence,
+            $matchedUserId,
+            null,
+        );
+        $this->logger->info('Message ignored', ['uid' => $message->uid, 'reason' => $reason]);
+        return true;
+    }
+
+    private function succeed(
+        EmailMessage $message,
+        string $detectedType,
+        float $confidence,
+        int $matchedUserId,
+        ?int $tripSegmentId,
+        string $logMessage,
+    ): bool {
+        $this->source->markProcessed($message->uid);
+        $this->parseLog->record(
+            $message->receivedAt,
+            $message->fromAddress,
+            $message->subject,
+            $message->uid,
+            $this->sourceName,
+            $detectedType,
             'success',
             null,
             $confidence,
-            $owner->id,
-            null,
+            $matchedUserId,
+            $tripSegmentId,
         );
-
-        $this->logger->info('Hotel confirmation imported', ['hotel_stay_id' => $created->id, 'user_id' => $owner->id]);
+        $this->logger->info($logMessage, ['uid' => $message->uid, 'user_id' => $matchedUserId]);
         return true;
     }
 

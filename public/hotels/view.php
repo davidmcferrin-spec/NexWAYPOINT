@@ -67,9 +67,7 @@ $rows = [
     'Walk to office/venue' => $property->walkToOffice
         ? ('Yes' . ($property->walkToOfficeNotes ? ' — ' . $property->walkToOfficeNotes : ''))
         : null,
-    'Destination fee' => $property->hasDestinationFee
-        ? ('Yes' . ($property->destinationFeeNotes ? ' — ' . $property->destinationFeeNotes : ''))
-        : null,
+    'Destination charge' => $property->hasDestinationFee ? 'Yes' : null,
     'Last stay price' => $stay->lastStayPrice !== null
         ? "{$stay->currency} " . number_format($stay->lastStayPrice, 2)
         : null,
@@ -90,7 +88,7 @@ $amenities = array_filter([
     $property->hasEvCharging ? 'EV charging' : null,
     $property->hasOnsiteRestaurant ? 'On-site restaurant' : null,
     $property->walkToOffice ? 'Walk to office' : null,
-    $property->hasDestinationFee ? 'Destination fee' : null,
+    $property->hasDestinationFee ? 'Destination charge' : null,
 ]);
 
 $teammateAdverse = $propertyRepo->findTeammateAdversePreferences($user->id, $property->hotelName, $property->city);
