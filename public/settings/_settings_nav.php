@@ -11,6 +11,7 @@ use NexWaypoint\Users\User;
 /** @var User $user */
 $settingsSection = $settingsSection ?? '';
 $settingsIsAdmin = $user->isAdmin || $user->role === 'manager';
+$settingsIsSystem = $user->isSystem;
 
 $settingsLinkClass = static function (string $section) use ($settingsSection): string {
     return $settingsSection === $section ? 'settings-nav-link is-active' : 'settings-nav-link';
@@ -28,5 +29,9 @@ $settingsLinkClass = static function (string $section) use ($settingsSection): s
         <a class="<?= $settingsLinkClass('integrations') ?>" href="/settings/integrations.php">Integrations</a>
         <a class="<?= $settingsLinkClass('jobs') ?>" href="/settings/jobs.php">Cron / service status</a>
         <a class="<?= $settingsLinkClass('users') ?>" href="/settings/users.php">Users</a>
+    <?php endif; ?>
+    <?php if ($settingsIsSystem): ?>
+        <span class="settings-nav-sep" aria-hidden="true"></span>
+        <a class="<?= $settingsLinkClass('mail-review') ?>" href="/settings/mail-review.php">Mail review</a>
     <?php endif; ?>
 </nav>

@@ -284,10 +284,15 @@ CREATE TABLE parse_log (
     confidence_score    REAL NULL,
     matched_user_id     INTEGER NULL REFERENCES users(id) ON DELETE SET NULL,
     trip_segment_id     INTEGER NULL REFERENCES trip_segments(id) ON DELETE SET NULL,
+    trip_id             INTEGER NULL REFERENCES trips(id) ON DELETE SET NULL,
+    hotel_stay_id       INTEGER NULL REFERENCES hotel_stays(id) ON DELETE SET NULL,
+    raw_path            TEXT NULL,
+    raw_expires_at      TEXT NULL,
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (mail_uid, source)
 );
 CREATE INDEX idx_parse_log_status ON parse_log(parse_status);
+CREATE INDEX idx_parse_log_received ON parse_log(received_at);
 
 CREATE TABLE visibility_rules (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

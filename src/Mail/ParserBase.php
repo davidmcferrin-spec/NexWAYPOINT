@@ -164,6 +164,7 @@ abstract class ParserBase implements ParserInterface
         $text = $plain !== ''
             ? ForwardedMailNormalizer::dequoteText($plain)
             : ForwardedMailNormalizer::dequoteText($this->htmlToText($message->bodyHtml));
+        $text = ForwardedMailNormalizer::stripDateSentHeaderLines($text);
         return $this->scrubMimeNoise($text);
     }
 

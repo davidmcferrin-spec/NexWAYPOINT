@@ -180,6 +180,17 @@ final class TripRepository
         return $row === null ? null : TripSegment::fromRow($row);
     }
 
+    /**
+     * After parse_log is written, point this trip's segments at that log row.
+     */
+    public function attachSourceParseLogToTrip(int $tripId, int $parseLogId): void
+    {
+        $this->db->execute(
+            'UPDATE trip_segments SET source_parse_log_id = :plog WHERE trip_id = :trip_id',
+            ['plog' => $parseLogId, 'trip_id' => $tripId]
+        );
+    }
+
     public function updateSegment(TripSegment $segment, ?int $actorUserId = null): TripSegment
     {
         if ($segment->id === null) {

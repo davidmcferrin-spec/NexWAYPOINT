@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace NexWaypoint\Mail;
 
 /**
- * In-memory representation of one inbound email. NEVER persisted as-is --
- * bodyPlain/bodyHtml exist only for the duration of detection + parsing and
- * must not be written to the database or logged. See parse_log's schema
- * comment for why (privacy constraint: raw email content never stored).
+ * In-memory representation of one inbound email during detection + parsing.
+ * A short-lived .eml copy may be written under storage/mail_raw/ for
+ * system-admin review (MAIL_RAW_RETENTION_DAYS); it is never stored in the DB.
  */
 final class EmailMessage
 {

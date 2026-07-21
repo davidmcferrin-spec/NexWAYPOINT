@@ -1350,6 +1350,52 @@ try {
         }
     }
 
+    // --- parse_log: resource links + short-lived raw path metadata ----------
+    if ($tableExists('parse_log') && !$columnExists('parse_log', 'trip_id')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN trip_id INTEGER NULL REFERENCES trips(id) ON DELETE SET NULL');
+        } else {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN trip_id INT UNSIGNED NULL');
+            $pdo->exec(
+                'ALTER TABLE parse_log ADD CONSTRAINT fk_parse_log_trip
+                 FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL'
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Added parse_log.trip_id\n");
+    }
+    if ($tableExists('parse_log') && !$columnExists('parse_log', 'hotel_stay_id')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN hotel_stay_id INTEGER NULL REFERENCES hotel_stays(id) ON DELETE SET NULL');
+        } else {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN hotel_stay_id INT UNSIGNED NULL');
+            $pdo->exec(
+                'ALTER TABLE parse_log ADD CONSTRAINT fk_parse_log_stay
+                 FOREIGN KEY (hotel_stay_id) REFERENCES hotel_stays(id) ON DELETE SET NULL'
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Added parse_log.hotel_stay_id\n");
+    }
+    if ($tableExists('parse_log') && !$columnExists('parse_log', 'raw_path')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN raw_path TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN raw_path VARCHAR(255) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added parse_log.raw_path\n");
+    }
+    if ($tableExists('parse_log') && !$columnExists('parse_log', 'raw_expires_at')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN raw_expires_at TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE parse_log ADD COLUMN raw_expires_at DATETIME NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added parse_log.raw_expires_at\n");
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {

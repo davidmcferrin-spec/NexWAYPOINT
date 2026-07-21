@@ -57,6 +57,7 @@ redirect to the builder.
 
 **Not started:** Azure AD SSO, PWA/offline, push notifications.
 Mail auto-import stays on auto-create + notify (no pending-approval queue).
+System-admin Mail review: Settings → Mail review (`is_system` only).
 
 ## Key architecture decisions (and why)
 
@@ -82,11 +83,16 @@ Mail auto-import stays on auto-create + notify (no pending-approval queue).
   whom (`manager_id` solid line + `user_dotted_managers` dotted line), not
   a coarse role dropdown. The seeded `admin` account is `is_system` —
   isolated from the org chart. Site-admin (`is_admin`) gates Settings →
-  Users and Site catalogs. Settings also manage `hotel_brands` and
-  `office_venues` (named offices with addresses for the walk-to combobox
-  and hotel map squares). Mail ownership is
-  correlated via `user_emails` (many addresses per user), not a single
-  `users.email`.
+  Users and Site catalogs. **Mail review** (raw .eml download + import
+  history with links to created trips/stays) is **`is_system` only**, not
+  `is_admin`. Settings also manage `hotel_brands` and `office_venues`
+  (named offices with addresses for the walk-to combobox and hotel map
+  squares). Mail ownership is correlated via `user_emails` (many addresses
+  per user), not a single `users.email`. Travel dates come from confirmation
+  body/subject/JSON-LD only — never IMAP Date or forward `Date:`/`Sent:`
+  lines (`ForwardedMailNormalizer::stripDateSentHeaderLines`). Raw .eml
+  files live under `storage/mail_raw/` for `MAIL_RAW_RETENTION_DAYS`
+  (default 7) then purge; review list uses `MAIL_REVIEW_DAYS` (default 14).
 - **Visibility defaults:** TOP_DOWN (manager viewing report, solid or
   dotted) defaults to full visibility; BOTTOM_UP (report viewing manager)
   defaults to city+date only. Per-hotel / per-trip `is_private` and

@@ -21,6 +21,7 @@ use NexWaypoint\Mail\M365GraphSource;
 use NexWaypoint\Mail\MailPoller;
 use NexWaypoint\Mail\MailSourceInterface;
 use NexWaypoint\Mail\ParseLogRepository;
+use NexWaypoint\Mail\RawMailStore;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
@@ -48,6 +49,8 @@ try {
 
     /** @var MailSourceInterface $source */
     $propertyRepo = new HotelPropertyRepository($db, $logger);
+    $rawRetention = max(1, (int) Env::get('MAIL_RAW_RETENTION_DAYS', '7'));
+    $rawDir = NEXWAYPOINT_ROOT . '/storage/mail_raw';
     $poller = new MailPoller(
         $source,
         $sourceName,
@@ -60,6 +63,7 @@ try {
         new NotificationRepository($db),
         new ParseLogRepository($db),
         $logger,
+        new RawMailStore($rawDir, $rawRetention, $logger),
     );
 
     $result = $poller->run();

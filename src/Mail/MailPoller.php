@@ -61,6 +61,7 @@ final class MailPoller
         private readonly NotificationRepository $notifications,
         private readonly ParseLogRepository $parseLog,
         private readonly Logger $logger,
+        private readonly ?RawMailStore $rawMail = null,
     ) {
     }
 
@@ -95,15 +96,13 @@ final class MailPoller
                 $this->logger->error('Unhandled error processing message', ['uid' => $message->uid, 'error' => $e->getMessage()]);
                 $reason = 'Unhandled exception: ' . $e->getMessage();
                 $this->source->markFailed($message->uid, $reason);
-                $this->parseLog->record(
-                    $message->receivedAt,
-                    $message->fromAddress,
-                    $message->subject,
-                    $message->uid,
-                    $this->sourceName,
+                $this->parseLogOutcome(
+                    $message,
                     null,
                     'failed',
                     $reason,
+                    null,
+                    null,
                     null,
                     null,
                     null,
@@ -114,6 +113,7 @@ final class MailPoller
         }
 
         $this->source->disconnect();
+        $this->purgeExpiredRawMail();
 
         $this->logger->info('Mail poll complete', ['fetched' => count($messages), 'success' => $success, 'failed' => $failed]);
         return [
@@ -122,6 +122,18 @@ final class MailPoller
             'failed' => $failed,
             'failure_reasons' => $failureReasons,
         ];
+    }
+
+    private function purgeExpiredRawMail(): void
+    {
+        if ($this->rawMail === null) {
+            return;
+        }
+        $cleared = $this->rawMail->purgeExpiredRows($this->parseLog->findWithRawPaths());
+        if ($cleared !== []) {
+            $this->parseLog->clearRawPaths($cleared);
+            $this->logger->info('Purged expired raw mail files', ['count' => count($cleared)]);
+        }
     }
 
     private function processOne(EmailMessage $message, float $minConfidence): bool
@@ -230,7 +242,7 @@ final class MailPoller
                 'A hotel stay was cancelled from an email notice. Confirmation was '
                 . ($cancelled->confirmationCode ?? 'unknown') . '.'
             );
-            return $this->succeed($message, 'hotel', $confidence, $userId, null, 'Hotel stay cancelled from email');
+            return $this->succeed($message, 'hotel', $confidence, $userId, null, null, null, 'Hotel stay cancelled from email');
         }
 
         if (($extracted['check_in'] ?? null) === null
@@ -309,6 +321,8 @@ final class MailPoller
             $confidence,
             $userId,
             null,
+            null,
+            (int) $result['stay']->id,
             'Hotel stay imported'
         );
     }
@@ -342,7 +356,7 @@ final class MailPoller
                 'trip_import',
                 "Itinerary {$code} was cancelled from an email notice ({$count} segment(s))."
             );
-            return $this->succeed($message, $kind, $confidence, $userId, null, 'Itinerary cancelled');
+            return $this->succeed($message, $kind, $confidence, $userId, null, null, null, 'Itinerary cancelled');
         }
 
         /** @var list<array<string, mixed>> $rawSegments */
@@ -426,6 +440,8 @@ final class MailPoller
             $confidence,
             $userId,
             $result['segments'][0]->id ?? null,
+            (int) $result['trip']->id,
+            null,
             "Itinerary {$verb}"
         );
     }
@@ -475,17 +491,15 @@ final class MailPoller
         ?float $confidence = null,
     ): bool {
         $this->source->markProcessed($message->uid);
-        $this->parseLog->record(
-            $message->receivedAt,
-            $message->fromAddress,
-            $message->subject,
-            $message->uid,
-            $this->sourceName,
+        $this->parseLogOutcome(
+            $message,
             $detectedType,
             'ignored',
             $reason,
             $confidence,
             $matchedUserId,
+            null,
+            null,
             null,
         );
         $this->logger->info('Message ignored', ['uid' => $message->uid, 'reason' => $reason]);
@@ -498,43 +512,88 @@ final class MailPoller
         float $confidence,
         int $matchedUserId,
         ?int $tripSegmentId,
+        ?int $tripId,
+        ?int $hotelStayId,
         string $logMessage,
     ): bool {
         $this->source->markProcessed($message->uid);
-        $this->parseLog->record(
-            $message->receivedAt,
-            $message->fromAddress,
-            $message->subject,
-            $message->uid,
-            $this->sourceName,
+        $parseLogId = $this->parseLogOutcome(
+            $message,
             $detectedType,
             'success',
             null,
             $confidence,
             $matchedUserId,
             $tripSegmentId,
+            $tripId,
+            $hotelStayId,
         );
+        if ($tripId !== null && $parseLogId > 0) {
+            $this->trips->attachSourceParseLogToTrip($tripId, $parseLogId);
+        }
         $this->logger->info($logMessage, ['uid' => $message->uid, 'user_id' => $matchedUserId]);
         return true;
     }
 
-    private function fail(EmailMessage $message, string $detectedType, string $reason, ?int $matchedUserId = null, ?float $confidence = null): void
-    {
+    private function fail(
+        EmailMessage $message,
+        string $detectedType,
+        string $reason,
+        ?int $matchedUserId = null,
+        ?float $confidence = null,
+    ): void {
         $this->lastFailureReason = $reason;
         $this->source->markFailed($message->uid, $reason);
-        $this->parseLog->record(
-            $message->receivedAt,
-            $message->fromAddress,
-            $message->subject,
-            $message->uid,
-            $this->sourceName,
+        $this->parseLogOutcome(
+            $message,
             $detectedType,
             'failed',
             $reason,
             $confidence,
             $matchedUserId,
             null,
+            null,
+            null,
         );
         $this->logger->warning('Message routed to review queue', ['uid' => $message->uid, 'reason' => $reason]);
+    }
+
+    private function parseLogOutcome(
+        EmailMessage $message,
+        ?string $detectedType,
+        string $parseStatus,
+        ?string $failureReason,
+        ?float $confidence,
+        ?int $matchedUserId,
+        ?int $tripSegmentId,
+        ?int $tripId,
+        ?int $hotelStayId,
+    ): int {
+        $id = $this->parseLog->record(
+            $message->receivedAt,
+            $message->fromAddress,
+            $message->subject,
+            $message->uid,
+            $this->sourceName,
+            $detectedType,
+            $parseStatus,
+            $failureReason,
+            $confidence,
+            $matchedUserId,
+            $tripSegmentId,
+            [
+                'trip_id' => $tripId,
+                'hotel_stay_id' => $hotelStayId,
+            ],
+        );
+
+        if ($this->rawMail !== null && $id > 0) {
+            $meta = $this->rawMail->write($id, $message);
+            if ($meta !== null) {
+                $this->parseLog->updateRawMeta($id, $meta['raw_path'], $meta['raw_expires_at']);
+            }
+        }
+
+        return $id;
     }
 }

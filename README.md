@@ -316,7 +316,11 @@ storage/                  Logs, uploads, cache -- must be writable, must NOT be 
 
 - Raw email bodies are never written to the database -- only structured
   fields extracted by a parser. `parse_log` stores metadata (from/subject/
-  status/confidence) for audit purposes, never body content.
+  status/confidence, links to created trip/stay) for audit. Optional
+  short-lived `.eml` files under `storage/mail_raw/` (default 7 days via
+  `MAIL_RAW_RETENTION_DAYS`) are downloadable only by the `is_system`
+  bootstrap account (Settings → Mail review). Travel dates come from
+  confirmation content, not IMAP or forward Date/Sent headers.
 - Every write to `hotel_properties`, `hotel_stays`, `trips`, `trip_segments`,
   `users`, and `visibility_rules` goes through `Database::audit()`, which
   logs to `audit_log`. A DB administrator can see *that* something changed

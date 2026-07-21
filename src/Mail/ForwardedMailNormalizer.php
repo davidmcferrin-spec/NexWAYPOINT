@@ -40,6 +40,8 @@ final class ForwardedMailNormalizer
         }
 
         $meta = self::extractOriginalHeaders($plain);
+        // Forward header Date:/Sent: must not feed travel-date regexes.
+        $plain = self::stripDateSentHeaderLines($plain);
         $subject = $message->subject;
         if ($meta['subject'] !== null && trim($meta['subject']) !== '') {
             $subject = $meta['subject'];
@@ -63,6 +65,26 @@ final class ForwardedMailNormalizer
             bodyPlain: $plain,
             bodyHtml: $html,
         );
+    }
+
+    /**
+     * Remove Date:/Sent:/Date-Sent: lines so parsers never treat forward
+     * or client header timestamps as itinerary dates.
+     */
+    public static function stripDateSentHeaderLines(string $text): string
+    {
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $lines = explode("\n", $text);
+        $out = [];
+        foreach ($lines as $line) {
+            if (preg_match('/^(?:>+\s?|\|\s?)*(Date|Sent|Date-Sent)\s*:/i', $line) === 1) {
+                continue;
+            }
+            $out[] = $line;
+        }
+        $joined = implode("\n", $out);
+        $joined = (string) preg_replace("/\n{3,}/", "\n\n", $joined);
+        return trim($joined);
     }
 
     public static function stripForwardSubjectPrefix(string $subject): string

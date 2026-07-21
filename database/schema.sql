@@ -340,9 +340,9 @@ CREATE TABLE flight_status (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
--- parse_log: audit trail for inbound mail. Raw email body is NEVER stored here
--- or anywhere else in the schema -- only metadata + extracted structured fields
--- that end up on trip_segments. This is a non-negotiable privacy constraint.
+-- parse_log: audit trail for inbound mail. Raw bodies are NOT stored in the
+-- DB; optional short-lived .eml files live under storage/mail_raw/ and expire
+-- after MAIL_RAW_RETENTION_DAYS (system-admin review only).
 -- ----------------------------------------------------------------------------
 CREATE TABLE parse_log (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -357,11 +357,18 @@ CREATE TABLE parse_log (
     confidence_score    DECIMAL(3,2) NULL,
     matched_user_id     INT UNSIGNED NULL,
     trip_segment_id     INT UNSIGNED NULL,
+    trip_id             INT UNSIGNED NULL,
+    hotel_stay_id       INT UNSIGNED NULL,
+    raw_path            VARCHAR(255) NULL,
+    raw_expires_at      DATETIME NULL,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_parse_log_user FOREIGN KEY (matched_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT fk_parse_log_segment FOREIGN KEY (trip_segment_id) REFERENCES trip_segments(id) ON DELETE SET NULL,
+    CONSTRAINT fk_parse_log_trip FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL,
+    CONSTRAINT fk_parse_log_stay FOREIGN KEY (hotel_stay_id) REFERENCES hotel_stays(id) ON DELETE SET NULL,
     UNIQUE KEY uq_parse_log_uid_source (mail_uid, source),
-    INDEX idx_parse_log_status (parse_status)
+    INDEX idx_parse_log_status (parse_status),
+    INDEX idx_parse_log_received (received_at)
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
@@ -421,8 +428,10 @@ CREATE TABLE aeroapi_usage_log (
 -- ----------------------------------------------------------------------------
 -- audit_log: every DB write funnels through Core\Database::audited*() helpers,
 -- which insert here. The VM/system administrator has DB access but this table
--- (plus parse_log's no-raw-body rule) is how "no admin access to personal
--- inbox content" is enforced by architecture rather than policy.
+-- (plus parse_log never storing bodies in MySQL) is how "no casual admin access
+-- to personal travel mail" is enforced by architecture rather than policy.
+-- System-admin Mail review may keep short-lived .eml files under storage/mail_raw/
+-- for MAIL_RAW_RETENTION_DAYS only.
 -- ----------------------------------------------------------------------------
 CREATE TABLE audit_log (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

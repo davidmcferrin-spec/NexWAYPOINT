@@ -44,6 +44,8 @@ TXT;
         self::assertStringContainsString('Confirmation code: AJXRPU', $normalized->bodyPlain);
         self::assertStringNotContainsString('> Confirmation', $normalized->bodyPlain);
         self::assertStringContainsString('American Airlines', $normalized->bodyPlain);
+        self::assertStringNotContainsString('Date:', $normalized->bodyPlain);
+        self::assertStringNotContainsString('July 12th, 2026', $normalized->bodyPlain);
 
         $detected = (new EmailConfirmationDetector())->detect($normalized);
         self::assertSame('flight', $detected['type']);
@@ -78,6 +80,8 @@ TXT;
         ));
 
         self::assertSame('Your Jul-04-2026 Confirmation', $normalized->subject);
+        self::assertStringNotContainsString('Date:', $normalized->bodyPlain);
+        self::assertStringNotContainsString('Jul 1, 2026 at 10:00 AM', $normalized->bodyPlain);
         $detected = (new EmailConfirmationDetector())->detect($normalized);
         self::assertSame('hotel', $detected['type']);
         self::assertSame('hilton.com', $detected['matched_domain']);
@@ -107,6 +111,8 @@ TXT;
         ));
 
         self::assertSame('Your Trip Confirmation # ABC123', $normalized->subject);
+        self::assertStringNotContainsString('Sent:', $normalized->bodyPlain);
+        self::assertStringNotContainsString('July 1, 2026 9:00 AM', $normalized->bodyPlain);
         $detected = (new EmailConfirmationDetector())->detect($normalized);
         self::assertSame('flight', $detected['type']);
         self::assertSame('delta.com', $detected['matched_domain']);
@@ -178,5 +184,46 @@ TXT;
 
         self::assertSame('no-reply@info.email.aa.com', $normalized->fromAddress);
         self::assertSame('Your trip confirmation', $normalized->subject);
+    }
+
+    /**
+     * Forward header Date must not become the flight depart date when the
+     * itinerary date appears later in the body.
+     */
+    public function testUnitedForwardDoesNotUseHeaderDateForDepart(): void
+    {
+        $raw = <<<'TXT'
+FYI
+
+---------- Forwarded message ---------
+From: United Airlines <united@united.com>
+Date: Mon, Jul 1, 2026 at 10:00 AM
+Subject: Confirmation Number: UA9XYZ
+To: <dave@example.com>
+
+Confirmation Number: UA9XYZ
+UA 482
+Huntsville (HSV) to Denver (DEN)
+Departing Wednesday, July 29, 2026 8:15 AM
+Arriving Wednesday, July 29, 2026 10:05 AM
+TXT;
+
+        $normalized = ForwardedMailNormalizer::normalize(new EmailMessage(
+            uid: '7',
+            fromAddress: 'dave@example.com',
+            subject: 'Fwd: Confirmation Number: UA9XYZ',
+            receivedAt: new \DateTimeImmutable('2026-07-01 15:00:00'),
+            bodyPlain: $raw,
+            bodyHtml: '',
+        ));
+
+        self::assertStringNotContainsString('Jul 1, 2026 at 10:00 AM', $normalized->bodyPlain);
+
+        $parsed = (new \NexWaypoint\Mail\Parsers\UnitedAirlinesParser())->parse($normalized);
+        self::assertNotNull($parsed);
+        self::assertNotEmpty($parsed['segments'] ?? []);
+        $depart = (string) ($parsed['segments'][0]['depart_dt'] ?? '');
+        self::assertStringStartsWith('2026-07-29', $depart);
+        self::assertStringNotContainsString('2026-07-01', $depart);
     }
 }
