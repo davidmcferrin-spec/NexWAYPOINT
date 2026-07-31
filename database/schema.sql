@@ -283,10 +283,12 @@ CREATE TABLE carriers (
     INDEX idx_carriers_type (carrier_type)
 ) ENGINE=InnoDB;
 
--- airports: IATA → IANA timezone for interpreting naive segment wall-clock times.
+-- airports: IATA → city/state label + IANA timezone for wall-clock times.
 CREATE TABLE airports (
     iata        CHAR(3) NOT NULL,
     name        VARCHAR(150) NULL,
+    city        VARCHAR(100) NULL,
+    state       CHAR(2) NULL,
     timezone    VARCHAR(64) NOT NULL,
     latitude    DECIMAL(10,7) NULL,
     longitude   DECIMAL(10,7) NULL,

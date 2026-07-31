@@ -47,7 +47,9 @@ en_route / post-flight (45m windows), layover (gap ≤3h), itinerary remote
 (gap >3h at arrived city), then hotel / override / Home. Segment times stay
 naive local wall-clock; depart is interpreted in the **origin** airport
 IANA TZ and arrive in the **destination** airport TZ via `airports` lookup
-(`data/airports_us.php` seed + `AirportRepository`). Unknown codes / trains
+(`data/airports_us.php` seed + `AirportRepository`). Seed covers ~190 US
+codes (city/state + timezone) plus nearby hubs; UI/status use
+`labelFor()` e.g. `Washington, DC (DCA)`. Unknown codes / trains
 fall back to `APP_TIMEZONE`. Trip create/edit uses spreadsheet builder
 (`/trips/builder.php` + `replaceTripLegs` / `replaceTripHotels`); Mode is
 Flight or Train; hotels attach via `hotel_stay_id` (existing stay or create
@@ -196,5 +198,5 @@ System-admin Mail review: Settings → Mail review (`is_system` only).
 
 1. Tighten Delta/United/Hilton parsers against more live fixtures (trip
    details / Hilton cancel without original conf #).
-2. Expand `airports` seed / admin UI if non-US hubs are missing.
+2. Expand non-US hubs / admin UI for airports if travel patterns need it.
 3. Optionally use `users.timezone` for "now" when home ≠ `APP_TIMEZONE`.

@@ -118,7 +118,8 @@ $formatSummary = static function (array $summary, ?string $errorMessage = null):
         <h2>Mail parse failures</h2>
         <p class="hint">
             Why individual messages were sent to <code>ParseFailed</code>.
-            Move a message back to INBOX (unread) to retry after fixing aliases or parsers.
+            Use <a href="/settings/mail-review.php">Mail review</a> to re-parse from a stored .eml
+            or re-queue the message to INBOX unread after fixing aliases or parsers.
         </p>
         <?php if ($parseFailures === []): ?>
             <p class="empty-state">No failed parses recorded.</p>

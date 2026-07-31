@@ -118,6 +118,106 @@ TXT;
         self::assertSame('delta.com', $detected['matched_domain']);
     }
 
+    public function testOutlookMailtoFromHeader(): void
+    {
+        $raw = <<<'TXT'
+See below.
+
+-----Original Message-----
+From: American Airlines [mailto:no-reply@info.email.aa.com]
+Sent: Monday, July 1, 2026 9:00 AM
+To: dave@example.com
+Subject: Your trip confirmation (ORD - DFW)
+
+Confirmation code: MTLKAA
+AA 100
+ORD
+DFW
+TXT;
+
+        $normalized = ForwardedMailNormalizer::normalize(new EmailMessage(
+            uid: 'outlook-mailto',
+            fromAddress: 'dave@example.com',
+            subject: 'FW: Your trip confirmation (ORD - DFW)',
+            receivedAt: new \DateTimeImmutable('now'),
+            bodyPlain: $raw,
+            bodyHtml: '',
+        ));
+
+        self::assertSame('Your trip confirmation (ORD - DFW)', $normalized->subject);
+        self::assertStringContainsString('no-reply@info.email.aa.com', $normalized->bodyPlain);
+        self::assertStringNotContainsString('Sent:', $normalized->bodyPlain);
+
+        $detected = (new EmailConfirmationDetector())->detect($normalized);
+        self::assertSame('flight', $detected['type']);
+        self::assertSame('aa.com', $detected['matched_domain']);
+    }
+
+    public function testGmailHtmlOnlyQuoteDiv(): void
+    {
+        $html = <<<'HTML'
+<div>FYI<br></div>
+<div class="gmail_quote">
+---------- Forwarded message ---------<br>
+From: United Airlines &lt;united@united.com&gt;<br>
+Date: Mon, Jul 1, 2026 at 10:00 AM<br>
+Subject: Confirmation Number: GMLHTML<br>
+To: &lt;dave@example.com&gt;<br>
+<br>
+Confirmation Number: GMLHTML<br>
+UA 123 HSV-DEN
+</div>
+HTML;
+
+        $normalized = ForwardedMailNormalizer::normalize(new EmailMessage(
+            uid: 'gmail-html',
+            fromAddress: 'dave@example.com',
+            subject: 'Fwd: Confirmation Number: GMLHTML',
+            receivedAt: new \DateTimeImmutable('now'),
+            bodyPlain: '',
+            bodyHtml: $html,
+        ));
+
+        self::assertSame('Confirmation Number: GMLHTML', $normalized->subject);
+        self::assertStringContainsString('Confirmation Number: GMLHTML', $normalized->bodyPlain);
+        self::assertStringNotContainsString('Jul 1, 2026 at 10:00 AM', $normalized->bodyPlain);
+
+        $detected = (new EmailConfirmationDetector())->detect($normalized);
+        self::assertSame('flight', $detected['type']);
+        self::assertSame('united.com', $detected['matched_domain']);
+    }
+
+    public function testOutlookWebReplyForwardDiv(): void
+    {
+        $html = <<<'HTML'
+<div>Please add this.</div>
+<div id="divRplyFwdMsg">
+<b>From:</b> Delta Air Lines &lt;delta@delta.com&gt;<br>
+<b>Sent:</b> Monday, July 1, 2026 9:00 AM<br>
+<b>Subject:</b> Your Trip Confirmation # OWA123<br>
+<br>
+FLIGHT CONFIRMATION # OWA123
+</div>
+HTML;
+
+        $normalized = ForwardedMailNormalizer::normalize(new EmailMessage(
+            uid: 'owa-html',
+            fromAddress: 'dave@example.com',
+            subject: 'FW: Your Trip Confirmation # OWA123',
+            receivedAt: new \DateTimeImmutable('now'),
+            bodyPlain: '',
+            bodyHtml: $html,
+        ));
+
+        self::assertSame('Your Trip Confirmation # OWA123', $normalized->subject);
+        self::assertStringContainsString('FLIGHT CONFIRMATION # OWA123', $normalized->bodyPlain);
+        self::assertStringNotContainsString('Sent:', $normalized->bodyPlain);
+
+        $detected = (new EmailConfirmationDetector())->detect($normalized);
+        self::assertSame('flight', $detected['type']);
+        self::assertSame('delta.com', $detected['matched_domain']);
+    }
+
     public function testYahooForwardMarker(): void
     {
         $raw = <<<'TXT'

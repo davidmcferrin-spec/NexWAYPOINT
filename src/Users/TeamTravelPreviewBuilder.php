@@ -224,9 +224,13 @@ final class TeamTravelPreviewBuilder
 
         $route = '';
         if ($canCity) {
-            $origin = $segment->origin ?? '?';
-            $dest = $segment->destination ?? '?';
-            $route = $origin . ' → ' . $dest;
+            if ($this->airports !== null) {
+                $route = $this->airports->routeLabel($segment->origin, $segment->destination);
+            } else {
+                $origin = $segment->origin ?? '?';
+                $dest = $segment->destination ?? '?';
+                $route = $origin . ' → ' . $dest;
+            }
         }
 
         $label = trim(implode(' ', $bits));
@@ -280,7 +284,7 @@ final class TeamTravelPreviewBuilder
         if ($isLayover) {
             $label = 'Layover';
             if ($canCity) {
-                $city = trim((string) ($current->destination ?? ''));
+                $city = $this->placeLabel($current->destination);
                 if ($city !== '') {
                     $label = 'Layover in ' . $city;
                 }
@@ -288,7 +292,7 @@ final class TeamTravelPreviewBuilder
         } else {
             $label = 'Stay';
             if ($canCity) {
-                $city = trim((string) ($current->destination ?? ''));
+                $city = $this->placeLabel($current->destination);
                 if ($city !== '') {
                     $label = 'In ' . $city;
                 }
@@ -303,6 +307,14 @@ final class TeamTravelPreviewBuilder
         }
 
         return ['type' => $isLayover ? 'layover' : 'stay', 'label' => $label];
+    }
+
+    private function placeLabel(?string $code): string
+    {
+        if ($this->airports !== null) {
+            return $this->airports->cityFor($code) ?? trim((string) $code);
+        }
+        return trim((string) $code);
     }
 
     private function departInstant(TripSegment $segment): \DateTimeImmutable

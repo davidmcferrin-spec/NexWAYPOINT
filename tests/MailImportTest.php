@@ -8,6 +8,7 @@ use NexWaypoint\Mail\EmailConfirmationDetector;
 use NexWaypoint\Mail\EmailMessage;
 use NexWaypoint\Mail\MailPoller;
 use NexWaypoint\Mail\MailSourceInterface;
+use NexWaypoint\Mail\NullMailSource;
 use NexWaypoint\Mail\ParseLogRepository;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
@@ -364,6 +365,301 @@ HTML;
         $trips = new TripRepository($this->db, $this->logger);
         $segments = $trips->findSegmentsByConfirmation((int) $user->id, 'HSVDFW1');
         self::assertCount(1, $segments);
+    }
+
+    /**
+     * Re-parse must work for Gmail / Outlook / Proton wrappers and direct vendor mail.
+     *
+     * @dataProvider reprocessForwardClientProvider
+     */
+    public function testReprocessMessageFromStoredShapeSucceeds(
+        string $uid,
+        string $subject,
+        string $body,
+    ): void {
+        $repo = new UserRepository($this->db, $this->logger);
+        $user = $repo->create('dave', 'dave@example.com', 'test-password-12', 'Dave', 'subordinate', null);
+
+        $message = new EmailMessage(
+            uid: $uid,
+            fromAddress: 'dave@example.com',
+            subject: $subject,
+            receivedAt: new \DateTimeImmutable('2026-07-20'),
+            bodyPlain: $body,
+            bodyHtml: '',
+        );
+
+        $props = new HotelPropertyRepository($this->db, $this->logger);
+        $poller = new MailPoller(
+            new NullMailSource(),
+            'dreamhost_imap',
+            new EmailConfirmationDetector(),
+            $repo,
+            $props,
+            new HotelStayRepository($this->db, $this->logger, $props),
+            new TripRepository($this->db, $this->logger),
+            new CarrierRepository($this->db, $this->logger),
+            new NotificationRepository($this->db),
+            new ParseLogRepository($this->db),
+            $this->logger,
+        );
+
+        $first = $poller->reprocessMessage($message);
+        self::assertTrue($first['ok'], ($first['reason'] ?? 'expected success') . " [{$uid}]");
+
+        $stays = new HotelStayRepository($this->db, $this->logger, $props);
+        $found = $stays->findByConfirmationCode((int) $user->id, '3500303313');
+        self::assertNotNull($found, "stay missing after reprocess [{$uid}]");
+
+        // Force reprocess (default) re-upserts by confirmation; still succeeds.
+        $second = $poller->reprocessMessage($message);
+        self::assertTrue($second['ok']);
+        $again = $stays->findByConfirmationCode((int) $user->id, '3500303313');
+        self::assertNotNull($again);
+        self::assertSame($found->id, $again->id);
+    }
+
+    public function testForceReprocessReplacesIncompleteFlightItinerary(): void
+    {
+        $repo = new UserRepository($this->db, $this->logger);
+        $user = $repo->create('dave', 'dave@example.com', 'test-password-12', 'Dave', 'subordinate', null);
+        $userId = (int) $user->id;
+
+        $trips = new TripRepository($this->db, $this->logger);
+        $carriers = new CarrierRepository($this->db, $this->logger);
+        $carrier = $carriers->findOrCreateByIata($userId, 'AA', 'American Airlines', $userId);
+
+        // Simulate prior incomplete import (outbound only).
+        $first = $trips->upsertItineraryByConfirmation($userId, 'NZWPVQ', [[
+            'segment_type' => 'flight',
+            'carrier_id' => $carrier->id,
+            'carrier' => $carrier->name,
+            'flight_number' => '3579',
+            'origin' => 'HSV',
+            'destination' => 'DFW',
+            'depart_dt' => '2026-08-03 19:37:00',
+            'arrive_dt' => '2026-08-03 21:50:00',
+        ]], null, $userId);
+        self::assertCount(1, $first['segments']);
+        $tripId = (int) $first['trip']->id;
+
+        $parseLog = new ParseLogRepository($this->db);
+        $parseLog->record(
+            new \DateTimeImmutable('2026-07-31'),
+            'dave@example.com',
+            'Fw: Your trip confirmation (HSV - DFW)',
+            '80',
+            'dreamhost_imap',
+            'flight',
+            'success',
+            null,
+            1.0,
+            $userId,
+            $first['segments'][0]->id,
+            ['trip_id' => $tripId],
+        );
+
+        $body = <<<'TXT'
+Sent with Proton Mail secure email.
+
+------- Forwarded Message -------
+From: American Airlines <no-reply@info.email.aa.com>
+Subject: Your trip confirmation (HSV - DFW)
+To: dave@example.com <dave@example.com>
+
+> Confirmation code: NZWPVQ
+>
+> Monday, August 3, 2026
+>
+> HSV
+>
+> Huntsville
+>
+> 7:37 PM
+>
+> AA 3579
+>
+> Operated by Envoy Air as American Eagle
+>
+> DFW
+>
+> Dallas/Fort Worth
+>
+> 9:50 PM
+>
+> Thursday, August 6, 2026
+>
+> DFW
+>
+> Dallas/Fort Worth
+>
+> 8:00 PM
+>
+> AA 4317
+>
+> Operated by Envoy Air as American Eagle
+>
+> HSV
+>
+> Huntsville
+>
+> 9:56 PM
+>
+> Manage your trip
+TXT;
+
+        $message = new EmailMessage(
+            uid: '80',
+            fromAddress: 'dave@example.com',
+            subject: 'Fw: Your trip confirmation (HSV - DFW)',
+            receivedAt: new \DateTimeImmutable('2026-07-31'),
+            bodyPlain: $body,
+            bodyHtml: '',
+        );
+
+        $props = new HotelPropertyRepository($this->db, $this->logger);
+        $poller = new MailPoller(
+            new NullMailSource(),
+            'dreamhost_imap',
+            new EmailConfirmationDetector(),
+            $repo,
+            $props,
+            new HotelStayRepository($this->db, $this->logger, $props),
+            $trips,
+            $carriers,
+            new NotificationRepository($this->db),
+            $parseLog,
+            $this->logger,
+        );
+
+        // Without force, already-success short-circuits and leaves the incomplete trip.
+        $skipped = $poller->reprocessMessage($message, false);
+        self::assertTrue($skipped['ok']);
+        self::assertCount(1, $trips->findSegmentsByConfirmation($userId, 'NZWPVQ'));
+
+        $forced = $poller->reprocessMessage($message, true);
+        self::assertTrue($forced['ok'], $forced['reason'] ?? 'force reprocess failed');
+
+        $segments = $trips->findSegmentsByConfirmation($userId, 'NZWPVQ');
+        self::assertCount(2, $segments);
+        self::assertSame($tripId, $segments[0]->tripId);
+        self::assertSame($tripId, $segments[1]->tripId);
+        self::assertSame('3579', $segments[0]->flightNumber);
+        self::assertSame('4317', $segments[1]->flightNumber);
+        self::assertSame('HSV', $segments[1]->destination);
+
+        $trip = $trips->find($tripId);
+        self::assertNotNull($trip);
+        self::assertSame('DFW', $trip->destinationCity);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function reprocessForwardClientProvider(): array
+    {
+        $hiltonBody = <<<'TXT'
+> Hello DAVID,
+>
+> Your reservation for Tuesday Jul 07, 2026 has been confirmed.
+>
+> Confirmation # 3500303313
+>
+> New York Hilton Midtown
+> -----------------------
+>
+> 1335 Avenue of the Americas, New York, NY, 10019 US
+>
+> +12125867000
+>
+> Tuesday
+>
+> Jul 07
+>
+> Check In:  3:00 PM
+>
+> ### 6
+>
+> Nights
+>
+> Monday
+>
+> Jul 13
+>
+> Check Out: 12:00 PM
+>
+> Jul-07-2026 - Jul-09-2026
+> Jul-09-2026 - Jul-10-2026
+> Jul-10-2026 - Jul-11-2026
+> Jul-11-2026 - Jul-12-2026
+> Jul-12-2026 - Jul-13-2026
+TXT;
+
+        return [
+            'proton_forward' => [
+                'reparse-proton',
+                'Fw: Your Jul-07-2026 Confirmation #3500303313',
+                "Sent with Proton Mail secure email.\n\n------- Forwarded Message -------\n"
+                . "From: Hilton Hotels & Resorts Confirmed <noreply@h6.hilton.com>\n"
+                . "Subject: Your Jul-07-2026 Confirmation #3500303313\n"
+                . "To: dave@example.com <dave@example.com>\n\n"
+                . $hiltonBody,
+            ],
+            'gmail_forward' => [
+                'reparse-gmail',
+                'Fwd: Your Jul-07-2026 Confirmation #3500303313',
+                "FYI\n\n---------- Forwarded message ---------\n"
+                . "From: Hilton Hotels & Resorts Confirmed <noreply@h6.hilton.com>\n"
+                . "Date: Tue, Jul 7, 2026 at 11:34 AM\n"
+                . "Subject: Your Jul-07-2026 Confirmation #3500303313\n"
+                . "To: <dave@example.com>\n\n"
+                . str_replace('> ', '', $hiltonBody),
+            ],
+            'outlook_forward' => [
+                'reparse-outlook',
+                'FW: Your Jul-07-2026 Confirmation #3500303313',
+                "See below.\n\n-----Original Message-----\n"
+                . "From: Hilton Hotels & Resorts Confirmed [mailto:noreply@h6.hilton.com]\n"
+                . "Sent: Tuesday, July 7, 2026 11:34 AM\n"
+                . "To: dave@example.com\n"
+                . "Subject: Your Jul-07-2026 Confirmation #3500303313\n\n"
+                . str_replace('> ', '', $hiltonBody),
+            ],
+        ];
+    }
+
+    public function testReprocessMessageReportsFailureWithoutImapSideEffects(): void
+    {
+        $repo = new UserRepository($this->db, $this->logger);
+        $repo->create('dave', 'dave@example.com', 'test-password-12', 'Dave', 'subordinate', null);
+
+        $message = new EmailMessage(
+            uid: '778',
+            fromAddress: 'dave@example.com',
+            subject: 'Random newsletter',
+            receivedAt: new \DateTimeImmutable('now'),
+            bodyPlain: 'Nothing to parse here',
+            bodyHtml: '',
+        );
+
+        $props = new HotelPropertyRepository($this->db, $this->logger);
+        $poller = new MailPoller(
+            new NullMailSource(),
+            'dreamhost_imap',
+            new EmailConfirmationDetector(),
+            $repo,
+            $props,
+            new HotelStayRepository($this->db, $this->logger, $props),
+            new TripRepository($this->db, $this->logger),
+            new CarrierRepository($this->db, $this->logger),
+            new NotificationRepository($this->db),
+            new ParseLogRepository($this->db),
+            $this->logger,
+        );
+
+        $result = $poller->reprocessMessage($message);
+        self::assertFalse($result['ok']);
+        self::assertNotNull($result['reason']);
     }
 
     private function msg(string $from, string $subject): EmailMessage

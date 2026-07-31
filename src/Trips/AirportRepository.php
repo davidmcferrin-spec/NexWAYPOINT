@@ -8,12 +8,12 @@ use NexWaypoint\Core\Database;
 use NexWaypoint\Core\Logger;
 
 /**
- * IATA → IANA timezone lookup for interpreting naive segment wall-clock times.
+ * IATA → timezone / display-label lookup.
  * Prefers the airports table; falls back to data/airports_us.php.
  */
 final class AirportRepository
 {
-    /** @var array<string, string>|null iata => timezone */
+    /** @var array<string, array{timezone: string, name: ?string, city: ?string, state: ?string}>|null */
     private ?array $cache = null;
 
     public function __construct(
@@ -28,17 +28,69 @@ final class AirportRepository
      */
     public function timezoneForCode(?string $code): ?string
     {
-        $iata = self::normalizeIata($code);
-        if ($iata === null) {
-            return null;
-        }
-        $map = $this->map();
-        return $map[$iata] ?? null;
+        $meta = $this->metaFor($code);
+        return $meta['timezone'] ?? null;
     }
 
     public function has(string $code): bool
     {
         return $this->timezoneForCode($code) !== null;
+    }
+
+    /**
+     * Human label: "Washington, DC (DCA)", "Toronto (YYZ)", or raw code.
+     */
+    public function labelFor(?string $code): string
+    {
+        $iata = self::normalizeIata($code);
+        if ($iata === null) {
+            $raw = trim((string) $code);
+            return $raw !== '' ? $raw : '?';
+        }
+
+        $meta = $this->metaFor($iata);
+        if ($meta === null) {
+            return $iata;
+        }
+
+        $city = trim((string) ($meta['city'] ?? ''));
+        $state = trim((string) ($meta['state'] ?? ''));
+        if ($city !== '' && $state !== '') {
+            return "{$city}, {$state} ({$iata})";
+        }
+        if ($city !== '') {
+            return "{$city} ({$iata})";
+        }
+
+        $name = trim((string) ($meta['name'] ?? ''));
+        if ($name !== '') {
+            return "{$name} ({$iata})";
+        }
+
+        return $iata;
+    }
+
+    /**
+     * City (or name) without the IATA suffix — for location pins / short status.
+     */
+    public function cityFor(?string $code): ?string
+    {
+        $meta = $this->metaFor($code);
+        if ($meta === null) {
+            return null;
+        }
+        $city = trim((string) ($meta['city'] ?? ''));
+        if ($city !== '') {
+            $state = trim((string) ($meta['state'] ?? ''));
+            return $state !== '' ? "{$city}, {$state}" : $city;
+        }
+        $name = trim((string) ($meta['name'] ?? ''));
+        return $name !== '' ? $name : null;
+    }
+
+    public function routeLabel(?string $origin, ?string $destination, string $arrow = ' → '): string
+    {
+        return $this->labelFor($origin) . $arrow . $this->labelFor($destination);
     }
 
     /**
@@ -67,7 +119,20 @@ final class AirportRepository
     }
 
     /**
-     * @return array<string, string>
+     * @return array{timezone: string, name: ?string, city: ?string, state: ?string}|null
+     */
+    private function metaFor(?string $code): ?array
+    {
+        $iata = self::normalizeIata($code);
+        if ($iata === null) {
+            return null;
+        }
+        $map = $this->map();
+        return $map[$iata] ?? null;
+    }
+
+    /**
+     * @return array<string, array{timezone: string, name: ?string, city: ?string, state: ?string}>
      */
     private function map(): array
     {
@@ -78,13 +143,23 @@ final class AirportRepository
         $map = [];
         if ($this->db !== null && $this->db->tableExists('airports')) {
             try {
-                $rows = $this->db->fetchAll('SELECT iata, timezone FROM airports');
+                $hasCity = $this->db->columnExists('airports', 'city');
+                $cols = $hasCity
+                    ? 'SELECT iata, timezone, name, city, state FROM airports'
+                    : 'SELECT iata, timezone, name FROM airports';
+                $rows = $this->db->fetchAll($cols);
                 foreach ($rows as $row) {
                     $iata = self::normalizeIata((string) ($row['iata'] ?? ''));
                     $tz = trim((string) ($row['timezone'] ?? ''));
-                    if ($iata !== null && $tz !== '') {
-                        $map[$iata] = $tz;
+                    if ($iata === null || $tz === '') {
+                        continue;
                     }
+                    $map[$iata] = [
+                        'timezone' => $tz,
+                        'name' => self::nullableString($row['name'] ?? null),
+                        'city' => $hasCity ? self::nullableString($row['city'] ?? null) : null,
+                        'state' => $hasCity ? self::nullableString($row['state'] ?? null) : null,
+                    ];
                 }
             } catch (\Throwable $e) {
                 $this->logger?->warning('Airport table read failed; using seed file', [
@@ -94,7 +169,7 @@ final class AirportRepository
         }
 
         if ($map === []) {
-            $map = self::seedMap();
+            $map = self::seedMetaMap();
         }
 
         $this->cache = $map;
@@ -106,25 +181,37 @@ final class AirportRepository
      */
     public static function seedMap(): array
     {
-        $path = dirname(__DIR__, 2) . '/data/airports_us.php';
-        if (!is_file($path)) {
-            return [];
-        }
-        /** @var list<array{iata: string, name: string, timezone: string}> $rows */
-        $rows = require $path;
         $map = [];
-        foreach ($rows as $row) {
-            $iata = self::normalizeIata($row['iata'] ?? null);
-            $tz = trim((string) ($row['timezone'] ?? ''));
-            if ($iata !== null && $tz !== '') {
-                $map[$iata] = $tz;
-            }
+        foreach (self::seedMetaMap() as $iata => $meta) {
+            $map[$iata] = $meta['timezone'];
         }
         return $map;
     }
 
     /**
-     * @return list<array{iata: string, name: string, timezone: string}>
+     * @return array<string, array{timezone: string, name: ?string, city: ?string, state: ?string}>
+     */
+    public static function seedMetaMap(): array
+    {
+        $map = [];
+        foreach (self::seedRows() as $row) {
+            $iata = self::normalizeIata($row['iata'] ?? null);
+            $tz = trim((string) ($row['timezone'] ?? ''));
+            if ($iata === null || $tz === '') {
+                continue;
+            }
+            $map[$iata] = [
+                'timezone' => $tz,
+                'name' => self::nullableString($row['name'] ?? null),
+                'city' => self::nullableString($row['city'] ?? null),
+                'state' => self::nullableString($row['state'] ?? null),
+            ];
+        }
+        return $map;
+    }
+
+    /**
+     * @return list<array{iata: string, name: string, city: ?string, state: ?string, timezone: string}>
      */
     public static function seedRows(): array
     {
@@ -132,7 +219,7 @@ final class AirportRepository
         if (!is_file($path)) {
             return [];
         }
-        /** @var list<array{iata: string, name: string, timezone: string}> $rows */
+        /** @var list<array{iata: string, name: string, city?: ?string, state?: ?string, timezone: string}> $rows */
         $rows = require $path;
         return $rows;
     }
@@ -151,5 +238,14 @@ final class AirportRepository
             return null;
         }
         return $code;
+    }
+
+    private static function nullableString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $s = trim((string) $value);
+        return $s !== '' ? $s : null;
     }
 }

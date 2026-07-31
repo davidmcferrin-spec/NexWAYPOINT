@@ -91,4 +91,33 @@ final class RawMailStoreTest extends TestCase
         self::assertNull($store->absolutePath('../secrets.txt'));
         self::assertNull($store->absolutePath('mail_raw/../../etc/passwd'));
     }
+
+    public function testWriteLoadRoundTrip(): void
+    {
+        $logger = new \NexWaypoint\Core\Logger($this->dir . '/test.log', 'error');
+        $store = new RawMailStore($this->dir, 7, $logger);
+        $msg = new EmailMessage(
+            uid: '99123',
+            fromAddress: 'dave@example.com',
+            subject: 'Fw: Your confirmation',
+            receivedAt: new \DateTimeImmutable('2026-07-20 15:30:00'),
+            bodyPlain: "Hello\nConfirmation # 12345\n",
+            bodyHtml: '',
+            recipientAddresses: ['travel@dump.example', 'dave@work.example'],
+        );
+
+        $meta = $store->write(99, $msg);
+        self::assertNotNull($meta);
+        $absolute = $store->absolutePath($meta['raw_path']);
+        self::assertNotNull($absolute);
+
+        $loaded = $store->loadEmailMessage($absolute);
+        self::assertNotNull($loaded);
+        self::assertSame('99123', $loaded->uid);
+        self::assertSame('dave@example.com', $loaded->fromAddress);
+        self::assertSame('Fw: Your confirmation', $loaded->subject);
+        self::assertStringContainsString('Confirmation # 12345', $loaded->bodyPlain);
+        self::assertContains('travel@dump.example', $loaded->recipientAddresses);
+        self::assertContains('dave@work.example', $loaded->recipientAddresses);
+    }
 }

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripRepository;
@@ -12,6 +13,7 @@ $user = $app['auth']->requireAuth();
 
 $tripRepo = new TripRepository($app['db'], $app['logger']);
 $carrierRepo = new CarrierRepository($app['db'], $app['logger']);
+$airports = new AirportRepository($app['db'], $app['logger']);
 
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $trip = $tripRepo->find($id);
@@ -141,7 +143,7 @@ $today = (new DateTimeImmutable('today'))->format('Y-m-d');
                     <tr>
                         <td><?= htmlspecialchars($segment->segmentType, ENT_QUOTES) ?></td>
                         <td><?= htmlspecialchars($carrierLabel !== null && $carrierLabel !== '' ? $carrierLabel : '—', ENT_QUOTES) ?></td>
-                        <td><?= htmlspecialchars(($segment->origin ?? '?') . ' → ' . ($segment->destination ?? '?'), ENT_QUOTES) ?></td>
+                        <td><?= htmlspecialchars($airports->routeLabel($segment->origin, $segment->destination), ENT_QUOTES) ?></td>
                         <td><?= htmlspecialchars($segment->departDt ?? '—', ENT_QUOTES) ?></td>
                         <td><?= htmlspecialchars($segment->arriveDt ?? '—', ENT_QUOTES) ?></td>
                         <td><?= htmlspecialchars($segment->confirmationCode ?? '—', ENT_QUOTES) ?></td>

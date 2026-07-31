@@ -83,6 +83,134 @@ HTML;
         self::assertSame('XYZ789', $result['confirmation_code']);
     }
 
+    public function testAmericanAirlinesPlainRoundTripTwoLegs(): void
+    {
+        $plain = <<<'TXT'
+Confirmation code: NZWPVQ
+
+Monday, August 3, 2026
+
+HSV
+
+Huntsville
+
+7:37 PM
+
+AA 3579
+
+Operated by Envoy Air as American Eagle
+
+DFW
+
+Dallas/Fort Worth
+
+9:50 PM
+
+Seat: 4A
+
+Thursday, August 6, 2026
+
+DFW
+
+Dallas/Fort Worth
+
+8:00 PM
+
+AA 4317
+
+Operated by Envoy Air as American Eagle
+
+HSV
+
+Huntsville
+
+9:56 PM
+
+Seat: 4D
+
+Manage your trip
+
+Your purchase
+TXT;
+
+        $parser = new AmericanAirlinesParser();
+        $result = $parser->parse($this->message(
+            'no-reply@info.email.aa.com',
+            'Your trip confirmation (HSV - DFW)',
+            $plain
+        ));
+
+        self::assertNotNull($result);
+        self::assertSame('confirm', $result['event']);
+        self::assertSame('NZWPVQ', $result['confirmation_code']);
+        self::assertCount(2, $result['segments']);
+        self::assertSame('3579', $result['segments'][0]['flight_number']);
+        self::assertSame('HSV', $result['segments'][0]['origin']);
+        self::assertSame('DFW', $result['segments'][0]['destination']);
+        self::assertSame('2026-08-03 19:37:00', $result['segments'][0]['depart_dt']);
+        self::assertSame('2026-08-03 21:50:00', $result['segments'][0]['arrive_dt']);
+        self::assertSame('4317', $result['segments'][1]['flight_number']);
+        self::assertSame('DFW', $result['segments'][1]['origin']);
+        self::assertSame('HSV', $result['segments'][1]['destination']);
+        self::assertSame('2026-08-06 20:00:00', $result['segments'][1]['depart_dt']);
+        self::assertSame('2026-08-06 21:56:00', $result['segments'][1]['arrive_dt']);
+    }
+
+    public function testAmericanAirlinesPlainSameDayConnection(): void
+    {
+        $plain = <<<'TXT'
+Confirmation code: MULT01
+
+Monday, August 10, 2026
+
+HSV
+
+Huntsville
+
+6:00 AM
+
+AA 100
+
+DFW
+
+Dallas/Fort Worth
+
+8:15 AM
+
+DFW
+
+Dallas/Fort Worth
+
+9:30 AM
+
+AA 200
+
+LAX
+
+Los Angeles
+
+11:00 AM
+
+Manage your trip
+TXT;
+
+        $parser = new AmericanAirlinesParser();
+        $result = $parser->parse($this->message(
+            'no-reply@info.email.aa.com',
+            'Your trip confirmation (HSV - LAX)',
+            $plain
+        ));
+
+        self::assertNotNull($result);
+        self::assertCount(2, $result['segments']);
+        self::assertSame('HSV', $result['segments'][0]['origin']);
+        self::assertSame('DFW', $result['segments'][0]['destination']);
+        self::assertSame('DFW', $result['segments'][1]['origin']);
+        self::assertSame('LAX', $result['segments'][1]['destination']);
+        self::assertSame('100', $result['segments'][0]['flight_number']);
+        self::assertSame('200', $result['segments'][1]['flight_number']);
+    }
+
     public function testBreezeConfirm(): void
     {
         $parser = new BreezeAirlinesParser();

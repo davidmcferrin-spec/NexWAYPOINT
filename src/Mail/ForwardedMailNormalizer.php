@@ -7,26 +7,28 @@ namespace NexWaypoint\Mail;
 /**
  * Normalizes teammate forwards from Gmail, Outlook/Exchange, Proton Mail,
  * Yahoo, Apple Mail, and similar clients so detectors/parsers see the
- * underlying confirmation content (not just the outer Fw: wrapper).
+ * underlying confirmation content (not just the outer Fw:/Fwd:/FW: wrapper).
  *
- * Ownership still uses the outer From: (teammate address). Subject/body are
- * cleaned for vendor detection and field extraction.
+ * Also leaves direct vendor mail (auto-forward rules, no wrap) intact.
+ * Ownership still uses the outer From: (teammate address) or recipient
+ * fallback when From is a known vendor.
  */
 final class ForwardedMailNormalizer
 {
     /**
      * Markers that introduce the original message in a forward.
-     * Order does not matter; first match wins for "content after marker".
+     * Earliest match wins for "content after marker".
      *
      * @var list<string>
      */
     private const FORWARD_MARKERS = [
-        '/^-{2,}\s*Forwarded message\s*-{2,}/im',
-        '/^-{2,}\s*Forwarded Message\s*-{2,}/im',
-        '/^-{2,}\s*Original Message\s*-{2,}/im',
-        '/^Begin forwarded message:\s*$/im',
+        '/^-{2,}\s*Forwarded message\s*-{2,}/im',       // Gmail
+        '/^-{2,}\s*Forwarded Message\s*-{2,}/im',       // Proton / Yahoo
+        '/^-{2,}\s*Original Message\s*-{2,}/im',          // Outlook classic
+        '/^Begin forwarded message:\s*$/im',             // Apple Mail
         '/^-{5,}\s*Original Message\s*-{5,}/im',
-        '/^_{5,}\s*$/m', // Outlook/Exchange separator line
+        '/^-{2,}\s*Forwarded by\b.+$/im',                 // Notes / some Exchange
+        '/^_{5,}\s*$/m',                                 // Outlook/Exchange separator
         '/^-{5,}\s*$/m',
     ];
 
@@ -78,7 +80,7 @@ final class ForwardedMailNormalizer
         $lines = explode("\n", $text);
         $out = [];
         foreach ($lines as $line) {
-            if (preg_match('/^(?:>+\s?|\|\s?)*(Date|Sent|Date-Sent)\s*:/i', $line) === 1) {
+            if (preg_match('/^(?:>+\s?|\|\s?|\*?\s)*(Date|Sent|Date-Sent)\s*:/i', $line) === 1) {
                 continue;
             }
             $out[] = $line;
@@ -99,7 +101,7 @@ final class ForwardedMailNormalizer
     }
 
     /**
-     * Remove quote prefixes and soft line-noise common in Proton/Outlook forwards.
+     * Remove quote prefixes and soft line-noise common in Proton/Outlook/Gmail forwards.
      */
     public static function dequoteText(string $text): string
     {
@@ -146,6 +148,14 @@ final class ForwardedMailNormalizer
         ) === 1) {
             return trim($m[1]);
         }
+        // Outlook / Exchange web often uses divRplyFwdMsg around the original.
+        if (preg_match(
+            '#(<div[^>]*id="?divRplyFwdMsg"?[^>]*>.*)$#is',
+            $html,
+            $m
+        ) === 1) {
+            return trim($m[1]);
+        }
         if (preg_match('#(<blockquote[^>]*>.*)</blockquote>#is', $html, $m) === 1) {
             // Prefer innermost large blockquote if present; take last match body.
             return trim($m[1] . '</blockquote>');
@@ -183,7 +193,7 @@ final class ForwardedMailNormalizer
         $from = null;
         $subject = null;
 
-        // Proton / Gmail / Yahoo style header block
+        // Gmail / Proton / Yahoo / Apple header block
         if (preg_match(
             '/^From:\s*(.+)$/mi',
             $text,
@@ -192,12 +202,24 @@ final class ForwardedMailNormalizer
             $from = self::emailFromHeaderLine(trim($m[1]));
         }
 
+        // Outlook classic: From: Name [mailto:addr@domain]
+        if ($from === null && preg_match(
+            '/^From:\s*.*?\[mailto:([^\]]+)\]/mi',
+            $text,
+            $m
+        ) === 1) {
+            $from = strtolower(trim($m[1]));
+        }
+
         if (preg_match('/^Subject:\s*(.+)$/mi', $text, $m) === 1) {
             $subject = self::stripForwardSubjectPrefix(trim($m[1]));
         }
 
-        // Outlook: "From: Name <email> Sent: ... Subject: ..."
-        if ($subject === null && preg_match('/Subject:\s*(.+?)(?:\r?\n|$)/i', $text, $m) === 1) {
+        // Outlook / RTF: "*From:* … *Subject:* …" or bold markers left after HTML strip
+        if ($from === null && preg_match('/\*?\s*From\s*\*?\s*:\s*(.+)$/mi', $text, $m) === 1) {
+            $from = self::emailFromHeaderLine(trim($m[1]));
+        }
+        if ($subject === null && preg_match('/\*?\s*Subject\s*\*?\s*:\s*(.+?)(?:\r?\n|$)/i', $text, $m) === 1) {
             $subject = self::stripForwardSubjectPrefix(trim($m[1]));
         }
 
@@ -207,6 +229,10 @@ final class ForwardedMailNormalizer
     private static function emailFromHeaderLine(string $line): ?string
     {
         if (preg_match('/<([^>]+@[^>]+)>/', $line, $m) === 1) {
+            return strtolower(trim($m[1]));
+        }
+        // Outlook: Name [mailto:addr@domain.com]
+        if (preg_match('/\[mailto:([^\]]+@[^\]\s]+)\]/i', $line, $m) === 1) {
             return strtolower(trim($m[1]));
         }
         if (preg_match('/([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})/i', $line, $m) === 1) {

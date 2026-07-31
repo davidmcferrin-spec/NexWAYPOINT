@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\TripRepository;
 
@@ -10,6 +11,7 @@ $user = $app['auth']->requireAuth();
 
 $tripRepo = new TripRepository($app['db'], $app['logger']);
 $carrierRepo = new CarrierRepository($app['db'], $app['logger']);
+$airports = new AirportRepository($app['db'], $app['logger']);
 
 $scope = (string) ($_GET['scope'] ?? 'all');
 if (!in_array($scope, ['all', 'upcoming', 'past', 'cancelled'], true)) {
@@ -90,7 +92,7 @@ $statusBadge = static function (string $status): string {
                     $summaryParts = [];
                     foreach (array_slice($segments, 0, 3) as $segment) {
                         $label = strtoupper($segment->segmentType);
-                        $route = trim(($segment->origin ?? '?') . '→' . ($segment->destination ?? '?'));
+                        $route = $airports->routeLabel($segment->origin, $segment->destination, '→');
                         $flight = trim(($segment->carrier ?? '') . ' ' . ($segment->flightNumber ?? ''));
                         $summaryParts[] = trim($label . ' ' . ($flight !== '' ? $flight . ' ' : '') . $route);
                     }

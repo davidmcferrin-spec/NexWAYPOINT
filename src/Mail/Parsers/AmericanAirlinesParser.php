@@ -12,6 +12,15 @@ use NexWaypoint\Mail\ParserBase;
  */
 final class AmericanAirlinesParser extends ParserBase
 {
+    /** @var list<string> */
+    private const AIRPORT_STOP = [
+        'THE', 'AND', 'FOR', 'YOU', 'ARE', 'ALL', 'NEW', 'NOW', 'APP', 'PDF',
+        'USA', 'USD', 'EST', 'CST', 'PST', 'EDT', 'CDT', 'GMT', 'UTC', 'FAQ',
+        'VIP', 'PRO', 'AA', 'LLC', 'HAS', 'WAS', 'CAN', 'MAY', 'GET', 'SEE',
+        'OUR', 'ANY', 'BUT', 'HOW', 'WHO', 'OUT', 'ONE', 'TWO', 'TOP', 'YES',
+        'HTML', 'COM',
+    ];
+
     public function parse(EmailMessage $message): ?array
     {
         $this->resetConfidenceTracking();
@@ -83,10 +92,123 @@ final class AmericanAirlinesParser extends ParserBase
 
     /**
      * Plain-text / forwarded AA confirmation (no Schema.org JSON-LD).
+     * Emits one segment per AA flight (round-trips, connections, multi-city).
      *
      * @return list<array<string, mixed>>
      */
     private function parsePlainConfirmation(string $text, string $subject): array
+    {
+        $segments = $this->parseAaReceiptLegs($text);
+        if ($segments !== []) {
+            return $segments;
+        }
+
+        return $this->parsePlainSingleLegFallback($text, $subject);
+    }
+
+    /**
+     * AA receipt layout: weekday date headers, each with one or more
+     * origin / depart / AA n / dest / arrive stacks.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function parseAaReceiptLegs(string $text): array
+    {
+        $dateRe = '/((?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})/i';
+        if (preg_match_all($dateRe, $text, $dm, PREG_OFFSET_CAPTURE) < 1) {
+            return [];
+        }
+
+        $segments = [];
+        $dates = $dm[1];
+        for ($i = 0; $i < count($dates); $i++) {
+            $dateRaw = $dates[$i][0];
+            $start = $dates[$i][1];
+            $end = $dates[$i + 1][1] ?? strlen($text);
+            $chunk = substr($text, $start, max(0, $end - $start));
+            if (preg_match(
+                '/\b(?:Manage your trip|Your purchase|Bag information|Book a hotel)\b/i',
+                $chunk,
+                $cut,
+                PREG_OFFSET_CAPTURE
+            ) === 1) {
+                $chunk = substr($chunk, 0, (int) $cut[0][1]);
+            }
+
+            foreach ($this->parseAaFlightsInDateChunk($chunk, $dateRaw) as $seg) {
+                $segments[] = $seg;
+            }
+        }
+
+        return $segments;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function parseAaFlightsInDateChunk(string $chunk, string $dateRaw): array
+    {
+        if (preg_match_all('/\bAA\s*(\d{1,4})\b/i', $chunk, $fm, PREG_OFFSET_CAPTURE) < 1) {
+            return [];
+        }
+
+        $segments = [];
+        $n = count($fm[0]);
+        for ($i = 0; $i < $n; $i++) {
+            $flightNumber = $this->normalizeFlightNumber($fm[1][$i][0], 'AA');
+            if ($flightNumber === null) {
+                continue;
+            }
+
+            $flightPos = $fm[0][$i][1];
+            $nextPos = $fm[0][$i + 1][1] ?? strlen($chunk);
+            $lookBack = substr($chunk, max(0, $flightPos - 350), min(350, $flightPos));
+            $lookAhead = substr(
+                $chunk,
+                $flightPos + strlen($fm[0][$i][0]),
+                max(0, min(500, $nextPos - $flightPos))
+            );
+
+            $origin = $this->lastStandaloneAirport($lookBack);
+            $destination = $this->firstStandaloneAirport($lookAhead);
+            if ($origin === null || $destination === null || $origin === $destination) {
+                continue;
+            }
+
+            $departTime = $this->lastTimeToken($lookBack);
+            $arriveTime = $this->firstTimeToken($lookAhead);
+            $depart = $departTime !== null
+                ? $this->parseFlexibleDateTime($dateRaw . ' ' . $departTime)
+                : $this->parseFlexibleDateTime($dateRaw);
+            $arrive = $arriveTime !== null
+                ? $this->parseFlexibleDateTime($dateRaw . ' ' . $arriveTime)
+                : null;
+
+            $this->recordField(true); // flight
+            $this->recordField(true); // route
+            $this->recordField($depart !== null);
+
+            $segments[] = [
+                'confirmation_code' => null,
+                'carrier_iata' => 'AA',
+                'carrier_name' => 'American Airlines',
+                'flight_number' => $flightNumber,
+                'origin' => $origin,
+                'destination' => $destination,
+                'depart_dt' => $depart,
+                'arrive_dt' => $arrive,
+            ];
+        }
+
+        return $segments;
+    }
+
+    /**
+     * Older one-way / sparse plain bodies without weekday date headers.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function parsePlainSingleLegFallback(string $text, string $subject): array
     {
         $origin = null;
         $destination = null;
@@ -104,20 +226,10 @@ final class AmericanAirlinesParser extends ParserBase
         }
 
         if ($origin === null || $destination === null) {
-            // Prefer airport codes that appear as their own lines (AA receipt layout).
-            if (preg_match_all('/(?:^|\n)\s*>?\s*([A-Z]{3})\s*(?:\n|$)/', $text, $am) >= 1) {
-                $codes = [];
-                $stop = ['THE', 'AND', 'FOR', 'YOU', 'ARE', 'ALL', 'NEW', 'NOW', 'APP', 'PDF', 'USA', 'USD', 'EST', 'CST', 'PST', 'EDT', 'CDT', 'GMT', 'UTC', 'FAQ', 'VIP', 'PRO', 'AA'];
-                foreach ($am[1] as $code) {
-                    if (!in_array($code, $stop, true)) {
-                        $codes[] = $code;
-                    }
-                }
-                $codes = array_values(array_unique($codes));
-                if (count($codes) >= 2) {
-                    $origin = $codes[0];
-                    $destination = $codes[1];
-                }
+            $codes = $this->standaloneAirports($text);
+            if (count($codes) >= 2) {
+                $origin = $codes[0];
+                $destination = $codes[1];
             }
         }
 
@@ -138,8 +250,8 @@ final class AmericanAirlinesParser extends ParserBase
             }
         }
 
-        $this->recordField(true); // flight number
-        $this->recordField(true); // route
+        $this->recordField(true);
+        $this->recordField(true);
         $this->recordField($depart !== null);
 
         return [[
@@ -152,6 +264,55 @@ final class AmericanAirlinesParser extends ParserBase
             'depart_dt' => $depart,
             'arrive_dt' => null,
         ]];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function standaloneAirports(string $text): array
+    {
+        if (preg_match_all('/(?:^|\n)\s*>?\s*([A-Z]{3})\s*(?:\n|$)/', $text, $am) < 1) {
+            return [];
+        }
+        $codes = [];
+        foreach ($am[1] as $code) {
+            if (!in_array($code, self::AIRPORT_STOP, true)) {
+                $codes[] = $code;
+            }
+        }
+        return array_values(array_unique($codes));
+    }
+
+    private function lastStandaloneAirport(string $text): ?string
+    {
+        $codes = $this->standaloneAirports($text);
+        if ($codes === []) {
+            return null;
+        }
+        return $codes[count($codes) - 1];
+    }
+
+    private function firstStandaloneAirport(string $text): ?string
+    {
+        $codes = $this->standaloneAirports($text);
+        return $codes[0] ?? null;
+    }
+
+    private function lastTimeToken(string $text): ?string
+    {
+        if (preg_match_all('/\b(\d{1,2}:\d{2}\s*[AP]M)\b/i', $text, $tm) < 1) {
+            return null;
+        }
+        $times = $tm[1];
+        return $times[count($times) - 1] ?? null;
+    }
+
+    private function firstTimeToken(string $text): ?string
+    {
+        if (preg_match('/\b(\d{1,2}:\d{2}\s*[AP]M)\b/i', $text, $tm) !== 1) {
+            return null;
+        }
+        return $tm[1];
     }
 
     /**
@@ -213,9 +374,8 @@ final class AmericanAirlinesParser extends ParserBase
         $numbers = array_values(array_unique($matches[1]));
         $airports = [];
         if (preg_match_all('/\b([A-Z]{3})\b/', $text, $am) === 1 || true) {
-            $stop = ['THE', 'AND', 'FOR', 'YOU', 'ARE', 'ALL', 'NEW', 'NOW', 'HAS', 'WAS', 'CAN', 'MAY', 'GET', 'SEE', 'OUR', 'ANY', 'BUT', 'HOW', 'WHO', 'OUT', 'ONE', 'TWO', 'TOP', 'APP', 'PDF', 'HTML', 'COM', 'USA', 'USD', 'EST', 'CST', 'PST', 'EDT', 'CDT', 'GMT', 'UTC', 'FAQ', 'YES', 'VIP', 'PRO', 'AA', 'LLC'];
             foreach ($am[1] ?? [] as $code) {
-                if (!in_array($code, $stop, true)) {
+                if (!in_array($code, self::AIRPORT_STOP, true)) {
                     $airports[] = $code;
                 }
             }

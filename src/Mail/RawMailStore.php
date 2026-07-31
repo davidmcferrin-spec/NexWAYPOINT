@@ -143,4 +143,81 @@ final class RawMailStore
     {
         return str_replace(["\r", "\n"], '', $value);
     }
+
+    /**
+     * Rebuild an EmailMessage from a file written by write().
+     */
+    public function loadEmailMessage(string $absolutePath): ?EmailMessage
+    {
+        if (!is_file($absolutePath) || !is_readable($absolutePath)) {
+            return null;
+        }
+        $raw = @file_get_contents($absolutePath);
+        if ($raw === false || trim($raw) === '') {
+            return null;
+        }
+
+        $raw = str_replace(["\r\n", "\r"], "\n", $raw);
+        $parts = explode("\n\n", $raw, 2);
+        $headerBlock = $parts[0] ?? '';
+        $body = $parts[1] ?? '';
+
+        $headers = [];
+        $current = null;
+        foreach (explode("\n", $headerBlock) as $line) {
+            if ($line !== '' && ($line[0] === ' ' || $line[0] === "\t") && $current !== null) {
+                $headers[$current] .= ' ' . trim($line);
+                continue;
+            }
+            if (preg_match('/^([^:]+):\s*(.*)$/', $line, $m) === 1) {
+                $current = strtolower(trim($m[1]));
+                $headers[$current] = trim($m[2]);
+            }
+        }
+
+        $from = strtolower(trim((string) ($headers['from'] ?? '')));
+        if (preg_match('/<([^>]+@[^>]+)>/', $from, $m) === 1) {
+            $from = strtolower(trim($m[1]));
+        }
+        $subject = (string) ($headers['subject'] ?? '');
+        $uid = trim((string) ($headers['x-nexwaypoint-mail-uid'] ?? ''));
+        if ($uid === '') {
+            $uid = 'reparse-' . hash('sha256', $absolutePath);
+        }
+
+        $date = new \DateTimeImmutable('now');
+        if (!empty($headers['date'])) {
+            try {
+                $date = new \DateTimeImmutable((string) $headers['date']);
+            } catch (\Exception) {
+                // keep now
+            }
+        }
+
+        $recipients = [];
+        foreach (['to', 'x-nexwaypoint-owner-candidates'] as $key) {
+            if (empty($headers[$key])) {
+                continue;
+            }
+            if (preg_match_all('/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/i', (string) $headers[$key], $ms) < 1) {
+                continue;
+            }
+            foreach ($ms[0] as $email) {
+                $email = strtolower($email);
+                if ($email !== $from && !in_array($email, $recipients, true)) {
+                    $recipients[] = $email;
+                }
+            }
+        }
+
+        return new EmailMessage(
+            uid: $uid,
+            fromAddress: $from,
+            subject: $subject,
+            receivedAt: $date,
+            bodyPlain: $body,
+            bodyHtml: '',
+            recipientAddresses: $recipients,
+        );
+    }
 }

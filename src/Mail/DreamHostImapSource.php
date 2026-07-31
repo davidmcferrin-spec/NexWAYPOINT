@@ -210,6 +210,160 @@ final class DreamHostImapSource implements MailSourceInterface
         $this->logger->warning('Message marked failed', ['uid' => $uid, 'reason' => $reason]);
     }
 
+    /**
+     * Move a message from the failed folder back to INBOX and clear \Seen
+     * so the next poll picks it up.
+     *
+     * IMAP UIDs often change after folder moves, so $subject/$fromAddress are
+     * used as a fallback when $uid is not present in the failed folder.
+     */
+    public function requeueFailedToInbox(
+        string $uid,
+        ?string $subject = null,
+        ?string $fromAddress = null,
+    ): void {
+        $this->disconnect();
+        $username = Env::getRequired('IMAP_USERNAME');
+        $password = Env::getRequired('IMAP_PASSWORD');
+        $connection = @imap_open($this->mailboxBase . $this->failedFolder, $username, $password);
+        if ($connection === false) {
+            $error = imap_last_error() ?: 'unknown error';
+            throw new \RuntimeException("Unable to open failed IMAP folder: {$error}");
+        }
+
+        try {
+            $intUid = $this->resolveUidInOpenMailbox($connection, $uid, $subject, $fromAddress);
+            $this->ensureFolderExists($connection, $this->inboxFolder);
+            // Clear Seen so fetchUnseenMessages will see it after move.
+            @imap_clearflag_full($connection, (string) $intUid, '\\Seen', ST_UID);
+            if (!@imap_mail_move($connection, (string) $intUid, $this->inboxFolder, CP_UID)) {
+                $error = imap_last_error() ?: 'move failed';
+                throw new \RuntimeException(
+                    "Could not move UID {$intUid} from {$this->failedFolder} to {$this->inboxFolder}: {$error}"
+                );
+            }
+            imap_expunge($connection);
+            $this->logger->info('Failed message re-queued to inbox', [
+                'uid' => $uid,
+                'resolved_uid' => $intUid,
+                'from' => $this->failedFolder,
+                'to' => $this->inboxFolder,
+            ]);
+        } finally {
+            imap_close($connection);
+        }
+    }
+
+    /**
+     * After a successful disk re-parse, move the message out of the failed
+     * folder into the processed folder (same end state as a normal success).
+     */
+    public function markProcessedFromFailedFolder(
+        string $uid,
+        ?string $subject = null,
+        ?string $fromAddress = null,
+    ): void {
+        $this->disconnect();
+        $username = Env::getRequired('IMAP_USERNAME');
+        $password = Env::getRequired('IMAP_PASSWORD');
+        $connection = @imap_open($this->mailboxBase . $this->failedFolder, $username, $password);
+        if ($connection === false) {
+            $this->logger->warning('Could not open failed folder to finalize re-parse', [
+                'uid' => $uid,
+                'error' => imap_last_error() ?: 'unknown',
+            ]);
+            return;
+        }
+
+        try {
+            try {
+                $intUid = $this->resolveUidInOpenMailbox($connection, $uid, $subject, $fromAddress);
+            } catch (\RuntimeException $e) {
+                $this->logger->warning('Could not locate re-parsed message in failed folder', [
+                    'uid' => $uid,
+                    'error' => $e->getMessage(),
+                ]);
+                return;
+            }
+            $this->ensureFolderExists($connection, $this->processedFolder);
+            imap_setflag_full($connection, (string) $intUid, '\\Seen', ST_UID);
+            if (!@imap_mail_move($connection, (string) $intUid, $this->processedFolder, CP_UID)) {
+                $this->logger->warning('Could not move re-parsed message from failed folder', [
+                    'uid' => $uid,
+                    'resolved_uid' => $intUid,
+                    'error' => imap_last_error() ?: 'unknown',
+                ]);
+                return;
+            }
+            imap_expunge($connection);
+            $this->logger->info('Re-parsed message moved from failed to processed', [
+                'uid' => $uid,
+                'resolved_uid' => $intUid,
+            ]);
+        } finally {
+            @imap_close($connection);
+        }
+    }
+
+    /**
+     * Find a message in the currently selected mailbox.
+     * Prefer the recorded UID; fall back to From + Subject (UIDs remap on move).
+     */
+    private function resolveUidInOpenMailbox(
+        \IMAP\Connection $connection,
+        string $preferredUid,
+        ?string $subject,
+        ?string $fromAddress,
+    ): int {
+        $intUid = (int) $preferredUid;
+        if ($intUid > 0) {
+            $overview = @imap_fetch_overview($connection, (string) $intUid, FT_UID);
+            if ($overview !== false && isset($overview[0])) {
+                return $intUid;
+            }
+        }
+
+        $wantFrom = strtolower(trim((string) $fromAddress));
+        $wantSubject = trim((string) $subject);
+        if ($wantFrom === '' && $wantSubject === '') {
+            throw new \RuntimeException(
+                'Mail UID ' . $preferredUid . ' was not found in folder and no subject/from was provided to search.'
+            );
+        }
+
+        $uids = @imap_search($connection, 'ALL', SE_UID);
+        if ($uids === false || $uids === []) {
+            throw new \RuntimeException('Failed folder is empty; cannot locate message ' . $preferredUid . '.');
+        }
+
+        $matches = [];
+        foreach ($uids as $uid) {
+            $overview = @imap_fetch_overview($connection, (string) $uid, FT_UID);
+            if ($overview === false || !isset($overview[0])) {
+                continue;
+            }
+            $ov = $overview[0];
+            $from = isset($ov->from) ? $this->extractEmailAddress((string) $ov->from) : '';
+            $subj = isset($ov->subject) ? trim((string) imap_utf8((string) $ov->subject)) : '';
+            if ($wantFrom !== '' && $from !== $wantFrom) {
+                continue;
+            }
+            if ($wantSubject !== '' && $subj !== $wantSubject) {
+                continue;
+            }
+            $matches[] = (int) $uid;
+        }
+
+        if ($matches === []) {
+            throw new \RuntimeException(
+                'Could not find message in failed folder (recorded UID ' . $preferredUid
+                . '; subject/from search found none).'
+            );
+        }
+
+        return max($matches);
+    }
+
     public function disconnect(): void
     {
         if ($this->connection !== false) {

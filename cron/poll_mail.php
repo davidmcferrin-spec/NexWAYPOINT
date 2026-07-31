@@ -12,20 +12,7 @@ declare(strict_types=1);
 
 use NexWaypoint\Core\CronRunRepository;
 use NexWaypoint\Core\Env;
-use NexWaypoint\Hotels\HotelPropertyRepository;
-use NexWaypoint\Hotels\HotelStayRepository;
-use NexWaypoint\Mail\DreamHostImapSource;
-use NexWaypoint\Mail\EmailConfirmationDetector;
-use NexWaypoint\Mail\GmailApiSource;
-use NexWaypoint\Mail\M365GraphSource;
-use NexWaypoint\Mail\MailPoller;
-use NexWaypoint\Mail\MailSourceInterface;
-use NexWaypoint\Mail\ParseLogRepository;
-use NexWaypoint\Mail\RawMailStore;
-use NexWaypoint\Trips\CarrierRepository;
-use NexWaypoint\Trips\NotificationRepository;
-use NexWaypoint\Trips\TripRepository;
-use NexWaypoint\Users\UserRepository;
+use NexWaypoint\Mail\MailPollerFactory;
 
 $app = require dirname(__DIR__) . '/config/bootstrap.php';
 /** @var \NexWaypoint\Core\Logger $logger */
@@ -39,32 +26,8 @@ $exitCode = 0;
 
 try {
     $sourceName = Env::get('MAIL_SOURCE', 'dreamhost_imap');
-
-    $source = match ($sourceName) {
-        'dreamhost_imap' => new DreamHostImapSource($logger),
-        'gmail' => new GmailApiSource(),
-        'm365' => new M365GraphSource(),
-        default => throw new \RuntimeException("Unknown MAIL_SOURCE '{$sourceName}'. Use dreamhost_imap, gmail, or m365."),
-    };
-
-    /** @var MailSourceInterface $source */
-    $propertyRepo = new HotelPropertyRepository($db, $logger);
-    $rawRetention = max(1, (int) Env::get('MAIL_RAW_RETENTION_DAYS', '7'));
-    $rawDir = NEXWAYPOINT_ROOT . '/storage/mail_raw';
-    $poller = new MailPoller(
-        $source,
-        $sourceName,
-        new EmailConfirmationDetector(),
-        new UserRepository($db, $logger),
-        $propertyRepo,
-        new HotelStayRepository($db, $logger, $propertyRepo),
-        new TripRepository($db, $logger),
-        new CarrierRepository($db, $logger),
-        new NotificationRepository($db),
-        new ParseLogRepository($db),
-        $logger,
-        new RawMailStore($rawDir, $rawRetention, $logger),
-    );
+    $source = MailPollerFactory::createSource($logger, $sourceName);
+    $poller = MailPollerFactory::create($app, $source, $sourceName);
 
     $result = $poller->run();
 

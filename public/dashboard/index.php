@@ -29,7 +29,8 @@ $logger = $app['logger'];
 $userRepo = new UserRepository($db, $logger);
 $tripRepo = new TripRepository($db, $logger);
 $carrierRepo = new CarrierRepository($db, $logger);
-$statusEngine = new TripStatusEngine($tripRepo, $logger, new AirportRepository($db, $logger));
+$airports = new AirportRepository($db, $logger);
+$statusEngine = new TripStatusEngine($tripRepo, $logger, $airports);
 $visibilityEngine = new VisibilityEngine($userRepo, new VisibilityRuleRepository($db));
 $blockRepo = new VisibilityBlockRepository($db);
 $notifications = new NotificationRepository($db);
@@ -48,7 +49,7 @@ $travelPreview = new TeamTravelPreviewBuilder(
     $blockRepo,
     $stayRepo,
     $propertyRepo,
-    new AirportRepository($db, $logger),
+    $airports,
 );
 
 $myUpcomingTrips = $tripRepo->findActiveOrUpcoming($user->id, 60);
@@ -505,7 +506,7 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                             }
                         }
                         ?>
-                        · <?= htmlspecialchars(($segment->origin ?? '?') . ' → ' . ($segment->destination ?? '?'), ENT_QUOTES) ?>
+                        · <?= htmlspecialchars($airports->routeLabel($segment->origin, $segment->destination), ENT_QUOTES) ?>
                         <?php if ($segment->departDt !== null): ?>
                             · <?= htmlspecialchars($segment->departDt, ENT_QUOTES) ?>
                         <?php endif; ?>

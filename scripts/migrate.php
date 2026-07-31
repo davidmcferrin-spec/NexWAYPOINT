@@ -1290,13 +1290,15 @@ try {
         fwrite(STDOUT, "Added user_status_overrides.location_state\n");
     }
 
-    // --- airports (IATA → IANA timezone) --------------------------------------
+    // --- airports (IATA → city/state + IANA timezone) -------------------------
     if (!$tableExists('airports')) {
         if ($driver === 'sqlite') {
             $pdo->exec(
                 "CREATE TABLE airports (
                     iata TEXT NOT NULL PRIMARY KEY,
                     name TEXT NULL,
+                    city TEXT NULL,
+                    state TEXT NULL,
                     timezone TEXT NOT NULL,
                     latitude REAL NULL,
                     longitude REAL NULL
@@ -1307,6 +1309,8 @@ try {
                 "CREATE TABLE airports (
                     iata CHAR(3) NOT NULL,
                     name VARCHAR(150) NULL,
+                    city VARCHAR(100) NULL,
+                    state CHAR(2) NULL,
                     timezone VARCHAR(64) NOT NULL,
                     latitude DECIMAL(10,7) NULL,
                     longitude DECIMAL(10,7) NULL,
@@ -1318,24 +1322,40 @@ try {
         fwrite(STDOUT, "Created airports\n");
     }
 
+    if ($tableExists('airports') && !$columnExists('airports', 'city')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE airports ADD COLUMN city TEXT NULL');
+            $pdo->exec('ALTER TABLE airports ADD COLUMN state TEXT NULL');
+        } else {
+            $pdo->exec('ALTER TABLE airports ADD COLUMN city VARCHAR(100) NULL');
+            $pdo->exec('ALTER TABLE airports ADD COLUMN state CHAR(2) NULL');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added airports.city / airports.state\n");
+    }
+
     if ($tableExists('airports')) {
         $seedPath = dirname(__DIR__) . '/data/airports_us.php';
         if (is_file($seedPath)) {
-            /** @var list<array{iata: string, name: string, timezone: string}> $seedRows */
+            /** @var list<array{iata: string, name: string, city?: ?string, state?: ?string, timezone: string}> $seedRows */
             $seedRows = require $seedPath;
             $countBefore = (int) $pdo->query('SELECT COUNT(*) FROM airports')->fetchColumn();
             if ($driver === 'sqlite') {
                 $upsert = $pdo->prepare(
-                    'INSERT INTO airports (iata, name, timezone) VALUES (:iata, :name, :tz)
+                    'INSERT INTO airports (iata, name, city, state, timezone) VALUES (:iata, :name, :city, :state, :tz)
                      ON CONFLICT(iata) DO UPDATE SET
                        name = excluded.name,
+                       city = excluded.city,
+                       state = excluded.state,
                        timezone = excluded.timezone'
                 );
             } else {
                 $upsert = $pdo->prepare(
-                    'INSERT INTO airports (iata, name, timezone) VALUES (:iata, :name, :tz)
+                    'INSERT INTO airports (iata, name, city, state, timezone) VALUES (:iata, :name, :city, :state, :tz)
                      ON DUPLICATE KEY UPDATE
                        name = VALUES(name),
+                       city = VALUES(city),
+                       state = VALUES(state),
                        timezone = VALUES(timezone)'
                 );
             }
@@ -1345,9 +1365,12 @@ try {
                 if (strlen($iata) !== 3 || $tz === '') {
                     continue;
                 }
+                $state = isset($row['state']) ? strtoupper(trim((string) $row['state'])) : '';
                 $upsert->execute([
                     'iata' => $iata,
                     'name' => trim((string) ($row['name'] ?? '')) ?: null,
+                    'city' => trim((string) ($row['city'] ?? '')) ?: null,
+                    'state' => $state !== '' ? $state : null,
                     'tz' => $tz,
                 ]);
             }
@@ -1355,6 +1378,8 @@ try {
             if ($countAfter > $countBefore) {
                 $changes++;
                 fwrite(STDOUT, 'Seeded ' . ($countAfter - $countBefore) . " airports\n");
+            } elseif ($countAfter > 0) {
+                fwrite(STDOUT, "Refreshed airports seed ({$countAfter} rows)\n");
             }
         }
     }

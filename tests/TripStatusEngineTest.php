@@ -186,7 +186,7 @@ final class TripStatusEngineTest extends NexWaypointTestCase
         self::assertSame('remote', $result['status']);
         self::assertStringContainsString('DEN', $result['label']);
         self::assertTrue($result['detail']['from_itinerary'] ?? false);
-        self::assertSame('DEN', $result['detail']['location_city']);
+        self::assertSame('Denver, CO', $result['detail']['location_city']);
     }
 
     public function testReturnHomeLegResumesEnRoute(): void
@@ -213,7 +213,8 @@ final class TripStatusEngineTest extends NexWaypointTestCase
         $result = $engine->resolveForUser($userId, $now);
 
         self::assertSame('en_route', $result['status']);
-        self::assertStringContainsString('DEN -> HSV', $result['label']);
+        self::assertStringContainsString('Denver, CO (DEN)', $result['label']);
+        self::assertStringContainsString('Huntsville, AL (HSV)', $result['label']);
     }
 
     public function testStatusEngineWithImportedMultiLegRoundTrip(): void
@@ -256,12 +257,12 @@ final class TripStatusEngineTest extends NexWaypointTestCase
         // Connection layover in DEN (≤3h) after post-flight window.
         $layover = $engine->resolveForUser($userId, new \DateTimeImmutable('2026-08-10 11:00:00'));
         self::assertSame('layover', $layover['status']);
-        self::assertStringContainsString('DEN', $layover['label']);
+        self::assertStringContainsString('Denver, CO', $layover['label']);
 
         // Long gap at LAX before return → remote at city.
         $remote = $engine->resolveForUser($userId, new \DateTimeImmutable('2026-08-12 12:00:00'));
         self::assertSame('remote', $remote['status']);
-        self::assertSame('LAX', $remote['detail']['location_city']);
+        self::assertSame('Los Angeles, CA', $remote['detail']['location_city']);
         self::assertTrue($remote['detail']['from_itinerary']);
     }
 
@@ -506,5 +507,15 @@ final class TripStatusEngineTest extends NexWaypointTestCase
         self::assertSame('America/New_York', $airports->timezoneForCode('DCA'));
         self::assertNull($airports->timezoneForCode('New York, NY'));
         self::assertNull($airports->timezoneForCode(null));
+
+        self::assertSame('Washington, DC (DCA)', $airports->labelFor('DCA'));
+        self::assertSame('Dulles, VA (IAD)', $airports->labelFor('iad'));
+        self::assertSame('Huntsville, AL (HSV)', $airports->labelFor('HSV'));
+        self::assertSame('Toronto (YYZ)', $airports->labelFor('YYZ'));
+        self::assertSame('XYZ', $airports->labelFor('XYZ'));
+        self::assertSame(
+            'Huntsville, AL (HSV) → Denver, CO (DEN)',
+            $airports->routeLabel('HSV', 'DEN')
+        );
     }
 }

@@ -124,6 +124,49 @@ final class MailPoller
         ];
     }
 
+    /**
+     * Re-run detection/parse/upsert for one message (e.g. from stored .eml).
+     * Does not fetch IMAP; uses this poller's mail source for markProcessed/Failed
+     * (pass NullMailSource when re-parsing from disk without mailbox moves).
+     *
+     * When $force is true (default), skips the parse_log success/ignored short-circuit
+     * so a corrected parser can replace an incomplete trip/stay via confirmation upsert.
+     *
+     * @return array{ok: bool, reason: ?string}
+     */
+    public function reprocessMessage(EmailMessage $message, bool $force = true): array
+    {
+        $minConfidence = (float) (Env::get('MAIL_MIN_PARSE_CONFIDENCE', (string) self::MIN_CONFIDENCE_DEFAULT));
+        $this->lastFailureReason = null;
+
+        try {
+            $ok = $this->processOne($message, $minConfidence, $force);
+            return [
+                'ok' => $ok,
+                'reason' => $ok ? null : ($this->lastFailureReason ?? 'Re-parse failed'),
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->error('Unhandled error reprocessing message', [
+                'uid' => $message->uid,
+                'error' => $e->getMessage(),
+            ]);
+            $reason = 'Unhandled exception: ' . $e->getMessage();
+            $this->source->markFailed($message->uid, $reason);
+            $this->parseLogOutcome(
+                $message,
+                null,
+                'failed',
+                $reason,
+                null,
+                null,
+                null,
+                null,
+                null,
+            );
+            return ['ok' => false, 'reason' => $reason];
+        }
+    }
+
     private function purgeExpiredRawMail(): void
     {
         if ($this->rawMail === null) {
@@ -136,14 +179,21 @@ final class MailPoller
         }
     }
 
-    private function processOne(EmailMessage $message, float $minConfidence): bool
+    private function processOne(EmailMessage $message, float $minConfidence, bool $force = false): bool
     {
         $this->lastFailureReason = null;
 
-        if ($this->parseLog->alreadyProcessed($message->uid, $this->sourceName)) {
+        if (!$force && $this->parseLog->alreadyProcessed($message->uid, $this->sourceName)) {
             $this->logger->info('Skipping already-logged message', ['uid' => $message->uid]);
             $this->source->markProcessed($message->uid);
             return true;
+        }
+
+        if ($force) {
+            $this->logger->info('Force reprocessing message', [
+                'uid' => $message->uid,
+                'source' => $this->sourceName,
+            ]);
         }
 
         // Subject/body cleaned for vendor parsers; ownership uses From then recipient fallback.

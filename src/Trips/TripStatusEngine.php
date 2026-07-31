@@ -131,36 +131,38 @@ final class TripStatusEngine
 
                 if ($now >= $preStart && $now < $depart) {
                     $verb = $segment->segmentType === 'flight' ? 'Pre-flight' : 'Pre-departure';
+                    $route = $this->routeLabel($segment);
                     return $this->result(
                         'pre_flight',
-                        "{$verb}: {$segment->origin} -> {$segment->destination}",
+                        "{$verb}: {$route}",
                         $segment,
-                        ['location_city' => $segment->destination]
+                        ['location_city' => $this->locationCity($segment->destination)]
                     );
                 }
 
                 if ($now >= $depart && $now <= $arrive) {
+                    $route = $this->routeLabel($segment);
                     if ($segment->status === 'cancelled') {
-                        return $this->result('cancelled', "Cancelled: {$segment->origin} -> {$segment->destination}", $segment, [
-                            'location_city' => $segment->destination,
+                        return $this->result('cancelled', "Cancelled: {$route}", $segment, [
+                            'location_city' => $this->locationCity($segment->destination),
                         ]);
                     }
                     if ($segment->status === 'delayed') {
-                        return $this->result('delayed', "Delayed: {$segment->origin} -> {$segment->destination}", $segment, [
-                            'location_city' => $segment->destination,
+                        return $this->result('delayed', "Delayed: {$route}", $segment, [
+                            'location_city' => $this->locationCity($segment->destination),
                         ]);
                     }
                     $verb = $segment->segmentType === 'flight' ? 'In Flight' : 'In Transit';
                     return $this->result(
                         'en_route',
-                        "{$verb}: {$segment->origin} -> {$segment->destination}",
+                        "{$verb}: {$route}",
                         $segment,
-                        ['location_city' => $segment->destination]
+                        ['location_city' => $this->locationCity($segment->destination)]
                     );
                 }
 
                 if ($now > $arrive && $now <= $postEnd) {
-                    $city = $segment->destination ?? 'destination';
+                    $city = $this->locationCity($segment->destination) ?? 'destination';
                     $postLabel = $segment->segmentType === 'flight'
                         ? "Post-flight: arrived {$city}"
                         : "Post-arrival: arrived {$city}";
@@ -168,7 +170,7 @@ final class TripStatusEngine
                         'post_flight',
                         $postLabel,
                         $segment,
-                        ['location_city' => $segment->destination]
+                        ['location_city' => $this->locationCity($segment->destination)]
                     );
                 }
 
@@ -182,13 +184,13 @@ final class TripStatusEngine
                 }
 
                 $gapSeconds = $nextDepart->getTimestamp() - $arrive->getTimestamp();
-                $city = $segment->destination ?? 'transit';
+                $city = $this->locationCity($segment->destination) ?? 'transit';
                 if ($gapSeconds <= self::LAYOVER_MAX_HOURS * 3600) {
                     return $this->result(
                         'layover',
                         "Layover in {$city}",
                         $segment,
-                        ['location_city' => $segment->destination]
+                        ['location_city' => $this->locationCity($segment->destination)]
                     );
                 }
 
@@ -203,7 +205,7 @@ final class TripStatusEngine
                     "Working Remote · {$city}",
                     $segment,
                     [
-                        'location_city' => $segment->destination,
+                        'location_city' => $this->locationCity($segment->destination),
                         'location_state' => null,
                         'from_itinerary' => true,
                     ]
@@ -258,6 +260,25 @@ final class TripStatusEngine
             return $this->airports->instant($airportCode, $naiveDt);
         }
         return new \DateTimeImmutable($naiveDt);
+    }
+
+    private function routeLabel(TripSegment $segment): string
+    {
+        if ($this->airports !== null) {
+            return $this->airports->routeLabel($segment->origin, $segment->destination, ' -> ');
+        }
+        return trim(($segment->origin ?? '?') . ' -> ' . ($segment->destination ?? '?'));
+    }
+
+    private function locationCity(?string $code): ?string
+    {
+        if ($code === null || trim($code) === '') {
+            return null;
+        }
+        if ($this->airports !== null) {
+            return $this->airports->cityFor($code) ?? $code;
+        }
+        return $code;
     }
 
     /**
