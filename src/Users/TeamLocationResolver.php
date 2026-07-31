@@ -7,6 +7,7 @@ namespace NexWaypoint\Users;
 use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\TripRepository;
 
 /**
@@ -15,6 +16,8 @@ use NexWaypoint\Trips\TripRepository;
  * Home/office/unavailable → profile home city.
  * Remote → override location (fallback home).
  * Travel → hotel property coords or geocoded destination city.
+ * Bare IATA destination_city values (e.g. DFW) expand via AirportRepository
+ * to labels like "Dallas/Fort Worth, TX (DFW)".
  * Returns null when destination detail is visibility-redacted or unresolved.
  */
 final class TeamLocationResolver
@@ -24,6 +27,7 @@ final class TeamLocationResolver
         private readonly HotelStayRepository $stays,
         private readonly HotelPropertyRepository $properties,
         private readonly Geocoder $geocoder,
+        private readonly ?AirportRepository $airports = null,
     ) {
     }
 
@@ -255,22 +259,49 @@ final class TeamLocationResolver
         if ($city === '') {
             return null;
         }
-        // destination_city may already be "Chicago, IL"
+
+        $displayLabel = null;
         $parsedCity = $city;
         $parsedState = $state;
-        if ($parsedState === null && preg_match('/^(.+?),\s*([A-Za-z]{2}|[A-Za-z .]+)$/', $city, $m) === 1) {
+
+        // Bare IATA (trips.destination_city from mail/builder) → friendly label + city geocode.
+        $iata = AirportRepository::normalizeIata($city);
+        if (
+            $this->airports !== null
+            && $iata !== null
+            && $state === null
+            && $this->airports->has($iata)
+            && strtoupper(trim($city)) === $iata
+        ) {
+            $displayLabel = $this->airports->labelFor($iata);
+            $place = $this->airports->cityFor($iata);
+            if ($place !== null && preg_match('/^(.+?),\s*([A-Za-z]{2})$/', $place, $m) === 1) {
+                $parsedCity = trim($m[1]);
+                $parsedState = trim($m[2]);
+            } elseif ($place !== null) {
+                $parsedCity = $place;
+                $parsedState = null;
+            }
+        } elseif ($parsedState === null && preg_match('/^(.+?),\s*([A-Za-z]{2}|[A-Za-z .]+)$/', $city, $m) === 1) {
+            // destination_city may already be "Chicago, IL"
             $parsedCity = trim($m[1]);
             $parsedState = trim($m[2]);
         }
 
         $coords = $this->geocoder->geocodeCity($parsedCity, $parsedState, 'US');
+        if ($coords === null && $displayLabel !== null && $parsedCity !== $city) {
+            // Expanded city failed; last try the raw IATA / original string.
+            $coords = $this->geocoder->geocodeCity($city, null, 'US');
+        }
         if ($coords === null) {
             return null;
         }
 
-        $label = $parsedState !== null && $parsedState !== ''
-            ? "{$parsedCity}, {$parsedState}"
-            : $parsedCity;
+        $label = $displayLabel ?? (
+            $parsedState !== null && $parsedState !== ''
+                ? "{$parsedCity}, {$parsedState}"
+                : $parsedCity
+        );
 
         return [
             'lat' => $coords['lat'],

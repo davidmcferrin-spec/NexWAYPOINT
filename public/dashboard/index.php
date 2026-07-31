@@ -41,6 +41,7 @@ $locationResolver = new TeamLocationResolver(
     $stayRepo,
     $propertyRepo,
     new Geocoder($logger),
+    $airports,
 );
 $upcomingFinder = new TeamUpcomingTripFinder($tripRepo, $visibilityEngine, $blockRepo);
 $travelPreview = new TeamTravelPreviewBuilder(

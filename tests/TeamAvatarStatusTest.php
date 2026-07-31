@@ -7,6 +7,7 @@ namespace NexWaypoint\Tests;
 use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\TeamLocationResolver;
@@ -181,6 +182,59 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertNotSame('', $result['next']['dates']);
         self::assertStringContainsString('Chicago', (string) $result['upcoming']);
         self::assertStringContainsString('·', (string) $result['upcoming']);
+    }
+
+    public function testUpcomingIataDestinationUsesAirportLabel(): void
+    {
+        $userId = $this->insertUser('dave');
+        $userRepo = new UserRepository($this->db, $this->logger);
+        $userRepo->updateHomeLocation($userId, 'Huntsville', 'AL', 34.7304, -86.5861, $userId);
+        $user = $userRepo->find($userId);
+        self::assertNotNull($user);
+
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $start = (new \DateTimeImmutable('today'))->modify('+5 days')->format('Y-m-d');
+        $end = (new \DateTimeImmutable('today'))->modify('+8 days')->format('Y-m-d');
+        $trip = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'DFW',
+            startDate: $start,
+            endDate: $end,
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $cacheDir = sys_get_temp_dir() . '/nx_geocode_iata_' . $userId;
+        if (!is_dir($cacheDir)) {
+            mkdir($cacheDir, 0777, true);
+        }
+        $cacheKey = strtolower('v3||Dallas/Fort Worth|TX||United States');
+        file_put_contents(
+            $cacheDir . '/' . hash('sha256', $cacheKey) . '.json',
+            json_encode(['lat' => 32.8998, 'lon' => -97.0403])
+        );
+
+        $resolver = new TeamLocationResolver(
+            $tripRepo,
+            new HotelStayRepository($this->db, $this->logger),
+            new HotelPropertyRepository($this->db, $this->logger),
+            new Geocoder($this->logger, $cacheDir),
+            new AirportRepository(null, $this->logger),
+        );
+
+        $result = $resolver->resolveWithUpcoming(
+            $user,
+            ['status' => 'home', 'label' => 'Home', 'detail' => []],
+            true,
+            $trip,
+        );
+
+        self::assertNotNull($result['next']);
+        self::assertSame('Dallas/Fort Worth, TX (DFW)', $result['next']['city_label']);
+        self::assertStringContainsString('Dallas/Fort Worth, TX (DFW)', (string) $result['upcoming']);
     }
 
     public function testPrivateUpcomingDoesNotMovePinWhenTripNull(): void
