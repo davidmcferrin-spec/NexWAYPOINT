@@ -307,6 +307,65 @@ HTML;
         self::assertSame('CLT', $segments[0]->destination);
     }
 
+    public function testMailPollerOwnsVendorFromViaBodyDeliveredTo(): void
+    {
+        $repo = new UserRepository($this->db, $this->logger);
+        $user = $repo->create('dave', 'dave@work.example', 'test-password-12', 'Dave', 'subordinate', null);
+        $repo->addEmail((int) $user->id, 'david.mcferrin@pm.me', 'Proton', (int) $user->id);
+
+        $html = <<<'HTML'
+<script type="application/ld+json">
+{
+  "@type": "FlightReservation",
+  "reservationNumber": "HSVDFW1",
+  "reservationFor": {
+    "@type": "Flight",
+    "flightNumber": "AA 100",
+    "airline": {"iataCode": "AA", "name": "American Airlines"},
+    "departureAirport": {"iataCode": "HSV"},
+    "arrivalAirport": {"iataCode": "DFW"},
+    "departureTime": "2026-08-20T12:00:00Z",
+    "arrivalTime": "2026-08-20T14:00:00Z"
+  }
+}
+</script>
+HTML;
+
+        $source = new ArrayMailSource([
+            new EmailMessage(
+                uid: 'aa-vendor-from',
+                fromAddress: 'no-reply@info.email.aa.com',
+                subject: 'Your trip confirmation (HSV - DFW)',
+                receivedAt: new \DateTimeImmutable('2026-07-31'),
+                bodyPlain: "Confirmation code: HSVDFW1\nThis email was sent to david.mcferrin@pm.me",
+                bodyHtml: $html,
+            ),
+        ]);
+
+        $props = new HotelPropertyRepository($this->db, $this->logger);
+        $poller = new MailPoller(
+            $source,
+            'test',
+            new EmailConfirmationDetector(),
+            $repo,
+            $props,
+            new HotelStayRepository($this->db, $this->logger, $props),
+            new TripRepository($this->db, $this->logger),
+            new CarrierRepository($this->db, $this->logger),
+            new NotificationRepository($this->db),
+            new ParseLogRepository($this->db),
+            $this->logger,
+        );
+
+        $result = $poller->run();
+        self::assertSame(1, $result['success'], 'vendor From should attribute via body recipient');
+        self::assertSame(0, $result['failed']);
+
+        $trips = new TripRepository($this->db, $this->logger);
+        $segments = $trips->findSegmentsByConfirmation((int) $user->id, 'HSVDFW1');
+        self::assertCount(1, $segments);
+    }
+
     private function msg(string $from, string $subject): EmailMessage
     {
         return new EmailMessage(

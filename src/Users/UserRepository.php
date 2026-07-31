@@ -521,6 +521,33 @@ final class UserRepository
     /**
      * Persist avatar filesystem path and circular crop focus (0–100 percent).
      */
+    /**
+     * Toggle whether the user appears on their own team board (as manager would see them).
+     */
+    public function updateSeeSelf(int $userId, bool $seeSelf, ?int $actorUserId = null): User
+    {
+        if (!$this->db->columnExists('users', 'see_self')) {
+            throw new \RuntimeException('users.see_self missing; run php scripts/migrate.php');
+        }
+
+        $this->db->execute(
+            'UPDATE users SET see_self = :see_self, updated_at = CURRENT_TIMESTAMP WHERE id = :id',
+            [
+                'see_self' => $seeSelf ? 1 : 0,
+                'id' => $userId,
+            ]
+        );
+        $this->db->audit($actorUserId, 'update_see_self', 'users', $userId, [
+            'see_self' => $seeSelf,
+        ]);
+
+        $user = $this->find($userId);
+        if ($user === null) {
+            throw new \RuntimeException('User update succeeded but row could not be re-read.');
+        }
+        return $user;
+    }
+
     public function updatePhoto(
         int $userId,
         ?string $photoPath,

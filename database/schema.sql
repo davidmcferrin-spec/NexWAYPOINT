@@ -32,6 +32,7 @@ CREATE TABLE users (
     home_state      VARCHAR(120) NULL,
     home_lat        DECIMAL(10,7) NULL,
     home_lon        DECIMAL(10,7) NULL,
+    see_self        TINYINT(1) NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_users_manager FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL,

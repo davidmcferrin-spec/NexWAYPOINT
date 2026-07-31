@@ -24,6 +24,7 @@ final class User
         public readonly ?string $homeState = null,
         public readonly ?float $homeLat = null,
         public readonly ?float $homeLon = null,
+        public readonly bool $seeSelf = false,
     ) {
     }
 
@@ -60,6 +61,7 @@ final class User
             homeLon: isset($row['home_lon']) && $row['home_lon'] !== '' && $row['home_lon'] !== null
                 ? (float) $row['home_lon']
                 : null,
+            seeSelf: (bool) ($row['see_self'] ?? false),
         );
     }
 

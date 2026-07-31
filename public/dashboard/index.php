@@ -112,23 +112,36 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
         VisibilityBlockRepository $blockRepo,
         TeamLocationResolver $locationResolver,
         TeamUpcomingTripFinder $upcomingFinder,
-        bool $isSelf,
+        bool $markAsSelf,
+        ?string $forceDirection = null,
     ): array {
         $alwaysVisibleStatuses = ['home', 'office', 'remote', 'unavailable'];
         $status = $statusEngine->resolveForUser($subject->id);
         $tripId = $status['detail']['trip_id'] ?? null;
 
+        // SELF bypass only when viewing yourself with no forced manager-preview direction.
+        $bypassVisibility = $markAsSelf
+            && $forceDirection === null
+            && $viewerId === $subject->id;
+
         $displayLabel = $status['label'];
         $destinationVisible = true;
-        if (!$isSelf && !in_array($status['status'], $alwaysVisibleStatuses, true) && $tripId !== null) {
+        if (!$bypassVisibility && !in_array($status['status'], $alwaysVisibleStatuses, true) && $tripId !== null) {
             $trip = $tripRepo->find((int) $tripId);
-            $hidden = $trip !== null && $blockRepo->isHiddenFromViewer(
-                $subject->id,
-                $viewerId,
-                $trip->isPrivate,
-                VisibilityBlockRepository::TYPE_TRIP,
-                $trip->id
-            );
+            $tripIsPrivate = $trip !== null && $trip->isPrivate;
+            $hidden = false;
+            if ($trip !== null && $forceDirection === null) {
+                $hidden = $blockRepo->isHiddenFromViewer(
+                    $subject->id,
+                    $viewerId,
+                    $trip->isPrivate,
+                    VisibilityBlockRepository::TYPE_TRIP,
+                    $trip->id
+                );
+            } elseif ($tripIsPrivate) {
+                // No-manager See Self: private trips stay hidden.
+                $hidden = true;
+            }
 
             if ($hidden) {
                 $destinationVisible = false;
@@ -138,8 +151,15 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
                     default => 'Unavailable',
                 };
             } else {
-                $tripIsPrivate = $trip !== null && $trip->isPrivate;
-                $visibility = $visibilityEngine->getVisibleFields($viewerId, $subject->id, $tripIsPrivate);
+                if ($forceDirection !== null) {
+                    $visibility = $visibilityEngine->getVisibleFieldsForDirection(
+                        $subject->id,
+                        $forceDirection,
+                        $tripIsPrivate,
+                    );
+                } else {
+                    $visibility = $visibilityEngine->getVisibleFields($viewerId, $subject->id, $tripIsPrivate);
+                }
 
                 if (!in_array('destination_city', $visibility['visible_fields'], true)) {
                     $destinationVisible = false;
@@ -157,7 +177,13 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
 
         // Next = soonest visible trip that is not the one they are already on.
         $excludeTripId = $tripId !== null ? (int) $tripId : null;
-        $upcomingTrip = $upcomingFinder->findVisible($viewerId, $subject->id, 21, $excludeTripId);
+        $upcomingTrip = $upcomingFinder->findVisible(
+            $viewerId,
+            $subject->id,
+            21,
+            $excludeTripId,
+            $forceDirection,
+        );
         $resolved = $locationResolver->resolveWithUpcoming(
             $subject,
             $status,
@@ -176,7 +202,7 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
             'photo_focus_x' => $subject->photoFocusX,
             'photo_focus_y' => $subject->photoFocusY,
             'initials' => nexwaypoint_initials($subject->displayName),
-            'is_self' => $isSelf,
+            'is_self' => $markAsSelf,
         ];
     }
 }
@@ -199,23 +225,39 @@ foreach ($userRepo->findAllActive() as $teammate) {
     );
 }
 
-$selfEntry = nexwaypoint_build_board_entry(
-    $user,
-    $user->id,
-    $statusEngine,
-    $tripRepo,
-    $visibilityEngine,
-    $blockRepo,
-    $locationResolver,
-    $upcomingFinder,
-    true,
-);
+$previewViewerId = $user->managerId;
+$selfForceDirection = null;
+if ($previewViewerId === null) {
+    $dottedIds = $userRepo->dottedManagerIds($user->id);
+    $previewViewerId = $dottedIds[0] ?? null;
+}
+
+$selfEntry = null;
+if ($user->seeSelf) {
+    if ($previewViewerId === null) {
+        $selfForceDirection = VisibilityEngine::DIRECTION_TOP_DOWN;
+        $previewViewerId = $user->id; // placeholder; forceDirection drives field rules
+    }
+    $selfEntry = nexwaypoint_build_board_entry(
+        $user,
+        $previewViewerId,
+        $statusEngine,
+        $tripRepo,
+        $visibilityEngine,
+        $blockRepo,
+        $locationResolver,
+        $upcomingFinder,
+        true,
+        $selfForceDirection,
+    );
+    $team = array_merge([$selfEntry], $team);
+}
 
 $mapPeople = [];
 $selfOnMap = false;
 $othersOnMap = 0;
 
-$mapCandidates = array_merge([$selfEntry], $team);
+$mapCandidates = $team;
 foreach ($mapCandidates as $entry) {
     if ($entry['location'] === null) {
         continue;
@@ -246,8 +288,12 @@ foreach ($mapCandidates as $entry) {
 $mapLonelyNote = $selfOnMap && $othersOnMap === 0;
 
 $teamProfiles = [];
-foreach (array_merge([$selfEntry], $team) as $entry) {
+foreach ($team as $entry) {
     $uid = (string) $entry['user']->id;
+    $profileViewerId = $entry['is_self'] && $previewViewerId !== null
+        ? $previewViewerId
+        : $user->id;
+    $profileAsDirection = $entry['is_self'] ? $selfForceDirection : null;
     $teamProfiles[$uid] = [
         'id' => $entry['user']->id,
         'name' => $entry['is_self']
@@ -257,7 +303,12 @@ foreach (array_merge([$selfEntry], $team) as $entry) {
         'location' => $entry['location']['city_label'] ?? null,
         'next' => $entry['next'],
         'window_days' => $upcomingMapDays,
-        'trips' => $travelPreview->build($user->id, $entry['user']->id, $upcomingMapDays),
+        'trips' => $travelPreview->build(
+            $profileViewerId,
+            $entry['user']->id,
+            $upcomingMapDays,
+            $profileAsDirection,
+        ),
     ];
 }
 
@@ -325,7 +376,12 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                                         <?php else: ?>
                                             <span class="avatar-circle avatar-sm avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
                                         <?php endif; ?>
-                                        <?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?>
+                                        <?= htmlspecialchars(
+                                            $entry['is_self']
+                                                ? $entry['user']->displayName . ' (you)'
+                                                : $entry['user']->displayName,
+                                            ENT_QUOTES
+                                        ) ?>
                                     </span>
                                 </td>
                                 <td>
@@ -372,7 +428,12 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                             <?php else: ?>
                                 <span class="avatar-circle avatar-lg avatar-fallback"><?= htmlspecialchars($entry['initials'], ENT_QUOTES) ?></span>
                             <?php endif; ?>
-                            <h3 class="team-card-name"><?= htmlspecialchars($entry['user']->displayName, ENT_QUOTES) ?></h3>
+                            <h3 class="team-card-name"><?= htmlspecialchars(
+                                $entry['is_self']
+                                    ? $entry['user']->displayName . ' (you)'
+                                    : $entry['user']->displayName,
+                                ENT_QUOTES
+                            ) ?></h3>
                             <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
                             <div class="team-card-places">
                                 <p class="team-place">

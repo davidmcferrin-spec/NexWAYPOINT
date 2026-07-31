@@ -112,17 +112,8 @@ final class VisibilityEngine
             return ['direction' => $direction, 'visible_fields' => self::ALL_FIELDS, 'overrides_applied' => false];
         }
 
-        $defaultFields = in_array($direction, [self::DIRECTION_BOTTOM_UP, self::DIRECTION_UNRELATED], true)
-            ? self::RESTRICTED_FIELDS
-            : self::ALL_FIELDS;
-
-        // Baseline visibility map. A private trip starts fully closed;
-        // everything from here on is an explicit grant, not a default.
-        $visibility = [];
-        foreach (self::ALL_FIELDS as $field) {
-            $visibility[$field] = $tripIsPrivate ? false : in_array($field, $defaultFields, true);
-        }
-
+        $baseline = $this->baselineVisibility($direction, $tripIsPrivate);
+        $visibility = $baseline['visibility'];
         $overridesApplied = false;
 
         // Direction-wide default override, then per-viewer override
@@ -146,11 +137,45 @@ final class VisibilityEngine
             }
         }
 
-        $visibleFields = array_values(array_keys(array_filter($visibility)));
+        return [
+            'direction' => $direction,
+            'visible_fields' => array_values(array_keys(array_filter($visibility))),
+            'overrides_applied' => $overridesApplied,
+        ];
+    }
+
+    /**
+     * Direction-forced field visibility (defaults + subject's direction-wide
+     * rules only). Used for See Self when the user has no manager to preview as.
+     *
+     * @return array{direction: string, visible_fields: string[], overrides_applied: bool}
+     */
+    public function getVisibleFieldsForDirection(
+        int $subjectUserId,
+        string $direction,
+        bool $tripIsPrivate = false,
+    ): array {
+        if ($direction === self::DIRECTION_SELF) {
+            return ['direction' => $direction, 'visible_fields' => self::ALL_FIELDS, 'overrides_applied' => false];
+        }
+
+        $baseline = $this->baselineVisibility($direction, $tripIsPrivate);
+        $visibility = $baseline['visibility'];
+        $overridesApplied = false;
+
+        foreach ($this->rules->findForSubject($subjectUserId) as $rule) {
+            if ($rule->direction !== $direction || $rule->targetUserId !== null) {
+                continue;
+            }
+            if (in_array($rule->fieldName, self::ALL_FIELDS, true)) {
+                $visibility[$rule->fieldName] = $rule->visible;
+                $overridesApplied = true;
+            }
+        }
 
         return [
             'direction' => $direction,
-            'visible_fields' => $visibleFields,
+            'visible_fields' => array_values(array_keys(array_filter($visibility))),
             'overrides_applied' => $overridesApplied,
         ];
     }
@@ -164,5 +189,24 @@ final class VisibilityEngine
     public function previewForViewer(int $subjectUserId, int $viewerId, bool $tripIsPrivate = false): array
     {
         return $this->getVisibleFields($viewerId, $subjectUserId, $tripIsPrivate);
+    }
+
+    /**
+     * @return array{visibility: array<string, bool>}
+     */
+    private function baselineVisibility(string $direction, bool $tripIsPrivate): array
+    {
+        $defaultFields = in_array($direction, [self::DIRECTION_BOTTOM_UP, self::DIRECTION_UNRELATED], true)
+            ? self::RESTRICTED_FIELDS
+            : self::ALL_FIELDS;
+
+        // Baseline visibility map. A private trip starts fully closed;
+        // everything from here on is an explicit grant, not a default.
+        $visibility = [];
+        foreach (self::ALL_FIELDS as $field) {
+            $visibility[$field] = $tripIsPrivate ? false : in_array($field, $defaultFields, true);
+        }
+
+        return ['visibility' => $visibility];
     }
 }

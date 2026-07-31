@@ -132,13 +132,25 @@ final class DreamHostImapSource implements MailSourceInterface
 
         [$plain, $html] = $this->extractBodies($connection, $uid, $structure);
 
+        $fromAddress = $this->extractEmailAddress($from);
+        $recipients = [];
+        if (is_string($header) && $header !== '') {
+            $recipients = MailOwnerResolver::recipientsFromHeaderBlock($header);
+        }
+        // Drop outer From if it also appears in To/Delivered-To lists.
+        $recipients = array_values(array_filter(
+            $recipients,
+            static fn (string $e): bool => $e !== $fromAddress
+        ));
+
         return new EmailMessage(
             uid: (string) $uid,
-            fromAddress: $this->extractEmailAddress($from),
+            fromAddress: $fromAddress,
             subject: $subject,
             receivedAt: $date,
             bodyPlain: $plain,
             bodyHtml: $html,
+            recipientAddresses: $recipients,
         );
     }
 

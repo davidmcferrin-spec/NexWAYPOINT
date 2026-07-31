@@ -64,6 +64,7 @@ final class ForwardedMailNormalizer
             receivedAt: $message->receivedAt,
             bodyPlain: $plain,
             bodyHtml: $html,
+            recipientAddresses: $message->recipientAddresses,
         );
     }
 

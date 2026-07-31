@@ -158,4 +158,70 @@ final class VisibilityEngineTest extends NexWaypointTestCase
         sort($result['visible_fields']);
         self::assertSame(['destination_city', 'travel_dates'], $result['visible_fields']);
     }
+
+    public function testDirectionForcedTopDownMatchesManagerViewerDefaults(): void
+    {
+        $managerId = $this->insertUser('manager', null, 'manager');
+        $subordinateId = $this->insertUser('sub', $managerId, 'subordinate');
+        $engine = $this->makeEngine();
+
+        $asManager = $engine->getVisibleFields($managerId, $subordinateId);
+        $forced = $engine->getVisibleFieldsForDirection(
+            $subordinateId,
+            VisibilityEngine::DIRECTION_TOP_DOWN,
+        );
+
+        self::assertSame(VisibilityEngine::DIRECTION_TOP_DOWN, $forced['direction']);
+        self::assertEqualsCanonicalizing($asManager['visible_fields'], $forced['visible_fields']);
+    }
+
+    public function testDirectionForcedTopDownRespectsDirectionWideRules(): void
+    {
+        $subjectId = $this->insertUser('solo');
+        $rules = new VisibilityRuleRepository($this->db);
+        $engine = $this->makeEngine();
+
+        // Hide destination from all top-down viewers via direction-wide rule.
+        $rules->upsert(
+            $subjectId,
+            null,
+            VisibilityEngine::DIRECTION_TOP_DOWN,
+            'destination_city',
+            false,
+        );
+
+        $forced = $engine->getVisibleFieldsForDirection(
+            $subjectId,
+            VisibilityEngine::DIRECTION_TOP_DOWN,
+        );
+
+        self::assertTrue($forced['overrides_applied']);
+        self::assertNotContains('destination_city', $forced['visible_fields']);
+        self::assertContains('travel_dates', $forced['visible_fields']);
+    }
+
+    public function testDirectionForcedIgnoresPerViewerOverrides(): void
+    {
+        $managerId = $this->insertUser('manager', null, 'manager');
+        $subordinateId = $this->insertUser('sub', $managerId, 'subordinate');
+        $rules = new VisibilityRuleRepository($this->db);
+        $engine = $this->makeEngine();
+
+        $rules->upsert(
+            $subordinateId,
+            $managerId,
+            VisibilityEngine::DIRECTION_USER_USER,
+            'destination_city',
+            false,
+        );
+
+        $asManager = $engine->getVisibleFields($managerId, $subordinateId);
+        $forced = $engine->getVisibleFieldsForDirection(
+            $subordinateId,
+            VisibilityEngine::DIRECTION_TOP_DOWN,
+        );
+
+        self::assertNotContains('destination_city', $asManager['visible_fields']);
+        self::assertContains('destination_city', $forced['visible_fields']);
+    }
 }

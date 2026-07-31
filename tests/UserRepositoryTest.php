@@ -9,6 +9,26 @@ use NexWaypoint\Users\UserRepository;
 
 final class UserRepositoryTest extends NexWaypointTestCase
 {
+    public function testSeeSelfDefaultsOffAndRoundTrips(): void
+    {
+        $repo = new UserRepository($this->db, $this->logger);
+        $userId = $this->insertUser('dave');
+
+        $user = $repo->find($userId);
+        self::assertNotNull($user);
+        self::assertFalse($user->seeSelf);
+
+        $updated = $repo->updateSeeSelf($userId, true, $userId);
+        self::assertTrue($updated->seeSelf);
+
+        $reloaded = $repo->find($userId);
+        self::assertNotNull($reloaded);
+        self::assertTrue($reloaded->seeSelf);
+
+        $off = $repo->updateSeeSelf($userId, false, $userId);
+        self::assertFalse($off->seeSelf);
+    }
+
     public function testSetDottedManagersPersistsAndSkipsSolidLine(): void
     {
         $boss = $this->insertUser('boss');

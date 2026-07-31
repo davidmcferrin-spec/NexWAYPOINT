@@ -124,10 +124,14 @@ final class RawMailStore
             'Subject: ' . $this->headerSafe($message->subject),
             'Date: ' . $message->receivedAt->format(\DateTimeInterface::RFC2822),
             'X-NexWAYPOINT-Mail-UID: ' . $this->headerSafe($message->uid),
-            'MIME-Version: 1.0',
-            'Content-Type: text/plain; charset=UTF-8',
-            'Content-Transfer-Encoding: 8bit',
         ];
+        if ($message->recipientAddresses !== []) {
+            $headers[] = 'To: ' . $this->headerSafe(implode(', ', $message->recipientAddresses));
+            $headers[] = 'X-NexWAYPOINT-Owner-Candidates: ' . $this->headerSafe(implode(', ', $message->recipientAddresses));
+        }
+        $headers[] = 'MIME-Version: 1.0';
+        $headers[] = 'Content-Type: text/plain; charset=UTF-8';
+        $headers[] = 'Content-Transfer-Encoding: 8bit';
         $body = trim($message->bodyPlain) !== ''
             ? $message->bodyPlain
             : trim(html_entity_decode(strip_tags($message->bodyHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8'));

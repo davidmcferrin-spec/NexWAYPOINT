@@ -116,8 +116,12 @@ System-admin Mail review: Settings → Mail review (`is_system` only).
   number only; enrichment builds FlightAware ident as IATA+number.
   Manage under Settings → Site catalogs (`/settings/site.php`); shared site-wide catalog.
 - **Mail parsers must handle direct vendor mail AND teammate forwards, plus
-  confirm / change / cancel.** Ownership always uses the outer `From:`
-  (matched via `user_emails`). `ForwardedMailNormalizer` strips Fw:/Fwd:
+  confirm / change / cancel.** Ownership prefers outer `From:` (matched via
+  `user_emails`). When `From` is a known vendor (Hilton/AA/Amtrak/…) and no
+  user matches, `MailOwnerResolver` falls back to IMAP `Delivered-To` /
+  `X-Original-To` / `To` / `Cc`, then body “delivered to” / “sent to”
+  recipient hints — so Proton auto-forwards that keep the vendor `From`
+  still attribute correctly. `ForwardedMailNormalizer` strips Fw:/Fwd:
   wrappers (Gmail, Outlook, Proton, Yahoo, Apple) before detect/parse so
   parsers see the underlying confirmation. Brand parsers (AA, Hilton,
   Marriott, …) must tolerate quoted bodies, soft line-breaks, zero-width

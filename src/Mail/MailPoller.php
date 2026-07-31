@@ -146,15 +146,33 @@ final class MailPoller
             return true;
         }
 
-        // Outer From: still used for ownership; subject/body cleaned for vendor parsers.
+        // Subject/body cleaned for vendor parsers; ownership uses From then recipient fallback.
         $normalized = ForwardedMailNormalizer::normalize($message);
 
         $detection = $this->detector->detect($normalized);
-        $owner = $this->users->findByEmail($message->fromAddress);
+        $ownership = (new MailOwnerResolver($this->users))->resolve($message);
+        $owner = $ownership['user'];
 
         if ($owner === null) {
-            $this->fail($message, $detection['type'], 'No NexWAYPOINT user matches From: address ' . $message->fromAddress);
+            $hint = $message->fromAddress !== ''
+                ? 'From: ' . $message->fromAddress
+                : 'empty From';
+            $this->fail(
+                $message,
+                $detection['type'],
+                'No NexWAYPOINT user matches ' . $hint
+                . ' (also tried Delivered-To/To and body recipient hints)'
+            );
             return false;
+        }
+
+        if ($ownership['via'] !== 'from' && $ownership['matched_email'] !== null) {
+            $this->logger->info('Mail owner resolved via recipient fallback', [
+                'uid' => $message->uid,
+                'from' => $message->fromAddress,
+                'matched_email' => $ownership['matched_email'],
+                'via' => $ownership['via'],
+            ]);
         }
 
         if (in_array($detection['event'], ['ignore', 'status'], true)) {

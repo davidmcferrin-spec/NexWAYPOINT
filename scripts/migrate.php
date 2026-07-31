@@ -1261,6 +1261,15 @@ try {
         $changes++;
         fwrite(STDOUT, "Added users.home_lon\n");
     }
+    if ($tableExists('users') && !$columnExists('users', 'see_self')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec('ALTER TABLE users ADD COLUMN see_self INTEGER NOT NULL DEFAULT 0');
+        } else {
+            $pdo->exec('ALTER TABLE users ADD COLUMN see_self TINYINT(1) NOT NULL DEFAULT 0');
+        }
+        $changes++;
+        fwrite(STDOUT, "Added users.see_self\n");
+    }
 
     if ($tableExists('user_status_overrides') && !$columnExists('user_status_overrides', 'location_city')) {
         if ($driver === 'sqlite') {

@@ -11,6 +11,10 @@ namespace NexWaypoint\Mail;
  */
 final class EmailMessage
 {
+    /**
+     * @param list<string> $recipientAddresses Candidate owner addresses from
+     *        IMAP Delivered-To / To / Cc / X-Original-To (lowercase), excluding From.
+     */
     public function __construct(
         public readonly string $uid,
         public readonly string $fromAddress,
@@ -18,6 +22,7 @@ final class EmailMessage
         public readonly \DateTimeImmutable $receivedAt,
         public readonly string $bodyPlain,
         public readonly string $bodyHtml,
+        public readonly array $recipientAddresses = [],
     ) {
     }
 

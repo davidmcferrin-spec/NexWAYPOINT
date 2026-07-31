@@ -221,10 +221,13 @@ installer:
    `IMAP_ENCRYPTION=ssl`, `IMAP_USERNAME`/`IMAP_PASSWORD` in `.env`.
 3. Have each teammate set up mail forwarding (or a filter that forwards)
    confirmation emails from their own inbox to that address. `MailPoller`
-   attributes each email to a NexWAYPOINT user by matching the `From:`
-   address against that user's rows in `user_emails` (primary plus any
-   aliases). Add every address you send/forward from under **My emails**
-   (`/settings/emails.php`), or have a site admin attach them under **Settings → Users**.
+   attributes each email to a NexWAYPOINT user by matching the outer `From:`
+   against `user_emails` (primary plus aliases). If `From` is a known vendor
+   (auto-forward that keeps Hilton/AA/etc. as sender), ownership falls back
+   to `Delivered-To` / `To` and body “delivered to …” clues — so the
+   traveler’s address in **My emails** still wins. Add every address you
+   receive or forward from under **My emails** (`/settings/emails.php`), or
+   have a site admin attach them under **Settings → Users**.
 4. `IMAP_PROCESSED_FOLDER`/`IMAP_FAILED_FOLDER` are created automatically
    on first connect if they don't exist.
 

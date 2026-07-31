@@ -41,10 +41,14 @@ final class TeamTravelPreviewBuilder
      *   redacted: bool
      * }>
      */
-    public function build(int $viewerId, int $subjectId, int $daysAhead = 21): array
+    /**
+     * @param ?string $asDirection When set (e.g. TOP_DOWN for See Self with no manager),
+     *        apply that direction's defaults + direction-wide rules instead of SELF bypass.
+     */
+    public function build(int $viewerId, int $subjectId, int $daysAhead = 21, ?string $asDirection = null): array
     {
         $out = [];
-        $isSelf = $viewerId === $subjectId;
+        $isSelf = $viewerId === $subjectId && $asDirection === null;
 
         foreach ($this->trips->findActiveOrUpcoming($subjectId, $daysAhead) as $trip) {
             if ($trip->id === null) {
@@ -55,23 +59,33 @@ final class TeamTravelPreviewBuilder
                 if ($trip->isPrivate) {
                     continue;
                 }
-                $hidden = $this->blocks->isHiddenFromViewer(
-                    $subjectId,
-                    $viewerId,
-                    $trip->isPrivate,
-                    VisibilityBlockRepository::TYPE_TRIP,
-                    $trip->id,
-                );
-                if ($hidden) {
-                    continue;
+                if ($asDirection === null) {
+                    $hidden = $this->blocks->isHiddenFromViewer(
+                        $subjectId,
+                        $viewerId,
+                        $trip->isPrivate,
+                        VisibilityBlockRepository::TYPE_TRIP,
+                        $trip->id,
+                    );
+                    if ($hidden) {
+                        continue;
+                    }
                 }
             }
 
-            $fields = $this->visibility->getVisibleFields(
-                $viewerId,
-                $subjectId,
-                $isSelf ? false : $trip->isPrivate,
-            )['visible_fields'];
+            if ($asDirection !== null) {
+                $fields = $this->visibility->getVisibleFieldsForDirection(
+                    $subjectId,
+                    $asDirection,
+                    $trip->isPrivate,
+                )['visible_fields'];
+            } else {
+                $fields = $this->visibility->getVisibleFields(
+                    $viewerId,
+                    $subjectId,
+                    $isSelf ? false : $trip->isPrivate,
+                )['visible_fields'];
+            }
 
             $canCity = $isSelf || in_array('destination_city', $fields, true);
             $canDates = $isSelf || in_array('travel_dates', $fields, true);

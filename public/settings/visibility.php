@@ -19,16 +19,30 @@ $engine = new VisibilityEngine($userRepo, $ruleRepo);
 $message = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
-    $direction = (string) ($_POST['direction'] ?? '');
-    $targetUserId = isset($_POST['target_user_id']) && $_POST['target_user_id'] !== '' ? (int) $_POST['target_user_id'] : null;
+    $action = (string) ($_POST['action'] ?? '');
 
-    if (in_array($direction, [VisibilityEngine::DIRECTION_TOP_DOWN, VisibilityEngine::DIRECTION_BOTTOM_UP, VisibilityEngine::DIRECTION_LATERAL, VisibilityEngine::DIRECTION_USER_USER], true)) {
-        foreach (VisibilityEngine::ALL_FIELDS as $field) {
-            $visible = isset($_POST['field'][$field]) && $_POST['field'][$field] === '1';
-            $ruleRepo->upsert($user->id, $targetUserId, $direction, $field, $visible, $user->id);
+    if ($action === 'see_self') {
+        $seeSelf = isset($_POST['see_self']) && $_POST['see_self'] === '1';
+        $user = $userRepo->updateSeeSelf($user->id, $seeSelf, $user->id);
+        $message = 'See Self preference saved.';
+    } else {
+        $direction = (string) ($_POST['direction'] ?? '');
+        $targetUserId = isset($_POST['target_user_id']) && $_POST['target_user_id'] !== '' ? (int) $_POST['target_user_id'] : null;
+
+        if (in_array($direction, [VisibilityEngine::DIRECTION_TOP_DOWN, VisibilityEngine::DIRECTION_BOTTOM_UP, VisibilityEngine::DIRECTION_LATERAL, VisibilityEngine::DIRECTION_USER_USER], true)) {
+            foreach (VisibilityEngine::ALL_FIELDS as $field) {
+                $visible = isset($_POST['field'][$field]) && $_POST['field'][$field] === '1';
+                $ruleRepo->upsert($user->id, $targetUserId, $direction, $field, $visible, $user->id);
+            }
+            $message = 'Sharing rules updated.';
         }
-        $message = 'Sharing rules updated.';
     }
+}
+
+// Re-read in case session user is stale after preference update.
+$fresh = $userRepo->find($user->id);
+if ($fresh !== null) {
+    $user = $fresh;
 }
 
 $myRules = $ruleRepo->findForSubject($user->id);
@@ -88,6 +102,22 @@ $panels = [
     <?php require __DIR__ . '/_settings_nav.php'; ?>
     <h1>Sharing</h1>
     <?php if ($message !== null): ?><p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p><?php endif; ?>
+
+    <div class="card">
+        <h3>See Self</h3>
+        <p class="hint">Show your own row, card, and map pin on the team board as your manager would see it.</p>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="see_self">
+            <label>
+                <input type="checkbox" name="see_self" value="1" <?= $user->seeSelf ? 'checked' : '' ?>>
+                See Self on Table, Cards, and Map
+            </label>
+            <p style="margin-top:0.75rem">
+                <button type="submit" class="primary">Save preference</button>
+            </p>
+        </form>
+    </div>
 
     <?php foreach ($panels as $direction => $panel): ?>
         <div class="card">

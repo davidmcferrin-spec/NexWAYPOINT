@@ -35,7 +35,7 @@ $settingsSection = 'hub';
         </a>
         <a class="settings-card" href="/settings/visibility.php">
             <h3>Sharing</h3>
-            <p>What teammates can see about your travel by reporting relationship.</p>
+            <p>What teammates can see about your travel, plus See Self on the team board.</p>
         </a>
         <?php if ($isAdmin): ?>
             <a class="settings-card" href="/settings/site.php">

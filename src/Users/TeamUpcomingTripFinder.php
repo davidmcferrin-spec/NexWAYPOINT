@@ -24,32 +24,45 @@ final class TeamUpcomingTripFinder
     ) {
     }
 
+    /**
+     * @param ?string $asDirection When set (e.g. TOP_DOWN for See Self with no manager),
+     *        apply that direction's defaults + direction-wide rules instead of SELF bypass.
+     */
     public function findVisible(
         int $viewerId,
         int $subjectId,
         int $daysAhead = 21,
         ?int $excludeTripId = null,
+        ?string $asDirection = null,
     ): ?Trip {
         foreach ($this->trips->findActiveOrUpcoming($subjectId, $daysAhead) as $trip) {
             if ($excludeTripId !== null && (int) $trip->id === $excludeTripId) {
                 continue;
             }
-            $isSelf = $viewerId === $subjectId;
+            $isSelf = $viewerId === $subjectId && $asDirection === null;
             if (!$isSelf) {
                 if ($trip->isPrivate) {
                     continue;
                 }
-                $hidden = $this->blocks->isHiddenFromViewer(
-                    $subjectId,
-                    $viewerId,
-                    $trip->isPrivate,
-                    VisibilityBlockRepository::TYPE_TRIP,
-                    (int) $trip->id,
-                );
-                if ($hidden) {
-                    continue;
+                if ($asDirection === null) {
+                    $hidden = $this->blocks->isHiddenFromViewer(
+                        $subjectId,
+                        $viewerId,
+                        $trip->isPrivate,
+                        VisibilityBlockRepository::TYPE_TRIP,
+                        (int) $trip->id,
+                    );
+                    if ($hidden) {
+                        continue;
+                    }
+                    $fields = $this->visibility->getVisibleFields($viewerId, $subjectId, false);
+                } else {
+                    $fields = $this->visibility->getVisibleFieldsForDirection(
+                        $subjectId,
+                        $asDirection,
+                        false,
+                    );
                 }
-                $fields = $this->visibility->getVisibleFields($viewerId, $subjectId, false);
                 if (!in_array('destination_city', $fields['visible_fields'], true)) {
                     continue;
                 }

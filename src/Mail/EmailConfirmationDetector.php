@@ -255,9 +255,39 @@ final class EmailConfirmationDetector
         return 'confirm';
     }
 
+    /**
+     * True when the address is on a known confirmation-vendor domain
+     * (Hilton, AA, Amtrak, …) — used for ownership fallback.
+     */
+    public static function isKnownVendorAddress(string $emailAddress): bool
+    {
+        $domain = self::domainOfStatic($emailAddress);
+        if ($domain === '') {
+            return false;
+        }
+        foreach (self::SENDER_DOMAIN_SUFFIXES as $suffixes) {
+            foreach ($suffixes as $suffix) {
+                if ($domain === $suffix || str_ends_with($domain, '.' . $suffix)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private function domainOf(string $emailAddress): string
     {
-        $parts = explode('@', $emailAddress);
-        return strtolower(trim(end($parts)));
+        return self::domainOfStatic($emailAddress);
+    }
+
+    private static function domainOfStatic(string $emailAddress): string
+    {
+        $parts = explode('@', strtolower(trim($emailAddress)));
+        if (count($parts) < 2) {
+            return '';
+        }
+
+        return trim((string) end($parts));
     }
 }

@@ -28,6 +28,7 @@ CREATE TABLE users (
     home_state      TEXT NULL,
     home_lat        REAL NULL,
     home_lon        REAL NULL,
+    see_self        INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

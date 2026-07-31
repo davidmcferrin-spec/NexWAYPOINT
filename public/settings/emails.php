@@ -70,10 +70,11 @@ foreach ($emails as $row) {
     <?php require __DIR__ . '/_settings_nav.php'; ?>
     <h1>My email addresses</h1>
     <p>
-        When you forward a hotel or airline confirmation into the travel mailbox,
-        NexWAYPOINT matches the message <code>From:</code> to one of these addresses
-        and attaches the booking to your account. Add every address you send from
-        (work, personal, phone mail app, etc.).
+        When confirmations land in the travel mailbox, NexWAYPOINT matches the outer
+        <code>From:</code> to one of these addresses. If the sender is still the
+        vendor (Hilton, AA, …) — common with auto-forward — it also matches
+        <code>Delivered-To</code> / <code>To</code> and “delivered to …” body text.
+        Add every address you receive or forward from (work, personal, Proton, etc.).
     </p>
 
     <?php if ($schemaWarning !== null): ?>
