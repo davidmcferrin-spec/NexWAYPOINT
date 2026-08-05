@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace NexWaypoint\Mail\Parsers;
 
+use NexWaypoint\Mail\EmailConfirmationDetector;
 use NexWaypoint\Mail\EmailMessage;
 use NexWaypoint\Mail\ParserBase;
 
@@ -17,6 +18,10 @@ final class BreezeAirlinesParser extends ParserBase
         $this->resetConfidenceTracking();
         $text = $this->messageText($message);
         $subjectLower = strtolower($message->subject);
+
+        if (EmailConfirmationDetector::isAirlineCheckInSubject($message->subject)) {
+            return ['kind' => 'flight', 'event' => 'ignore', 'confirmation_code' => null, 'segments' => []];
+        }
 
         $code = $this->extractFirstMatch([
             '/Confirmation\s+Number:\s*([A-Z0-9]{6})/i',

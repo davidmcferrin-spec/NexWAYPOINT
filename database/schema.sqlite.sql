@@ -323,6 +323,49 @@ CREATE TABLE visibility_blocks (
 CREATE INDEX idx_vis_block_resource ON visibility_blocks(resource_type, resource_id);
 CREATE INDEX idx_vis_block_owner ON visibility_blocks(owner_user_id);
 
+CREATE TABLE calendar_feeds (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind            TEXT NOT NULL CHECK (kind IN ('personal','team')),
+    token           TEXT NOT NULL,
+    member_user_ids TEXT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    last_accessed_at TEXT NULL,
+    UNIQUE (token),
+    UNIQUE (owner_user_id, kind)
+);
+CREATE INDEX idx_cal_feed_owner ON calendar_feeds(owner_user_id);
+
+CREATE TABLE expense_receipts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind                TEXT NOT NULL CHECK (kind IN ('flight','train','hotel','other')),
+    brand               TEXT NULL,
+    location_label      TEXT NOT NULL,
+    travel_date         TEXT NOT NULL,
+    travel_end_date     TEXT NULL,
+    confirmation_code   TEXT NULL,
+    amount              REAL NULL,
+    currency            TEXT NULL DEFAULT 'USD',
+    trip_id             INTEGER NULL REFERENCES trips(id) ON DELETE SET NULL,
+    hotel_stay_id       INTEGER NULL REFERENCES hotel_stays(id) ON DELETE SET NULL,
+    parse_log_id        INTEGER NULL,
+    source              TEXT NOT NULL CHECK (source IN ('generated','attachment','upload','email_body')),
+    title               TEXT NOT NULL,
+    original_filename   TEXT NULL,
+    mime_type           TEXT NOT NULL DEFAULT 'application/pdf',
+    file_path           TEXT NOT NULL,
+    file_size           INTEGER NOT NULL DEFAULT 0,
+    expires_at          TEXT NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_exp_receipt_owner ON expense_receipts(owner_user_id);
+CREATE INDEX idx_exp_receipt_expires ON expense_receipts(expires_at);
+CREATE INDEX idx_exp_receipt_trip ON expense_receipts(trip_id);
+CREATE INDEX idx_exp_receipt_stay ON expense_receipts(hotel_stay_id);
+
 CREATE TABLE aeroapi_usage_log (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     usage_date          TEXT NOT NULL,

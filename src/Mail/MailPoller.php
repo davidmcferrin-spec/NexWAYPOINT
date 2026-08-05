@@ -18,6 +18,7 @@ use NexWaypoint\Mail\Parsers\GenericHotelConfirmationParser;
 use NexWaypoint\Mail\Parsers\HiltonHotelParser;
 use NexWaypoint\Mail\Parsers\MarriottHotelParser;
 use NexWaypoint\Mail\Parsers\UnitedAirlinesParser;
+use NexWaypoint\Receipts\ReceiptCaptureService;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
@@ -35,6 +36,8 @@ use NexWaypoint\Users\UserRepository;
  *
  * Supported: AA / Delta / United / Breeze flights, Amtrak, Hilton / Marriott /
  * generic hotel. Folio / bag-receipt / status mail is ignored where detected.
+ * Successful confirm/change imports also archive an expense receipt PDF
+ * (vendor attachment when present, else generated itinerary summary).
  */
 final class MailPoller
 {
@@ -62,6 +65,7 @@ final class MailPoller
         private readonly ParseLogRepository $parseLog,
         private readonly Logger $logger,
         private readonly ?RawMailStore $rawMail = null,
+        private readonly ?ReceiptCaptureService $receipts = null,
     ) {
     }
 
@@ -114,6 +118,7 @@ final class MailPoller
 
         $this->source->disconnect();
         $this->purgeExpiredRawMail();
+        $this->purgeExpiredReceipts();
 
         $this->logger->info('Mail poll complete', ['fetched' => count($messages), 'success' => $success, 'failed' => $failed]);
         return [
@@ -176,6 +181,18 @@ final class MailPoller
         if ($cleared !== []) {
             $this->parseLog->clearRawPaths($cleared);
             $this->logger->info('Purged expired raw mail files', ['count' => count($cleared)]);
+        }
+    }
+
+    private function purgeExpiredReceipts(): void
+    {
+        if ($this->receipts === null) {
+            return;
+        }
+        try {
+            $this->receipts->purgeExpired();
+        } catch (\Throwable $e) {
+            $this->logger->warning('Receipt purge skipped', ['error' => $e->getMessage()]);
         }
     }
 
@@ -391,7 +408,8 @@ final class MailPoller
             null,
             null,
             (int) $result['stay']->id,
-            'Hotel stay imported'
+            'Hotel stay imported',
+            true,
         );
     }
 
@@ -492,6 +510,37 @@ final class MailPoller
             return false;
         }
 
+        // Defense in depth: a plain confirm that parses fewer legs than we already
+        // store (typical of check-in / boarding-pass mail) must not wipe the return.
+        // Explicit change/rebook events may shrink an itinerary.
+        if ($event === 'confirm') {
+            $existing = $this->trips->findSegmentsByConfirmation($userId, $code);
+            $activeExisting = 0;
+            foreach ($existing as $seg) {
+                if (!in_array($seg->segmentType, ['flight', 'train', 'car'], true)) {
+                    continue;
+                }
+                if ($seg->status === 'cancelled') {
+                    continue;
+                }
+                $activeExisting++;
+            }
+            if ($activeExisting > 0 && count($legs) < $activeExisting) {
+                return $this->ignore(
+                    $message,
+                    $kind,
+                    sprintf(
+                        'Confirm parse has %d leg(s) but confirmation %s already has %d; refusing shrink (likely check-in/status mail)',
+                        count($legs),
+                        $code,
+                        $activeExisting,
+                    ),
+                    $userId,
+                    $confidence,
+                );
+            }
+        }
+
         $result = $this->trips->upsertItineraryByConfirmation($userId, $code, $legs, null, $userId, null);
         $verb = $result['created'] ? 'imported' : 'updated';
         $dest = $result['trip']->destinationCity;
@@ -510,7 +559,8 @@ final class MailPoller
             $result['segments'][0]->id ?? null,
             (int) $result['trip']->id,
             null,
-            "Itinerary {$verb}"
+            "Itinerary {$verb}",
+            true,
         );
     }
 
@@ -583,6 +633,7 @@ final class MailPoller
         ?int $tripId,
         ?int $hotelStayId,
         string $logMessage,
+        bool $captureReceipt = false,
     ): bool {
         $this->source->markProcessed($message->uid);
         $parseLogId = $this->parseLogOutcome(
@@ -598,6 +649,26 @@ final class MailPoller
         );
         if ($tripId !== null && $parseLogId > 0) {
             $this->trips->attachSourceParseLogToTrip($tripId, $parseLogId);
+        }
+        if (
+            $captureReceipt
+            && $this->receipts !== null
+            && ($tripId !== null || $hotelStayId !== null)
+        ) {
+            $kind = match ($detectedType) {
+                'train' => 'train',
+                'hotel' => 'hotel',
+                default => 'flight',
+            };
+            $this->receipts->captureFromImport(
+                $message,
+                $matchedUserId,
+                $kind,
+                $tripId,
+                $hotelStayId,
+                $parseLogId > 0 ? $parseLogId : null,
+                $matchedUserId,
+            );
         }
         $this->logger->info($logMessage, ['uid' => $message->uid, 'user_id' => $matchedUserId]);
         return true;

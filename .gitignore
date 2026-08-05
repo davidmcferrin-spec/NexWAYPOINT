@@ -8,6 +8,7 @@ storage/uploads/hotel_photos/*
 storage/uploads/avatars/*
 storage/backups/*
 storage/mail_raw/*
+storage/receipts/*
 storage/admin-credentials.txt
 storage/*.sqlite
 !storage/logs/.gitkeep
@@ -16,3 +17,4 @@ storage/*.sqlite
 !storage/uploads/avatars/.gitkeep
 !storage/backups/.gitkeep
 !storage/mail_raw/.gitkeep
+!storage/receipts/.gitkeep

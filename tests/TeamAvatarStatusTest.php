@@ -314,7 +314,7 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
             $trip,
         );
 
-        // Active trip passed as "upcoming" must not become Next while en_route.
+        // Active trip passed as "upcoming" must not become Next; no return leg → still empty.
         self::assertNull($result['upcoming']);
         self::assertNull($result['next']);
         self::assertTrue(TeamLocationResolver::isAtBaseStatus('home'));
@@ -324,6 +324,283 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertFalse(TeamLocationResolver::isAtBaseStatus('layover'));
         self::assertFalse(TeamLocationResolver::isAtBaseStatus('remote', ['from_itinerary' => true]));
         self::assertTrue(TeamLocationResolver::isAtBaseStatus('remote'));
+    }
+
+    public function testTimeOfDayBucketBoundaries(): void
+    {
+        self::assertSame('Early', TeamLocationResolver::timeOfDayBucket('2026-08-14 10:00:00'));
+        self::assertSame('Afternoon', TeamLocationResolver::timeOfDayBucket('2026-08-14 10:01:00'));
+        self::assertSame('Afternoon', TeamLocationResolver::timeOfDayBucket('2026-08-14 16:00:00'));
+        self::assertSame('Evening', TeamLocationResolver::timeOfDayBucket('2026-08-14 16:01:00'));
+        self::assertSame('Evening', TeamLocationResolver::timeOfDayBucket('2026-08-14 20:00:00'));
+        self::assertSame('Late', TeamLocationResolver::timeOfDayBucket('2026-08-14 20:01:00'));
+        self::assertSame('Early', TeamLocationResolver::timeOfDayBucket('2026-08-14 06:30:00'));
+        self::assertNull(TeamLocationResolver::timeOfDayBucket(null));
+    }
+
+    public function testAwayRoundTripShowsHomeNextWithTimeOfDay(): void
+    {
+        $userId = $this->insertUser('dave_home_next');
+        $userRepo = new UserRepository($this->db, $this->logger);
+        $userRepo->updateHomeLocation($userId, 'Huntsville', 'AL', 34.7304, -86.5861, $userId);
+        $user = $userRepo->find($userId);
+        self::assertNotNull($user);
+
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $out = new \DateTimeImmutable('2026-08-10');
+        $back = new \DateTimeImmutable('2026-08-14');
+        $trip = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Los Angeles, CA',
+            startDate: $out->format('Y-m-d'),
+            endDate: $back->format('Y-m-d'),
+            status: 'active',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '1',
+            confirmationCode: 'HOME1',
+            origin: 'HSV',
+            destination: 'LAX',
+            departDt: $out->setTime(8, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $out->setTime(11, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '2',
+            confirmationCode: 'HOME1',
+            origin: 'LAX',
+            destination: 'HSV',
+            departDt: $back->setTime(16, 30)->format('Y-m-d H:i:s'),
+            arriveDt: $back->setTime(22, 15)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $resolver = new TeamLocationResolver(
+            $tripRepo,
+            new HotelStayRepository($this->db, $this->logger),
+            new HotelPropertyRepository($this->db, $this->logger),
+            new Geocoder($this->logger, sys_get_temp_dir() . '/nx_geocode_home_next'),
+            new AirportRepository(null, $this->logger),
+        );
+
+        $result = $resolver->resolveWithUpcoming(
+            $user,
+            [
+                'status' => 'at_hotel',
+                'label' => 'At hotel in Los Angeles, CA',
+                'detail' => ['trip_id' => $trip->id, 'destination' => 'Los Angeles, CA'],
+            ],
+            true,
+            null,
+            new \DateTimeImmutable('2026-08-12 12:00:00'),
+        );
+
+        self::assertNotNull($result['next']);
+        self::assertSame('Home', $result['next']['city_label']);
+        self::assertSame('Aug 14', $result['next']['dates']);
+        self::assertSame('Late', $result['next']['time_of_day']);
+        self::assertSame('Home · Aug 14 · Late', $result['upcoming']);
+        self::assertSame('Aug 14 · Late', TeamLocationResolver::formatNextDatesHint($result['next']));
+    }
+
+    public function testHomeReturnBeatsLaterTripAsNext(): void
+    {
+        $userId = $this->insertUser('dave_vs_later');
+        $userRepo = new UserRepository($this->db, $this->logger);
+        $userRepo->updateHomeLocation($userId, 'Huntsville', 'AL', 34.7304, -86.5861, $userId);
+        $user = $userRepo->find($userId);
+        self::assertNotNull($user);
+
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $out = new \DateTimeImmutable('2026-08-10');
+        $back = new \DateTimeImmutable('2026-08-14');
+        $active = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Denver, CO',
+            startDate: $out->format('Y-m-d'),
+            endDate: $back->format('Y-m-d'),
+            status: 'active',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $active->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '10',
+            confirmationCode: 'DEN1',
+            origin: 'HSV',
+            destination: 'DEN',
+            departDt: $out->setTime(9, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $out->setTime(11, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $active->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '11',
+            confirmationCode: 'DEN1',
+            origin: 'DEN',
+            destination: 'HSV',
+            departDt: $back->setTime(15, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $back->setTime(18, 30)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $laterStart = new \DateTimeImmutable('2026-08-20');
+        $later = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Chicago, IL',
+            startDate: $laterStart->format('Y-m-d'),
+            endDate: $laterStart->modify('+2 days')->format('Y-m-d'),
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $cacheDir = sys_get_temp_dir() . '/nx_geocode_vs_later_' . $userId;
+        if (!is_dir($cacheDir)) {
+            mkdir($cacheDir, 0777, true);
+        }
+        $cacheKey = strtolower('v3||Chicago|IL||United States');
+        file_put_contents(
+            $cacheDir . '/' . hash('sha256', $cacheKey) . '.json',
+            json_encode(['lat' => 41.8781, 'lon' => -87.6298])
+        );
+
+        $resolver = new TeamLocationResolver(
+            $tripRepo,
+            new HotelStayRepository($this->db, $this->logger),
+            new HotelPropertyRepository($this->db, $this->logger),
+            new Geocoder($this->logger, $cacheDir),
+            new AirportRepository(null, $this->logger),
+        );
+
+        $result = $resolver->resolveWithUpcoming(
+            $user,
+            [
+                'status' => 'remote',
+                'label' => 'Working Remote · Denver, CO',
+                'detail' => [
+                    'trip_id' => $active->id,
+                    'location_city' => 'Denver, CO',
+                    'from_itinerary' => true,
+                ],
+            ],
+            true,
+            $later,
+            new \DateTimeImmutable('2026-08-12 12:00:00'),
+        );
+
+        self::assertNotNull($result['next']);
+        self::assertSame('Home', $result['next']['city_label']);
+        self::assertSame('Evening', $result['next']['time_of_day']);
+        self::assertStringContainsString('Home', (string) $result['upcoming']);
+        self::assertStringNotContainsString('Chicago', (string) $result['upcoming']);
+    }
+
+    public function testAtBaseUpcomingIncludesDepartTimeOfDay(): void
+    {
+        $userId = $this->insertUser('dave_tod_depart');
+        $userRepo = new UserRepository($this->db, $this->logger);
+        $userRepo->updateHomeLocation($userId, 'Huntsville', 'AL', 34.7304, -86.5861, $userId);
+        $user = $userRepo->find($userId);
+        self::assertNotNull($user);
+
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $day = (new \DateTimeImmutable('today'))->modify('+5 days');
+        $trip = $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Chicago, IL',
+            startDate: $day->format('Y-m-d'),
+            endDate: $day->modify('+2 days')->format('Y-m-d'),
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $tripRepo->addSegment(new \NexWaypoint\Trips\TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'AA',
+            flightNumber: '100',
+            confirmationCode: 'TOD1',
+            origin: 'HSV',
+            destination: 'ORD',
+            departDt: $day->setTime(7, 15)->format('Y-m-d H:i:s'),
+            arriveDt: $day->setTime(9, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $cacheDir = sys_get_temp_dir() . '/nx_geocode_tod_' . $userId;
+        if (!is_dir($cacheDir)) {
+            mkdir($cacheDir, 0777, true);
+        }
+        $cacheKey = strtolower('v3||Chicago|IL||United States');
+        file_put_contents(
+            $cacheDir . '/' . hash('sha256', $cacheKey) . '.json',
+            json_encode(['lat' => 41.8781, 'lon' => -87.6298])
+        );
+
+        $resolver = new TeamLocationResolver(
+            $tripRepo,
+            new HotelStayRepository($this->db, $this->logger),
+            new HotelPropertyRepository($this->db, $this->logger),
+            new Geocoder($this->logger, $cacheDir),
+        );
+
+        $result = $resolver->resolveWithUpcoming(
+            $user,
+            ['status' => 'home', 'label' => 'Home', 'detail' => []],
+            true,
+            $trip,
+        );
+
+        self::assertNotNull($result['next']);
+        self::assertStringContainsString('Chicago', $result['next']['city_label']);
+        self::assertSame('Early', $result['next']['time_of_day']);
+        self::assertStringContainsString('Early', (string) $result['upcoming']);
     }
 
     public function testUpcomingFinderSkipsPrivateTripsForOthers(): void

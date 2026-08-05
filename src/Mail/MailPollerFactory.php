@@ -8,6 +8,11 @@ use NexWaypoint\Core\Env;
 use NexWaypoint\Core\Logger;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Receipts\ExpenseReceiptRepository;
+use NexWaypoint\Receipts\ReceiptCaptureService;
+use NexWaypoint\Receipts\ReceiptFileStore;
+use NexWaypoint\Receipts\ReceiptPdfBuilder;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
@@ -26,8 +31,30 @@ final class MailPollerFactory
         $db = $app['db'];
         $logger = $app['logger'];
         $propertyRepo = new HotelPropertyRepository($db, $logger);
+        $stayRepo = new HotelStayRepository($db, $logger, $propertyRepo);
+        $tripRepo = new TripRepository($db, $logger);
         $rawRetention = max(1, (int) Env::get('MAIL_RAW_RETENTION_DAYS', '7'));
         $rawDir = NEXWAYPOINT_ROOT . '/storage/mail_raw';
+
+        $receipts = null;
+        if ($db->tableExists('expense_receipts')) {
+            $fileStore = new ReceiptFileStore(NEXWAYPOINT_ROOT . '/storage/receipts', $logger);
+            $pdfBuilder = new ReceiptPdfBuilder(
+                $tripRepo,
+                $stayRepo,
+                $propertyRepo,
+                new AirportRepository($db, $logger),
+            );
+            $receipts = new ReceiptCaptureService(
+                new ExpenseReceiptRepository($db, $logger),
+                $fileStore,
+                $pdfBuilder,
+                $tripRepo,
+                $stayRepo,
+                $logger,
+                ReceiptCaptureService::retentionDaysFromEnv(),
+            );
+        }
 
         return new MailPoller(
             $source,
@@ -35,13 +62,14 @@ final class MailPollerFactory
             new EmailConfirmationDetector(),
             new UserRepository($db, $logger),
             $propertyRepo,
-            new HotelStayRepository($db, $logger, $propertyRepo),
-            new TripRepository($db, $logger),
+            $stayRepo,
+            $tripRepo,
             new CarrierRepository($db, $logger),
             new NotificationRepository($db),
             new ParseLogRepository($db),
             $logger,
             new RawMailStore($rawDir, $rawRetention, $logger),
+            $receipts,
         );
     }
 

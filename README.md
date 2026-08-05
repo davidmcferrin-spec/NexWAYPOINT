@@ -35,9 +35,11 @@ Composer dependency at runtime) so it runs on ordinary shared hosting
   mark trip segments cancelled or remove email-imported stays. Folio /
   bag-receipt / status mail is ignored. FlightAware AeroAPI is separate
   (live enrichment), not the importer.
-- **FlightAware AeroAPI client** -- flight lookup, live track, airport
-  delays, with a file-backed rate limiter and a 10-minute cache so you
-  don't burn through your AeroAPI budget on every dashboard refresh.
+- **FlightAware AeroAPI client** -- flight lookup pinned to each segment's
+  travel-date instance (`start`/`end` + origin/destination match; sticky
+  `fa_flight_id` thereafter), live track, airport delays, with a
+  file-backed rate limiter and a 10-minute cache so you don't burn through
+  your AeroAPI budget on every dashboard refresh.
 - **Alerting** -- delay > 30 min, gate change, cancellation, diversion,
   and landing all write to a `notifications` table the dashboard polls.
 - **Visibility engine** -- org-hierarchy-aware field-level sharing
@@ -322,7 +324,10 @@ storage/                  Logs, uploads, cache -- must be writable, must NOT be 
   status/confidence, links to created trip/stay) for audit. Optional
   short-lived `.eml` files under `storage/mail_raw/` (default 7 days via
   `MAIL_RAW_RETENTION_DAYS`) are downloadable only by the `is_system`
-  bootstrap account (Settings → Mail review). Travel dates come from
+  bootstrap account (Settings → Mail review). Expense receipts (vendor PDF
+  attachments or generated itinerary PDFs) are stored separately under
+  `storage/receipts/` for ~90 days (`RECEIPT_RETENTION_DAYS`) and listed at
+  `/receipts/` for the owning user. Travel dates come from
   confirmation content, not IMAP or forward Date/Sent headers.
 - Every write to `hotel_properties`, `hotel_stays`, `trips`, `trip_segments`,
   `users`, and `visibility_rules` goes through `Database::audit()`, which

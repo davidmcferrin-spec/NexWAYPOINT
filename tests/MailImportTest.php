@@ -46,6 +46,22 @@ final class MailImportTest extends NexWaypointTestCase
         ));
         self::assertSame('flight', $forwarded['type']);
         self::assertSame('aa.com', $forwarded['matched_domain']);
+
+        $checkIn = $detector->detect($this->msg(
+            'no-reply@info.email.aa.com',
+            'Check in for your AA flight to Dallas'
+        ));
+        self::assertSame('flight', $checkIn['type']);
+        self::assertSame('ignore', $checkIn['event']);
+
+        $fwdCheckIn = $detector->detect($this->msg(
+            'dave@example.com',
+            'Fw: It\'s time to check in'
+        ));
+        // Without vendor in From, type may be unknown unless body hints — subject alone.
+        self::assertTrue(EmailConfirmationDetector::isAirlineCheckInSubject('Fw: It\'s time to check in'));
+        self::assertTrue(EmailConfirmationDetector::isAirlineCheckInSubject('Your boarding pass is ready'));
+        self::assertFalse(EmailConfirmationDetector::isAirlineCheckInSubject('Your trip confirmation'));
     }
 
     public function testTripUpsertAndCancelByPnr(): void
@@ -306,6 +322,121 @@ HTML;
         self::assertCount(1, $segments);
         self::assertSame('HSV', $segments[0]->origin);
         self::assertSame('CLT', $segments[0]->destination);
+    }
+
+    public function testMailPollerIgnoresAirlineCheckInAndDoesNotShrinkItinerary(): void
+    {
+        $userId = $this->insertUser('dave');
+        $trips = new TripRepository($this->db, $this->logger);
+        $carriers = new CarrierRepository($this->db, $this->logger);
+        $carrier = $carriers->findOrCreateByIata($userId, 'AA', 'American Airlines', $userId);
+
+        $trips->upsertItineraryByConfirmation($userId, 'CHKIN1', [
+            [
+                'segment_type' => 'flight',
+                'carrier_id' => $carrier->id,
+                'carrier' => $carrier->name,
+                'flight_number' => '100',
+                'origin' => 'HSV',
+                'destination' => 'DFW',
+                'depart_dt' => '2026-09-01 08:00:00',
+                'arrive_dt' => '2026-09-01 10:00:00',
+            ],
+            [
+                'segment_type' => 'flight',
+                'carrier_id' => $carrier->id,
+                'carrier' => $carrier->name,
+                'flight_number' => '200',
+                'origin' => 'DFW',
+                'destination' => 'HSV',
+                'depart_dt' => '2026-09-05 12:00:00',
+                'arrive_dt' => '2026-09-05 14:00:00',
+            ],
+        ], null, $userId);
+
+        self::assertCount(2, $trips->findSegmentsByConfirmation($userId, 'CHKIN1'));
+
+        // Check-in subject must be ignored before replace.
+        $checkInSource = new ArrayMailSource([
+            new EmailMessage(
+                uid: 'checkin-1',
+                fromAddress: 'no-reply@info.email.aa.com',
+                subject: 'Check in for your AA flight',
+                receivedAt: new \DateTimeImmutable('2026-08-30'),
+                bodyPlain: "Confirmation code: CHKIN1\nHSV\nAA 100\nDFW\n",
+                bodyHtml: '',
+            ),
+        ]);
+
+        $props = new HotelPropertyRepository($this->db, $this->logger);
+        $poller = new MailPoller(
+            $checkInSource,
+            'test',
+            new EmailConfirmationDetector(),
+            new UserRepository($this->db, $this->logger),
+            $props,
+            new HotelStayRepository($this->db, $this->logger, $props),
+            $trips,
+            $carriers,
+            new NotificationRepository($this->db),
+            new ParseLogRepository($this->db),
+            $this->logger,
+        );
+
+        $result = $poller->run();
+        self::assertSame(1, $result['success']);
+        self::assertSame(0, $result['failed']);
+        self::assertCount(2, $trips->findSegmentsByConfirmation($userId, 'CHKIN1'));
+
+        // Defense in depth: even a confirm-shaped message with only one leg must not shrink.
+        $thinConfirm = new ArrayMailSource([
+            new EmailMessage(
+                uid: 'thin-1',
+                fromAddress: 'no-reply@info.email.aa.com',
+                subject: 'Your trip confirmation',
+                receivedAt: new \DateTimeImmutable('2026-08-31'),
+                bodyPlain: "Confirmation code: CHKIN1",
+                bodyHtml: <<<'HTML'
+<script type="application/ld+json">
+{
+  "@type": "FlightReservation",
+  "reservationNumber": "CHKIN1",
+  "reservationFor": {
+    "@type": "Flight",
+    "flightNumber": "AA 100",
+    "airline": {"iataCode": "AA", "name": "American Airlines"},
+    "departureAirport": {"iataCode": "HSV"},
+    "arrivalAirport": {"iataCode": "DFW"},
+    "departureTime": "2026-09-01T08:00:00",
+    "arrivalTime": "2026-09-01T10:00:00"
+  }
+}
+</script>
+HTML,
+            ),
+        ]);
+
+        $poller2 = new MailPoller(
+            $thinConfirm,
+            'test',
+            new EmailConfirmationDetector(),
+            new UserRepository($this->db, $this->logger),
+            $props,
+            new HotelStayRepository($this->db, $this->logger, $props),
+            $trips,
+            $carriers,
+            new NotificationRepository($this->db),
+            new ParseLogRepository($this->db),
+            $this->logger,
+        );
+        $result2 = $poller2->run();
+        self::assertSame(1, $result2['success']);
+        $segments = $trips->findSegmentsByConfirmation($userId, 'CHKIN1');
+        self::assertCount(2, $segments);
+        self::assertSame('HSV', $segments[0]->origin);
+        self::assertSame('DFW', $segments[0]->destination);
+        self::assertSame('DFW', $segments[1]->origin);
+        self::assertSame('HSV', $segments[1]->destination);
     }
 
     public function testMailPollerOwnsVendorFromViaBodyDeliveredTo(): void

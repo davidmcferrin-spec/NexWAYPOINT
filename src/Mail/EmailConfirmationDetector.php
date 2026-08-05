@@ -210,6 +210,11 @@ final class EmailConfirmationDetector
         }
 
         if ($type === 'flight') {
+            // Online check-in / boarding-pass mail often includes a PNR + one leg.
+            // Treating it as confirm would replaceTripLegs and wipe the return.
+            if (self::isAirlineCheckInSubject($subject)) {
+                return 'ignore';
+            }
             if (str_contains($subjectLower, 'status update')
                 || str_contains($subjectLower, 'thanks for your purchase')
                 || (str_contains($subjectLower, 'receipt') && !str_contains($subjectLower, 'itinerary')
@@ -253,6 +258,54 @@ final class EmailConfirmationDetector
         }
 
         return 'confirm';
+    }
+
+    /**
+     * Airline online check-in / boarding-pass subjects (not hotel check-in dates).
+     * Matches after stripping Fw:/Fwd:/Re: so teammate forwards still ignore.
+     */
+    public static function isAirlineCheckInSubject(string $subject): bool
+    {
+        $s = strtolower(trim($subject));
+        $s = preg_replace('/^(?:(?:fw|fwd|re)\s*:\s*)+/i', '', $s) ?? $s;
+        $s = trim($s);
+
+        if ($s === '') {
+            return false;
+        }
+
+        // Explicit boarding / check-in open cues.
+        $phrases = [
+            'check-in is open',
+            'check in is open',
+            'ready to check in',
+            'ready to check-in',
+            'time to check in',
+            'time to check-in',
+            'online check-in',
+            'online check in',
+            'check in now',
+            'check-in now',
+            'check in for your',
+            'check-in for your',
+            'check in to your',
+            'check-in to your',
+            "it's time to check",
+            'its time to check',
+            'boarding pass',
+            'boarding is open',
+            'mobile boarding',
+        ];
+        foreach ($phrases as $phrase) {
+            if (str_contains($s, $phrase)) {
+                return true;
+            }
+        }
+
+        // Broad subject hit: airline confirmations almost never put "check-in"
+        // in the subject (dates live in the body). Hotel mail is classified
+        // separately and does not use this helper.
+        return preg_match('/\bcheck[\s-]?in\b/', $s) === 1;
     }
 
     /**

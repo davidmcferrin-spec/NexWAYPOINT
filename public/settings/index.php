@@ -37,6 +37,14 @@ $settingsSection = 'hub';
             <h3>Sharing</h3>
             <p>What teammates can see about your travel, plus See Self on the team board.</p>
         </a>
+        <a class="settings-card" href="/settings/calendars.php">
+            <h3>Calendar feeds</h3>
+            <p>Subscribe in Outlook / iOS / Android to your travel and team whereabouts.</p>
+        </a>
+        <a class="settings-card" href="/receipts/index.php">
+            <h3>Expense receipts</h3>
+            <p>Download confirmation PDFs for expense reports (kept ~90 days).</p>
+        </a>
         <?php if ($isAdmin): ?>
             <a class="settings-card" href="/settings/site.php">
                 <h3>Site catalogs</h3>

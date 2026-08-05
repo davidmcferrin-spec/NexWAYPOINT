@@ -371,6 +371,8 @@ ensure_storage_dirs() {
         "${ROOT_DIR}/storage/cache" \
         "${ROOT_DIR}/storage/uploads/hotel_photos" \
         "${ROOT_DIR}/storage/uploads/avatars" \
+        "${ROOT_DIR}/storage/mail_raw" \
+        "${ROOT_DIR}/storage/receipts" \
         "${BACKUP_ROOT}"
     chmod 775 \
         "${ROOT_DIR}/storage" \
@@ -379,6 +381,8 @@ ensure_storage_dirs() {
         "${ROOT_DIR}/storage/uploads" \
         "${ROOT_DIR}/storage/uploads/hotel_photos" \
         "${ROOT_DIR}/storage/uploads/avatars" \
+        "${ROOT_DIR}/storage/mail_raw" \
+        "${ROOT_DIR}/storage/receipts" \
         "${BACKUP_ROOT}"
 }
 

@@ -218,6 +218,36 @@ a:hover {
 }
 .inline-form { display: inline; margin: 0; }
 .inline-form button { font-size: 0.85rem; padding: 0.25rem 0.55rem; }
+.row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.65rem;
+}
+.check-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0;
+    max-height: 16rem;
+    overflow: auto;
+}
+label.check {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem 0.55rem;
+    color: var(--text);
+    font-size: 0.95rem;
+}
+.hint-list {
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+}
+.hint-list li { margin: 0.35rem 0; }
 
 .status-override-form { max-width: 36rem; margin-top: 0.75rem; }
 .status-override-row {

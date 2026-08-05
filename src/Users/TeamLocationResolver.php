@@ -8,7 +8,9 @@ use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\AirportRepository;
+use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripRepository;
+use NexWaypoint\Trips\TripSegment;
 
 /**
  * Resolves lat/lon + city label for a teammate on the dashboard map.
@@ -19,6 +21,11 @@ use NexWaypoint\Trips\TripRepository;
  * Bare IATA destination_city values (e.g. DFW) expand via AirportRepository
  * to labels like "Dallas/Fort Worth, TX (DFW)".
  * Returns null when destination detail is visibility-redacted or unresolved.
+ *
+ * "Next" is the soonest location change a viewer should care about: return
+ * Home (re-base) while away, otherwise the next visible trip destination.
+ * Dates include an early/afternoon/evening/late bucket when a wall-clock
+ * depart/arrive time is known.
  */
 final class TeamLocationResolver
 {
@@ -94,46 +101,57 @@ final class TeamLocationResolver
     }
 
     /**
-     * Resolve current pin; optionally attach the next visible trip as a label
-     * (city + dates). Pin always stays where they are now.
+     * Resolve current pin; attach Next as the soonest location change
+     * (return Home while away, else next visible trip). Pin stays where they are now.
      *
      * @param array{status: string, label: string, detail: array<string, mixed>} $status
      * @return array{
      *   location: array{lat: float, lon: float, city_label: string, city_key: string}|null,
      *   upcoming: string|null,
-     *   next: array{city_label: string, dates: string}|null
+     *   next: array{city_label: string, dates: string, time_of_day: string|null}|null
      * }
      */
     public function resolveWithUpcoming(
         User $user,
         array $status,
         bool $destinationVisible,
-        ?\NexWaypoint\Trips\Trip $upcomingVisibleTrip,
+        ?Trip $upcomingVisibleTrip,
+        ?\DateTimeImmutable $now = null,
     ): array {
+        $now ??= new \DateTimeImmutable('now');
         $location = $this->resolve($user, $status, $destinationVisible);
-        $next = null;
+        $detail = $status['detail'] ?? [];
+        $activeTripId = isset($detail['trip_id']) ? (int) $detail['trip_id'] : 0;
+        $atBase = self::isAtBaseStatus($status['status'], $detail);
 
-        $activeTripId = isset($status['detail']['trip_id']) ? (int) $status['detail']['trip_id'] : 0;
+        /** @var list<array{sort_at: \DateTimeImmutable, next: array{city_label: string, dates: string, time_of_day: string|null}}> $candidates */
+        $candidates = [];
+
+        if (!$atBase && $activeTripId > 0) {
+            $homeNext = $this->candidateReturnHome($user, $activeTripId, $now, $status['status']);
+            if ($homeNext !== null) {
+                $candidates[] = $homeNext;
+            }
+        }
+
         if (
             $upcomingVisibleTrip !== null
             && trim($upcomingVisibleTrip->destinationCity) !== ''
             && (int) ($upcomingVisibleTrip->id ?? 0) !== $activeTripId
         ) {
-            $upcomingPin = $this->resolveUpcomingDestination($upcomingVisibleTrip->destinationCity);
-            if ($upcomingPin !== null) {
-                $next = [
-                    'city_label' => $upcomingPin['city_label'],
-                    'dates' => self::formatTripDateRange(
-                        $upcomingVisibleTrip->startDate,
-                        $upcomingVisibleTrip->endDate,
-                    ),
-                ];
+            $tripNext = $this->candidateUpcomingTrip($upcomingVisibleTrip);
+            if ($tripNext !== null) {
+                $candidates[] = $tripNext;
             }
         }
 
-        $upcomingLabel = $next !== null
-            ? $next['city_label'] . ' · ' . $next['dates']
-            : null;
+        usort(
+            $candidates,
+            static fn (array $a, array $b): int => $a['sort_at'] <=> $b['sort_at']
+        );
+
+        $next = $candidates[0]['next'] ?? null;
+        $upcomingLabel = $next !== null ? self::formatNextSummary($next) : null;
 
         return [
             'location' => $location,
@@ -154,6 +172,232 @@ final class TeamLocationResolver
             return $startDt->format('M j') . '–' . $endDt->format('j');
         }
         return $startDt->format('M j') . '–' . $endDt->format('M j');
+    }
+
+    public static function formatSingleDate(string $date): string
+    {
+        try {
+            return (new \DateTimeImmutable($date))->format('M j');
+        } catch (\Exception) {
+            return $date;
+        }
+    }
+
+    /**
+     * Early ≤10:00, Afternoon 10:01–16:00, Evening 16:01–20:00, Late after 20:00.
+     * Uses naive local wall-clock hour:minute from a segment datetime.
+     */
+    public static function timeOfDayBucket(?string $naiveDt): ?string
+    {
+        if ($naiveDt === null || trim($naiveDt) === '') {
+            return null;
+        }
+        try {
+            $dt = new \DateTimeImmutable($naiveDt);
+        } catch (\Exception) {
+            return null;
+        }
+        $minutes = ((int) $dt->format('H')) * 60 + (int) $dt->format('i');
+        if ($minutes <= 10 * 60) {
+            return 'Early';
+        }
+        if ($minutes <= 16 * 60) {
+            return 'Afternoon';
+        }
+        if ($minutes <= 20 * 60) {
+            return 'Evening';
+        }
+        return 'Late';
+    }
+
+    /**
+     * @param array{city_label: string, dates: string, time_of_day?: string|null} $next
+     */
+    public static function formatNextSummary(array $next): string
+    {
+        $parts = [$next['city_label'], $next['dates']];
+        $tod = $next['time_of_day'] ?? null;
+        if ($tod !== null && $tod !== '') {
+            $parts[] = $tod;
+        }
+        return implode(' · ', $parts);
+    }
+
+    /**
+     * Dates (+ optional time-of-day) for the Next column hint line.
+     *
+     * @param array{city_label: string, dates: string, time_of_day?: string|null} $next
+     */
+    public static function formatNextDatesHint(array $next): string
+    {
+        $tod = $next['time_of_day'] ?? null;
+        if ($tod !== null && $tod !== '') {
+            return $next['dates'] . ' · ' . $tod;
+        }
+        return $next['dates'];
+    }
+
+    /**
+     * @return array{sort_at: \DateTimeImmutable, next: array{city_label: string, dates: string, time_of_day: string|null}}|null
+     */
+    private function candidateReturnHome(
+        User $user,
+        int $tripId,
+        \DateTimeImmutable $now,
+        string $statusCode,
+    ): ?array {
+        $transit = $this->transitSegmentsForTrip($tripId);
+        if ($transit === []) {
+            // Hotel-only trips: treat checkout / trip end as re-base. Do not
+            // invent Home for transit-less rows that are somehow mid-status.
+            if ($statusCode !== 'at_hotel') {
+                return null;
+            }
+            $trip = $this->trips->find($tripId);
+            if ($trip === null || trim($trip->endDate) === '') {
+                return null;
+            }
+            try {
+                $endDay = new \DateTimeImmutable($trip->endDate . ' 23:59:59');
+            } catch (\Exception) {
+                return null;
+            }
+            if ($endDay <= $now) {
+                return null;
+            }
+            return [
+                'sort_at' => $endDay,
+                'next' => [
+                    'city_label' => 'Home',
+                    'dates' => self::formatSingleDate($trip->endDate),
+                    'time_of_day' => null,
+                ],
+            ];
+        }
+
+        $firstOrigin = strtoupper(trim((string) ($transit[0]->origin ?? '')));
+        $last = $transit[count($transit) - 1];
+        $lastDest = strtoupper(trim((string) ($last->destination ?? '')));
+        if ($lastDest === '' || $last->arriveDt === null) {
+            return null;
+        }
+
+        $returnsHome = ($firstOrigin !== '' && $firstOrigin === $lastDest)
+            || $this->airportMatchesHome($lastDest, $user);
+        if (!$returnsHome) {
+            return null;
+        }
+
+        $arriveInstant = $this->wallClockInstant($last->destination, (string) $last->arriveDt);
+        if ($arriveInstant <= $now) {
+            return null;
+        }
+
+        return [
+            'sort_at' => $arriveInstant,
+            'next' => [
+                'city_label' => 'Home',
+                'dates' => self::formatSingleDate((string) $last->arriveDt),
+                'time_of_day' => self::timeOfDayBucket((string) $last->arriveDt),
+            ],
+        ];
+    }
+
+    /**
+     * @return array{sort_at: \DateTimeImmutable, next: array{city_label: string, dates: string, time_of_day: string|null}}|null
+     */
+    private function candidateUpcomingTrip(Trip $trip): ?array
+    {
+        $upcomingPin = $this->resolveUpcomingDestination($trip->destinationCity);
+        if ($upcomingPin === null) {
+            return null;
+        }
+
+        $timeOfDay = null;
+        $sortAt = null;
+        $transit = $this->transitSegmentsForTrip((int) ($trip->id ?? 0));
+        if ($transit !== [] && $transit[0]->departDt !== null) {
+            $timeOfDay = self::timeOfDayBucket((string) $transit[0]->departDt);
+            $sortAt = $this->wallClockInstant($transit[0]->origin, (string) $transit[0]->departDt);
+        }
+
+        if ($sortAt === null) {
+            try {
+                $sortAt = new \DateTimeImmutable($trip->startDate . ' 00:00:00');
+            } catch (\Exception) {
+                $sortAt = new \DateTimeImmutable('now');
+            }
+        }
+
+        return [
+            'sort_at' => $sortAt,
+            'next' => [
+                'city_label' => $upcomingPin['city_label'],
+                'dates' => self::formatTripDateRange($trip->startDate, $trip->endDate),
+                'time_of_day' => $timeOfDay,
+            ],
+        ];
+    }
+
+    /**
+     * @return TripSegment[]
+     */
+    private function transitSegmentsForTrip(int $tripId): array
+    {
+        if ($tripId <= 0) {
+            return [];
+        }
+        $segments = [];
+        foreach ($this->trips->segmentsForTrip($tripId) as $segment) {
+            if ($segment->status === 'cancelled') {
+                continue;
+            }
+            if (!in_array($segment->segmentType, ['flight', 'train', 'car'], true)) {
+                continue;
+            }
+            if ($segment->departDt === null || $segment->arriveDt === null) {
+                continue;
+            }
+            $segments[] = $segment;
+        }
+        usort(
+            $segments,
+            static fn (TripSegment $a, TripSegment $b): int => strcmp((string) $a->departDt, (string) $b->departDt)
+        );
+        return $segments;
+    }
+
+    private function wallClockInstant(?string $airportCode, string $naiveDt): \DateTimeImmutable
+    {
+        if ($this->airports !== null) {
+            return $this->airports->instant($airportCode, $naiveDt);
+        }
+        try {
+            return new \DateTimeImmutable($naiveDt);
+        } catch (\Exception) {
+            return new \DateTimeImmutable('now');
+        }
+    }
+
+    private function airportMatchesHome(string $iata, User $user): bool
+    {
+        if ($this->airports === null || $user->homeCity === null || trim($user->homeCity) === '') {
+            return false;
+        }
+        $place = $this->airports->cityFor($iata);
+        if ($place === null) {
+            return false;
+        }
+        $homeCity = strtolower(trim($user->homeCity));
+        $homeState = $user->homeState !== null ? strtolower(trim($user->homeState)) : '';
+        $placeLower = strtolower($place);
+        if ($homeState !== '' && $placeLower === $homeCity . ', ' . $homeState) {
+            return true;
+        }
+        if (str_starts_with($placeLower, $homeCity . ',')) {
+            return true;
+        }
+        return $placeLower === $homeCity;
     }
 
     /**

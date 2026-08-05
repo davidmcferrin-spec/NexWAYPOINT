@@ -67,6 +67,7 @@ final class ForwardedMailNormalizer
             bodyPlain: $plain,
             bodyHtml: $html,
             recipientAddresses: $message->recipientAddresses,
+            attachments: $message->attachments,
         );
     }
 

@@ -96,7 +96,7 @@ if (!function_exists('nexwaypoint_initials')) {
  *   label: string,
  *   location: array{lat: float, lon: float, city_label: string, city_key: string}|null,
  *   upcoming: string|null,
- *   next: array{city_label: string, dates: string}|null,
+ *   next: array{city_label: string, dates: string, time_of_day: string|null}|null,
  *   avatar_url: string|null,
  *   photo_focus_x: float,
  *   photo_focus_y: float,
@@ -399,7 +399,10 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                                 <td>
                                     <?php if ($entry['next'] !== null): ?>
                                         <div><?= htmlspecialchars($entry['next']['city_label'], ENT_QUOTES) ?></div>
-                                        <div class="hint"><?= htmlspecialchars($entry['next']['dates'], ENT_QUOTES) ?></div>
+                                        <div class="hint"><?= htmlspecialchars(
+                                            TeamLocationResolver::formatNextDatesHint($entry['next']),
+                                            ENT_QUOTES
+                                        ) ?></div>
                                     <?php else: ?>
                                         <span class="hint">—</span>
                                     <?php endif; ?>
@@ -450,7 +453,10 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                                     <p class="team-place">
                                         <span class="team-place-label">Next</span>
                                         <?= htmlspecialchars($entry['next']['city_label'], ENT_QUOTES) ?>
-                                        <span class="hint"><?= htmlspecialchars($entry['next']['dates'], ENT_QUOTES) ?></span>
+                                        <span class="hint"><?= htmlspecialchars(
+                                            TeamLocationResolver::formatNextDatesHint($entry['next']),
+                                            ENT_QUOTES
+                                        ) ?></span>
                                     </p>
                                 <?php endif; ?>
                             </div>

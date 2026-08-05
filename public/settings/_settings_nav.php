@@ -22,6 +22,8 @@ $settingsLinkClass = static function (string $section) use ($settingsSection): s
     <a class="<?= $settingsLinkClass('hub') ?>" href="/settings/index.php">Overview</a>
     <a class="<?= $settingsLinkClass('emails') ?>" href="/settings/emails.php">My emails</a>
     <a class="<?= $settingsLinkClass('sharing') ?>" href="/settings/visibility.php">Sharing</a>
+    <a class="<?= $settingsLinkClass('calendars') ?>" href="/settings/calendars.php">Calendar feeds</a>
+    <a class="<?= $settingsLinkClass('receipts') ?>" href="/receipts/index.php">Receipts</a>
     <?php if ($settingsIsAdmin): ?>
         <span class="settings-nav-sep" aria-hidden="true"></span>
         <a class="<?= $settingsLinkClass('site') ?>" href="/settings/site.php">Site catalogs</a>

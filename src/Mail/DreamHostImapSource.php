@@ -131,6 +131,7 @@ final class DreamHostImapSource implements MailSourceInterface
         }
 
         [$plain, $html] = $this->extractBodies($connection, $uid, $structure);
+        $attachments = $this->extractAttachments($connection, $uid, $structure);
 
         $fromAddress = $this->extractEmailAddress($from);
         $recipients = [];
@@ -151,6 +152,7 @@ final class DreamHostImapSource implements MailSourceInterface
             bodyPlain: $plain,
             bodyHtml: $html,
             recipientAddresses: $recipients,
+            attachments: $attachments,
         );
     }
 
@@ -160,6 +162,20 @@ final class DreamHostImapSource implements MailSourceInterface
     private function extractBodies(\IMAP\Connection $connection, int $uid, object|false $structure): array
     {
         return ImapMimeBodyExtractor::extract(
+            $structure,
+            static function (string $partNumber) use ($connection, $uid): string {
+                $raw = imap_fetchbody($connection, $uid, $partNumber, FT_UID | FT_PEEK);
+                return is_string($raw) ? $raw : '';
+            }
+        );
+    }
+
+    /**
+     * @return list<array{filename: string, mime_type: string, content: string}>
+     */
+    private function extractAttachments(\IMAP\Connection $connection, int $uid, object|false $structure): array
+    {
+        return ImapMimeAttachmentExtractor::extract(
             $structure,
             static function (string $partNumber) use ($connection, $uid): string {
                 $raw = imap_fetchbody($connection, $uid, $partNumber, FT_UID | FT_PEEK);

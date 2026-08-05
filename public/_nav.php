@@ -74,6 +74,7 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/trips/list.php">Trips</a>
+        <a href="/receipts/index.php">Receipts</a>
         <a href="/hotels/properties.php">Hotels</a>
         <a href="/hotels/map.php">Map</a>
         <span class="navbar-sep" aria-hidden="true"></span>
@@ -87,6 +88,7 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
                 <a role="menuitem" href="/settings/index.php">Overview</a>
                 <a role="menuitem" href="/settings/emails.php">My emails</a>
                 <a role="menuitem" href="/settings/visibility.php">Sharing</a>
+                <a role="menuitem" href="/receipts/index.php">Receipts</a>
                 <?php if ($navIsAdmin): ?>
                     <span class="nav-dropdown-sep" aria-hidden="true"></span>
                     <a role="menuitem" href="/settings/site.php">Site catalogs</a>

@@ -729,19 +729,27 @@ final class TripRepository
     }
 
     /**
-     * All segments (any trip/owner) with a depart_dt in the given window and
-     * not yet in a terminal state -- used by the FlightAware enrichment sweep.
+     * Flight segments whose planned depart is near now (default: last 18h
+     * through next $hoursAhead). Used by the FlightAware enrichment sweep so
+     * stale open rows do not keep attaching the wrong day's flight instance.
      *
      * @return TripSegment[]
      */
-    public function findSegmentsNeedingEnrichment(int $hoursAhead = 48): array
+    public function findSegmentsNeedingEnrichment(int $hoursAhead = 48, int $hoursBehind = 18): array
     {
+        $now = new \DateTimeImmutable('now');
         $rows = $this->db->fetchAll(
             "SELECT * FROM trip_segments
              WHERE segment_type = 'flight'
                AND status NOT IN ('landed','cancelled','completed')
-               AND depart_dt <= :until",
-            ['until' => (new \DateTimeImmutable('now'))->modify("+{$hoursAhead} hours")->format('Y-m-d H:i:s')]
+               AND depart_dt IS NOT NULL
+               AND depart_dt >= :from
+               AND depart_dt <= :until
+             ORDER BY depart_dt ASC",
+            [
+                'from' => $now->modify("-{$hoursBehind} hours")->format('Y-m-d H:i:s'),
+                'until' => $now->modify("+{$hoursAhead} hours")->format('Y-m-d H:i:s'),
+            ]
         );
         return array_map(static fn (array $r) => TripSegment::fromRow($r), $rows);
     }

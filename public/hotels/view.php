@@ -6,6 +6,12 @@ use NexWaypoint\Core\Csrf;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Hotels\UserHotelBlacklistRepository;
+use NexWaypoint\Receipts\ExpenseReceiptRepository;
+use NexWaypoint\Receipts\ReceiptCaptureService;
+use NexWaypoint\Receipts\ReceiptFileStore;
+use NexWaypoint\Receipts\ReceiptPdfBuilder;
+use NexWaypoint\Trips\AirportRepository;
+use NexWaypoint\Trips\TripRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
 $user = $app['auth']->requireAuth();
@@ -30,11 +36,34 @@ if ($property === null) {
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
-    if (Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = (string) ($_POST['action'] ?? '');
+    if ($action === 'delete' && Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
         $repo->delete($stay->id, $user->id);
         header('Location: /hotels/list.php');
         exit;
+    }
+    if ($action === 'generate_receipt' && Csrf::verify((string) ($_POST['csrf_token'] ?? ''))) {
+        if ($app['db']->tableExists('expense_receipts')) {
+            $tripRepo = new TripRepository($app['db'], $app['logger']);
+            $capture = new ReceiptCaptureService(
+                new ExpenseReceiptRepository($app['db'], $app['logger']),
+                new ReceiptFileStore(NEXWAYPOINT_ROOT . '/storage/receipts', $app['logger']),
+                new ReceiptPdfBuilder(
+                    $tripRepo,
+                    $repo,
+                    $propertyRepo,
+                    new AirportRepository($app['db'], $app['logger']),
+                ),
+                $tripRepo,
+                $repo,
+                $app['logger'],
+                ReceiptCaptureService::retentionDaysFromEnv(),
+            );
+            $receipt = $capture->generateForStay((int) $stay->id, $user->id, null, $user->id);
+            header('Location: /receipts/download.php?id=' . (int) $receipt->id);
+            exit;
+        }
     }
 }
 
@@ -210,6 +239,15 @@ $myBlacklistReason = $blacklistRepo->reason($user->id, (int) $property->id);
             <?php endforeach; ?>
         </div>
     <?php endif; ?>
+
+    <div class="row-actions" style="margin-bottom: 1rem;">
+        <form method="post" class="inline-form">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+            <input type="hidden" name="action" value="generate_receipt">
+            <button type="submit">Expense receipt PDF</button>
+        </form>
+        <a href="/receipts/index.php">All receipts</a>
+    </div>
 
     <form method="post" onsubmit="return confirm('Delete this stay? This cannot be undone.');">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">

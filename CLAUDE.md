@@ -57,6 +57,22 @@ inline; multiple stays per trip OK). Long transit gaps use `at_hotel` when
 a linked hotel covers `now`. `/flights/add.php` and `/trains/add.php`
 redirect to the builder.
 
+**Calendar feeds (2026-08-04):** Settings → Calendar feeds issues per-user
+secret ICS URLs (`/feeds/calendar.php?t=…`) for (1) personal travel
+(flights/trains timed via airport TZ + trip all-day blocks) and (2) team
+whereabouts (visibility-filtered; optional member picker; timed legs only
+when flight/carrier fields are visible). Outlook/M365/iOS/Android subscribe
+via HTTPS or `webcal://`. Rotate invalidates the old token. Requires
+`calendar_feeds` (`php scripts/migrate.php` on existing DBs).
+
+**Expense receipts (2026-08-04):** Per-user receipt bin at `/receipts/`
+(date / location / brand / trip + download). Successful mail confirm/change
+imports archive a PDF under `storage/receipts/` — vendor MIME PDF attachment
+when present, else a generated itinerary/stay summary (`SimplePdf`, no
+Composer). Manual upload (PDF/JPG/PNG) and generate-from-trip/stay also
+supported. Retention `RECEIPT_RETENTION_DAYS` (default 90); purge runs at
+end of mail poll. Requires `expense_receipts` (`php scripts/migrate.php`).
+
 **Not started:** Azure AD SSO, PWA/offline, push notifications.
 Mail auto-import stays on auto-create + notify (no pending-approval queue).
 System-admin Mail review: Settings → Mail review (`is_system` only).
@@ -142,6 +158,11 @@ System-admin Mail review: Settings → Mail review (`is_system` only).
 - **Rate limiting for FlightAware is a file-backed token bucket**, not
   in-memory, because each cron invocation is a fresh PHP process with no
   persistent state between runs.
+- **FlightAware enrichment is date-scoped.** `GET /flights/{ident}` uses
+  `start`/`end` around the segment's origin-TZ `depart_dt`, then picks the
+  closest origin/destination match. After the first hit, refreshes stick to
+  `fa_flight_id`. The enrich cron only sweeps segments with `depart_dt` in
+  roughly the last 18h through the next 48h.
 - **VPS setup is interactive, user-space, and DB-driver-aware.** Production
   DreamHost has no sudo/apt. `setup.sh` defaults to skipping package installs
   and Composer; it verifies the PHP DreamHost already provides, never
@@ -193,6 +214,12 @@ System-admin Mail review: Settings → Mail review (`is_system` only).
   time, depart uses origin IATA TZ and arrive uses destination IATA TZ from
   `airports` (seeded from `data/airports_us.php`). Avoids storing UTC while
   fixing HSV→DEN style multi-zone days. Hotels stay on `APP_TIMEZONE`.
+- **Expense receipts are a durable file archive, not parse_log.** Short-lived
+  `mail_raw` stays for system debug (7 days). User-facing PDFs live in
+  `expense_receipts` + `storage/receipts/` (~90 days), preferring vendor MIME
+  attachments over generated itinerary summaries. Generated PDFs are
+  confirmation helpers, not vendor folios (amounts only when already on the
+  stay).
 
 ## Immediate next steps (suggested, not started)
 

@@ -65,6 +65,9 @@
                     if (profile.next.dates) {
                         nextBit += ' · ' + escapeHtml(profile.next.dates);
                     }
+                    if (profile.next.time_of_day) {
+                        nextBit += ' · ' + escapeHtml(profile.next.time_of_day);
+                    }
                     bits.push(nextBit);
                 }
                 metaEl.innerHTML = bits.join('<br>');

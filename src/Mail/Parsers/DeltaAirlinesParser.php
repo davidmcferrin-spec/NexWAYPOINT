@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace NexWaypoint\Mail\Parsers;
 
+use NexWaypoint\Mail\EmailConfirmationDetector;
 use NexWaypoint\Mail\EmailMessage;
 use NexWaypoint\Mail\ParserBase;
 
@@ -19,7 +20,10 @@ final class DeltaAirlinesParser extends ParserBase
         $text = $this->messageText($message);
         $subjectLower = strtolower($subject);
 
-        if (str_contains($subjectLower, 'status update') || str_contains($subjectLower, 'check-in')) {
+        if (
+            str_contains($subjectLower, 'status update')
+            || EmailConfirmationDetector::isAirlineCheckInSubject($subject)
+        ) {
             return ['kind' => 'flight', 'event' => 'ignore', 'confirmation_code' => null, 'segments' => []];
         }
 

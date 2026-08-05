@@ -417,6 +417,62 @@ CREATE TABLE visibility_blocks (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
+-- calendar_feeds: secret ICS subscription tokens (personal travel + team).
+-- token is a capability URL secret; treat like a password. member_user_ids
+-- is JSON int[] for team feeds (NULL = all other active users).
+-- ----------------------------------------------------------------------------
+CREATE TABLE calendar_feeds (
+    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_user_id   INT UNSIGNED NOT NULL,
+    kind            ENUM('personal','team') NOT NULL,
+    token           CHAR(64) NOT NULL,
+    member_user_ids JSON NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    last_accessed_at DATETIME NULL,
+    CONSTRAINT fk_cal_feed_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_cal_feed_token (token),
+    UNIQUE KEY uq_cal_feed_owner_kind (owner_user_id, kind),
+    INDEX idx_cal_feed_owner (owner_user_id)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
+-- expense_receipts: per-user PDF/image receipts for expense reports.
+-- Files live under storage/receipts/; expire after RECEIPT_RETENTION_DAYS.
+-- ----------------------------------------------------------------------------
+CREATE TABLE expense_receipts (
+    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_user_id       INT UNSIGNED NOT NULL,
+    kind                ENUM('flight','train','hotel','other') NOT NULL,
+    brand               VARCHAR(120) NULL,
+    location_label      VARCHAR(255) NOT NULL,
+    travel_date         DATE NOT NULL,
+    travel_end_date     DATE NULL,
+    confirmation_code   VARCHAR(50) NULL,
+    amount              DECIMAL(10,2) NULL,
+    currency            CHAR(3) NULL DEFAULT 'USD',
+    trip_id             INT UNSIGNED NULL,
+    hotel_stay_id       INT UNSIGNED NULL,
+    parse_log_id        INT UNSIGNED NULL,
+    source              ENUM('generated','attachment','upload','email_body') NOT NULL,
+    title               VARCHAR(255) NOT NULL,
+    original_filename   VARCHAR(255) NULL,
+    mime_type           VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+    file_path           VARCHAR(500) NOT NULL,
+    file_size           INT UNSIGNED NOT NULL DEFAULT 0,
+    expires_at          DATETIME NOT NULL,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_exp_receipt_owner FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_exp_receipt_trip FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL,
+    CONSTRAINT fk_exp_receipt_stay FOREIGN KEY (hotel_stay_id) REFERENCES hotel_stays(id) ON DELETE SET NULL,
+    INDEX idx_exp_receipt_owner (owner_user_id),
+    INDEX idx_exp_receipt_expires (expires_at),
+    INDEX idx_exp_receipt_trip (trip_id),
+    INDEX idx_exp_receipt_stay (hotel_stay_id)
+) ENGINE=InnoDB;
+
+-- ----------------------------------------------------------------------------
 -- aeroapi_usage_log: FlightAware AeroAPI call/budget tracking.
 -- ----------------------------------------------------------------------------
 CREATE TABLE aeroapi_usage_log (

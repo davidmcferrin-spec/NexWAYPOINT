@@ -6,12 +6,14 @@ declare(strict_types=1);
  * Run every 10 minutes via cron:
  *   php-cli /path/to/NexWAYPOINT/cron/enrich_flights.php
  *
- * Sweeps all non-terminal flight segments departing within 48 hours,
- * refreshes them from FlightAware (respecting the per-segment cache
- * window), and fires alerts for anything that changed materially.
+ * Sweeps non-terminal flight segments departing in the last ~18h through
+ * the next 48h, refreshes each from FlightAware pinned to that segment's
+ * travel-date instance (respecting the per-segment cache window), and
+ * fires alerts for anything that changed materially.
  */
 
 use NexWaypoint\Core\CronRunRepository;
+use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\AlertEvaluator;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\FlightAwareClient;
@@ -35,7 +37,11 @@ try {
     $flightStatusRepo = new FlightStatusRepository($db);
     $notificationRepo = new NotificationRepository($db);
     $alertEvaluator = new AlertEvaluator($notificationRepo, $logger);
-    $flightAware = new FlightAwareClient($logger, $flightStatusRepo);
+    $flightAware = new FlightAwareClient(
+        $logger,
+        $flightStatusRepo,
+        new AirportRepository($db, $logger),
+    );
 
     $segments = $tripRepo->findSegmentsNeedingEnrichment(48);
     $segmentCount = count($segments);
