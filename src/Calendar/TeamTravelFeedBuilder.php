@@ -14,11 +14,12 @@ use NexWaypoint\Visibility\VisibilityBlockRepository;
 use NexWaypoint\Visibility\VisibilityEngine;
 
 /**
- * Builds visibility-filtered ICS events for teammates on a team calendar feed.
+ * Visibility-filtered team ICS: presence ("Name · Denver") between legs,
+ * plus timed transit only when flight/carrier fields are visible.
  */
 final class TeamTravelFeedBuilder
 {
-    private const TRANSIT_TYPES = ['flight', 'train', 'car'];
+    private readonly TravelPresencePlanner $presence;
 
     public function __construct(
         private readonly UserRepository $users,
@@ -28,6 +29,7 @@ final class TeamTravelFeedBuilder
         private readonly ?AirportRepository $airports = null,
         private readonly int $daysAhead = 60,
     ) {
+        $this->presence = new TravelPresencePlanner($airports);
     }
 
     /**
@@ -73,17 +75,39 @@ final class TeamTravelFeedBuilder
                 $canFlight = in_array('flight_number', $fields, true);
                 $canCarrier = in_array('carrier', $fields, true);
 
-                if ($canDates) {
+                if (!$canDates && !$canCity) {
+                    continue;
+                }
+
+                $segments = $this->trips->segmentsForTrip($trip->id);
+                $transit = $this->presence->transitLegs($segments);
+                $windows = $canCity
+                    ? $this->presence->presenceWindows(
+                        $segments,
+                        $trip,
+                        $subject->homeCity,
+                        $subject->homeState,
+                    )
+                    : [];
+
+                $emittedPresence = false;
+                if ($canCity && $canDates) {
+                    foreach ($windows as $window) {
+                        $events[] = $this->presenceEvent($subject, $trip, $window);
+                        $emittedPresence = true;
+                    }
+                }
+
+                // Fallback all-day when no presence windows (hotel-only, re-base home, etc.).
+                if ($canDates && !$emittedPresence) {
                     $allDay = $this->tripAllDay($subject, $trip, $canCity, $canPurpose);
                     if ($allDay !== null) {
                         $events[] = $allDay;
                     }
                 }
 
-                // Timed legs only when flight identity is visible — city+dates
-                // alone stays on the all-day trip block (BOTTOM_UP default).
                 if ($canFlight || $canCarrier) {
-                    foreach ($this->trips->segmentsForTrip($trip->id) as $segment) {
+                    foreach ($transit as $segment) {
                         $timed = $this->transitEvent(
                             $subject,
                             $trip,
@@ -158,6 +182,29 @@ final class TeamTravelFeedBuilder
         );
     }
 
+    /**
+     * @param array{
+     *   after_segment_id: int,
+     *   city: string,
+     *   start: \DateTimeImmutable,
+     *   end: \DateTimeImmutable
+     * } $window
+     */
+    private function presenceEvent(User $subject, Trip $trip, array $window): IcsEvent
+    {
+        $city = $window['city'];
+        return new IcsEvent(
+            uid: 'nxwp-team-presence-' . $subject->id . '-' . $window['after_segment_id'] . '@nexwaypoint',
+            summary: $subject->displayName . ' · ' . $city,
+            description: null,
+            location: $city,
+            dtStart: $window['start']->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
+            dtEnd: $window['end']->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
+            allDay: false,
+            categories: ['NexWAYPOINT', 'Team', 'Presence'],
+        );
+    }
+
     private function transitEvent(
         User $subject,
         Trip $trip,
@@ -169,19 +216,15 @@ final class TeamTravelFeedBuilder
         if ($segment->status === 'cancelled' || $segment->id === null) {
             return null;
         }
-        if (!in_array($segment->segmentType, self::TRANSIT_TYPES, true)) {
-            return null;
-        }
         if ($segment->departDt === null || $segment->arriveDt === null) {
             return null;
         }
-        // Need at least some flight identity or city to be worth a timed event.
         if (!$canFlight && !$canCarrier && !$canCity) {
             return null;
         }
 
-        $start = $this->instant($segment->origin, $segment->departDt);
-        $end = $this->instant($segment->destination, $segment->arriveDt);
+        $start = $this->presence->instant($segment->origin, $segment->departDt);
+        $end = $this->presence->instant($segment->destination, $segment->arriveDt);
         if ($end <= $start) {
             $end = $start->modify('+1 hour');
         }
@@ -195,7 +238,7 @@ final class TeamTravelFeedBuilder
         }
         $route = '';
         if ($canCity) {
-            $route = $this->routeLabel($segment->origin, $segment->destination);
+            $route = $this->presence->routeLabel($segment->origin, $segment->destination);
             if ($route !== '') {
                 $bits[] = $route;
             }
@@ -216,24 +259,6 @@ final class TeamTravelFeedBuilder
             allDay: false,
             categories: ['NexWAYPOINT', 'Team'],
         );
-    }
-
-    private function instant(?string $airportCode, string $naiveDt): \DateTimeImmutable
-    {
-        if ($this->airports !== null) {
-            return $this->airports->instant($airportCode, $naiveDt);
-        }
-        return new \DateTimeImmutable($naiveDt);
-    }
-
-    private function routeLabel(?string $origin, ?string $destination): string
-    {
-        if ($this->airports !== null) {
-            return $this->airports->routeLabel($origin, $destination);
-        }
-        $o = $origin !== null && $origin !== '' ? $origin : '?';
-        $d = $destination !== null && $destination !== '' ? $destination : '?';
-        return $o . ' → ' . $d;
     }
 
     private function exclusiveEndDate(string $endDate): string

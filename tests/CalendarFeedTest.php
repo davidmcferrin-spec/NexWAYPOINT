@@ -137,17 +137,110 @@ final class CalendarFeedTest extends NexWaypointTestCase
         $summaries = array_map(static fn (IcsEvent $e) => $e->summary, $events);
         self::assertNotEmpty($events);
         self::assertTrue(
-            (bool) array_filter($summaries, static fn (string $s) => str_contains($s, 'Trip · Denver')),
-            'expected trip all-day event'
-        );
-        self::assertTrue(
             (bool) array_filter($summaries, static fn (string $s) => str_contains($s, 'UA') && str_contains($s, '482')),
             'expected flight event'
         );
+        self::assertTrue(
+            (bool) array_filter($summaries, static fn (string $s) => str_starts_with($s, 'In ') && str_contains($s, 'Denver')),
+            'expected In Denver presence after arrival'
+        );
+        self::assertFalse(
+            (bool) array_filter($summaries, static fn (string $s) => str_starts_with($s, 'Trip ·')),
+            'trip all-day should be omitted when transit legs exist'
+        );
 
         $body = (new IcsBuilder())->build('Personal', $events);
-        self::assertStringContainsString('nxwp-trip-' . (int) $trip->id . '@nexwaypoint', $body);
+        self::assertStringContainsString('nxwp-presence-', $body);
         self::assertStringContainsString('Confirmation: ABC123', $body);
+    }
+
+    public function testPersonalFeedPresenceBetweenLegsAndMidTrip(): void
+    {
+        $userId = $this->insertUser('cal_mid');
+        // Home base so return flight does not create an "In Huntsville" block.
+        if ($this->db->columnExists('users', 'home_city')) {
+            $this->db->execute(
+                'UPDATE users SET home_city = :c, home_state = :s WHERE id = :id',
+                ['c' => 'Huntsville', 's' => 'AL', 'id' => $userId]
+            );
+        }
+
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $today = new \DateTimeImmutable('today');
+        $outbound = $today->modify('-1 day');
+        $inbound = $today->modify('+2 days');
+
+        $trip = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Denver, CO',
+            startDate: $outbound->format('Y-m-d'),
+            endDate: $inbound->format('Y-m-d'),
+            status: 'active',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $tripRepo->addSegment(new TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '100',
+            confirmationCode: 'MID1',
+            origin: 'HSV',
+            destination: 'DEN',
+            departDt: $outbound->setTime(8, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $outbound->setTime(10, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+        $tripRepo->addSegment(new TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '200',
+            confirmationCode: 'MID1',
+            origin: 'DEN',
+            destination: 'HSV',
+            departDt: $inbound->setTime(16, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $inbound->setTime(19, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $owner = (new UserRepository($this->db, $this->logger))->find($userId);
+        self::assertNotNull($owner);
+
+        $events = (new PersonalTravelFeedBuilder(
+            $tripRepo,
+            new AirportRepository(null, $this->logger),
+        ))->buildEvents($owner, $today);
+
+        $summaries = array_map(static fn (IcsEvent $e) => $e->summary, $events);
+        self::assertTrue(
+            (bool) array_filter($summaries, static fn (string $s) => str_contains($s, 'UA 100') || str_contains($s, 'UA') && str_contains($s, '100')),
+            'outbound flight'
+        );
+        self::assertTrue(
+            (bool) array_filter($summaries, static fn (string $s) => str_contains($s, '200')),
+            'return flight'
+        );
+        self::assertTrue(
+            (bool) array_filter($summaries, static fn (string $s) => str_starts_with($s, 'In ') && str_contains($s, 'Denver')),
+            'In Denver between legs'
+        );
+        self::assertFalse(
+            (bool) array_filter($summaries, static fn (string $s) => str_contains($s, 'In Huntsville')),
+            'no presence after re-base home'
+        );
     }
 
     public function testPersonalFeedSkipsCancelledSegments(): void
@@ -308,6 +401,7 @@ final class CalendarFeedTest extends NexWaypointTestCase
 
         $bottomBody = (new IcsBuilder())->build('Team', $bottomEvents);
         self::assertStringContainsString('Nashville', $bottomBody);
+        self::assertStringContainsString('nxwp-team-presence-', $bottomBody);
         self::assertStringNotContainsString('WN', $bottomBody);
         self::assertStringNotContainsString('55', $bottomBody);
         self::assertStringNotContainsString('Mgr purpose', $bottomBody);

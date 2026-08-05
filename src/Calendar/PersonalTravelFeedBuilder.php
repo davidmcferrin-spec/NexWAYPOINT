@@ -8,39 +8,59 @@ use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripSegment;
+use NexWaypoint\Users\User;
 
 /**
- * Builds ICS events for the feed owner's own travel (full detail).
+ * Builds ICS events for the feed owner's own travel:
+ * timed transit legs + "In {city}" presence between legs (until next depart or trip end).
  */
 final class PersonalTravelFeedBuilder
 {
-    private const TRANSIT_TYPES = ['flight', 'train', 'car'];
+    private readonly TravelPresencePlanner $presence;
 
     public function __construct(
         private readonly TripRepository $trips,
         private readonly ?AirportRepository $airports = null,
         private readonly int $daysAhead = 90,
     ) {
+        $this->presence = new TravelPresencePlanner($airports);
     }
 
     /**
      * @return list<IcsEvent>
      */
-    public function buildEvents(int $ownerUserId, ?\DateTimeImmutable $asOf = null): array
+    public function buildEvents(int|User $owner, ?\DateTimeImmutable $asOf = null): array
     {
         $asOf ??= new \DateTimeImmutable('today');
+        $ownerUserId = $owner instanceof User ? $owner->id : $owner;
+        $homeCity = $owner instanceof User ? $owner->homeCity : null;
+        $homeState = $owner instanceof User ? $owner->homeState : null;
+
         $events = [];
 
         foreach ($this->trips->findActiveOrUpcoming($ownerUserId, $this->daysAhead, $asOf) as $trip) {
             if ($trip->id === null || $trip->status === 'cancelled') {
                 continue;
             }
-            $events[] = $this->tripAllDay($trip);
-            foreach ($this->trips->segmentsForTrip($trip->id) as $segment) {
+
+            $segments = $this->trips->segmentsForTrip($trip->id);
+            $transit = $this->presence->transitLegs($segments);
+            $windows = $this->presence->presenceWindows($segments, $trip, $homeCity, $homeState);
+
+            // Fat trip block only when there is no itinerary to hang presence on.
+            if ($transit === []) {
+                $events[] = $this->tripAllDay($trip);
+            }
+
+            foreach ($transit as $segment) {
                 $timed = $this->transitEvent($segment, $trip);
                 if ($timed !== null) {
                     $events[] = $timed;
                 }
+            }
+
+            foreach ($windows as $window) {
+                $events[] = $this->presenceEvent($window, $trip);
             }
         }
 
@@ -71,20 +91,37 @@ final class PersonalTravelFeedBuilder
         );
     }
 
+    /**
+     * @param array{
+     *   after_segment_id: int,
+     *   city: string,
+     *   start: \DateTimeImmutable,
+     *   end: \DateTimeImmutable
+     * } $window
+     */
+    private function presenceEvent(array $window, Trip $trip): IcsEvent
+    {
+        $city = $window['city'];
+        return new IcsEvent(
+            uid: 'nxwp-presence-' . $window['after_segment_id'] . '@nexwaypoint',
+            summary: 'In ' . $city,
+            description: 'Trip · ' . trim($trip->destinationCity),
+            location: $city,
+            dtStart: $window['start']->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
+            dtEnd: $window['end']->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
+            allDay: false,
+            categories: ['NexWAYPOINT', 'Presence'],
+        );
+    }
+
     private function transitEvent(TripSegment $segment, Trip $trip): ?IcsEvent
     {
-        if ($segment->status === 'cancelled') {
-            return null;
-        }
-        if (!in_array($segment->segmentType, self::TRANSIT_TYPES, true)) {
-            return null;
-        }
-        if ($segment->departDt === null || $segment->arriveDt === null || $segment->id === null) {
+        if ($segment->id === null || $segment->departDt === null || $segment->arriveDt === null) {
             return null;
         }
 
-        $start = $this->instant($segment->origin, $segment->departDt);
-        $end = $this->instant($segment->destination, $segment->arriveDt);
+        $start = $this->presence->instant($segment->origin, $segment->departDt);
+        $end = $this->presence->instant($segment->destination, $segment->arriveDt);
         if ($end <= $start) {
             $end = $start->modify('+1 hour');
         }
@@ -102,7 +139,7 @@ final class PersonalTravelFeedBuilder
         if ($segment->flightNumber !== null && trim($segment->flightNumber) !== '') {
             $bits[] = trim($segment->flightNumber);
         }
-        $route = $this->routeLabel($segment->origin, $segment->destination);
+        $route = $this->presence->routeLabel($segment->origin, $segment->destination);
         $summary = trim(implode(' ', $bits));
         if ($route !== '') {
             $summary = $summary !== '' ? $summary . ' · ' . $route : $route;
@@ -130,24 +167,6 @@ final class PersonalTravelFeedBuilder
             categories: ['NexWAYPOINT', $kind],
             status: $status,
         );
-    }
-
-    private function instant(?string $airportCode, string $naiveDt): \DateTimeImmutable
-    {
-        if ($this->airports !== null) {
-            return $this->airports->instant($airportCode, $naiveDt);
-        }
-        return new \DateTimeImmutable($naiveDt);
-    }
-
-    private function routeLabel(?string $origin, ?string $destination): string
-    {
-        if ($this->airports !== null) {
-            return $this->airports->routeLabel($origin, $destination);
-        }
-        $o = $origin !== null && $origin !== '' ? $origin : '?';
-        $d = $destination !== null && $destination !== '' ? $destination : '?';
-        return $o . ' → ' . $d;
     }
 
     private function exclusiveEndDate(string $endDate): string

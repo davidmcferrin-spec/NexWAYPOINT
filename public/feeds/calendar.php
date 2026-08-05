@@ -55,7 +55,7 @@ $airports = new AirportRepository($db, $logger);
 $ics = new IcsBuilder();
 
 if ($feed->kind === CalendarFeed::KIND_PERSONAL) {
-    $events = (new PersonalTravelFeedBuilder($tripRepo, $airports))->buildEvents($owner->id);
+    $events = (new PersonalTravelFeedBuilder($tripRepo, $airports))->buildEvents($owner);
     $calName = 'NexWAYPOINT · ' . $owner->displayName;
     $filename = 'nexwaypoint-personal.ics';
 } else {

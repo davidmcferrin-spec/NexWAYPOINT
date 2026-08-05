@@ -135,8 +135,8 @@ $selectedMembers = $team?->memberUserIds ?? [];
     <div class="card">
         <h3>My travel</h3>
         <p class="hint">
-            Your flights/trains (timed, airport timezones) and trip date blocks.
-            Full detail — this is your own itinerary.
+            Your flights/trains (timed, airport timezones) plus “In {city}” blocks
+            between legs until you fly on or re-base home. Full detail — your itinerary.
         </p>
         <?php if ($personalUrl === null): ?>
             <form method="post">
@@ -163,8 +163,9 @@ $selectedMembers = $team?->memberUserIds ?? [];
     <div class="card">
         <h3>Team whereabouts</h3>
         <p class="hint">
-            Where selected teammates will be, filtered by each person's sharing rules
-            (same rules as the team board). Private / blocked trips are omitted.
+            Teammate whereabouts as “Name · City” presence blocks (and timed flights
+            when sharing allows). Same visibility rules as the team board; private /
+            blocked trips are omitted. You are not on your own team feed.
         </p>
         <?php if ($teamUrl === null): ?>
             <form method="post">

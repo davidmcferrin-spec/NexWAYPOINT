@@ -59,11 +59,13 @@ redirect to the builder.
 
 **Calendar feeds (2026-08-04):** Settings → Calendar feeds issues per-user
 secret ICS URLs (`/feeds/calendar.php?t=…`) for (1) personal travel
-(flights/trains timed via airport TZ + trip all-day blocks) and (2) team
-whereabouts (visibility-filtered; optional member picker; timed legs only
-when flight/carrier fields are visible). Outlook/M365/iOS/Android subscribe
-via HTTPS or `webcal://`. Rotate invalidates the old token. Requires
-`calendar_feeds` (`php scripts/migrate.php` on existing DBs).
+(timed flight/train legs + “In {city}” presence between legs until next
+depart or trip end; re-base home skips a trailing home presence; trip
+all-day only when there are no transit legs) and (2) team whereabouts
+(visibility-filtered “Name · City” presence; optional member picker;
+timed legs only when flight/carrier fields are visible). Outlook/M365/
+iOS/Android subscribe via HTTPS or `webcal://`. Rotate invalidates the
+old token. Requires `calendar_feeds` (`php scripts/migrate.php`).
 
 **Expense receipts (2026-08-04):** Per-user receipt bin at `/receipts/`
 (date / location / brand / trip + download). Successful mail confirm/change
