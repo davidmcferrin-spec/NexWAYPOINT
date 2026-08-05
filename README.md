@@ -325,10 +325,11 @@ storage/                  Logs, uploads, cache -- must be writable, must NOT be 
   short-lived `.eml` files under `storage/mail_raw/` (default 7 days via
   `MAIL_RAW_RETENTION_DAYS`) are downloadable only by the `is_system`
   bootstrap account (Settings → Mail review). Expense receipts (vendor PDF
-  attachments or generated itinerary PDFs) are stored separately under
-  `storage/receipts/` for ~90 days (`RECEIPT_RETENTION_DAYS`) and listed at
-  `/receipts/` for the owning user. Travel dates come from
-  confirmation content, not IMAP or forward Date/Sent headers.
+  attachments, or a PDF of the vendor confirmation email when none is
+  attached) are stored separately under `storage/receipts/` for ~90 days
+  (`RECEIPT_RETENTION_DAYS`) and listed at `/receipts/` for the owning user.
+  Travel dates come from confirmation content, not IMAP or forward
+  Date/Sent headers.
 - Every write to `hotel_properties`, `hotel_stays`, `trips`, `trip_segments`,
   `users`, and `visibility_rules` goes through `Database::audit()`, which
   logs to `audit_log`. A DB administrator can see *that* something changed

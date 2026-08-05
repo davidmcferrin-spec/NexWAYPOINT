@@ -437,8 +437,9 @@ CREATE TABLE calendar_feeds (
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
--- expense_receipts: per-user PDF/image receipts for expense reports.
--- Files live under storage/receipts/; expire after RECEIPT_RETENTION_DAYS.
+-- expense_receipts: per-user vendor receipts from mail import (PDF attachment
+-- or PDF of confirmation email). Files under storage/receipts/; expire after
+-- RECEIPT_RETENTION_DAYS. source values generated/upload are legacy only.
 -- ----------------------------------------------------------------------------
 CREATE TABLE expense_receipts (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

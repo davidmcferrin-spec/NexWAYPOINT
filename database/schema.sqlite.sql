@@ -337,6 +337,8 @@ CREATE TABLE calendar_feeds (
 );
 CREATE INDEX idx_cal_feed_owner ON calendar_feeds(owner_user_id);
 
+-- Vendor receipts from mail import (PDF attachment or confirmation-email PDF).
+-- source values generated/upload are legacy only.
 CREATE TABLE expense_receipts (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

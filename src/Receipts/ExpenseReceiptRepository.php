@@ -48,36 +48,6 @@ final class ExpenseReceiptRepository
         return array_map(static fn (array $r): ExpenseReceipt => ExpenseReceipt::fromRow($r), $rows);
     }
 
-    public function findGeneratedForTrip(int $ownerUserId, int $tripId): ?ExpenseReceipt
-    {
-        $row = $this->db->fetchOne(
-            "SELECT * FROM expense_receipts
-             WHERE owner_user_id = :owner AND trip_id = :trip AND source = :src
-             ORDER BY id DESC LIMIT 1",
-            [
-                'owner' => $ownerUserId,
-                'trip' => $tripId,
-                'src' => ExpenseReceipt::SOURCE_GENERATED,
-            ]
-        );
-        return $row === null ? null : ExpenseReceipt::fromRow($row);
-    }
-
-    public function findGeneratedForStay(int $ownerUserId, int $hotelStayId): ?ExpenseReceipt
-    {
-        $row = $this->db->fetchOne(
-            "SELECT * FROM expense_receipts
-             WHERE owner_user_id = :owner AND hotel_stay_id = :stay AND source = :src
-             ORDER BY id DESC LIMIT 1",
-            [
-                'owner' => $ownerUserId,
-                'stay' => $hotelStayId,
-                'src' => ExpenseReceipt::SOURCE_GENERATED,
-            ]
-        );
-        return $row === null ? null : ExpenseReceipt::fromRow($row);
-    }
-
     public function create(ExpenseReceipt $receipt, ?int $actorUserId = null): ExpenseReceipt
     {
         $this->db->execute(

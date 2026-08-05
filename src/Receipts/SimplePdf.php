@@ -6,7 +6,7 @@ namespace NexWaypoint\Receipts;
 
 /**
  * Minimal multi-page PDF writer (Helvetica, text only).
- * No Composer dependency — enough for itinerary / confirmation summaries.
+ * No Composer dependency — used to archive vendor confirmation emails as PDF.
  */
 final class SimplePdf
 {

@@ -3,12 +3,6 @@
 declare(strict_types=1);
 
 use NexWaypoint\Core\Csrf;
-use NexWaypoint\Hotels\HotelPropertyRepository;
-use NexWaypoint\Hotels\HotelStayRepository;
-use NexWaypoint\Receipts\ExpenseReceiptRepository;
-use NexWaypoint\Receipts\ReceiptCaptureService;
-use NexWaypoint\Receipts\ReceiptFileStore;
-use NexWaypoint\Receipts\ReceiptPdfBuilder;
 use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\Trip;
@@ -55,30 +49,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 isPrivate: $trip->isPrivate,
             ), $user->id);
             $message = 'Trip marked completed.';
-        } elseif ($action === 'generate_receipt') {
-            if (!$app['db']->tableExists('expense_receipts')) {
-                $errors[] = 'Run php scripts/migrate.php to enable expense receipts.';
-            } else {
-                $propertyRepo = new HotelPropertyRepository($app['db'], $app['logger']);
-                $stayRepo = new HotelStayRepository($app['db'], $app['logger'], $propertyRepo);
-                $capture = new ReceiptCaptureService(
-                    new ExpenseReceiptRepository($app['db'], $app['logger']),
-                    new ReceiptFileStore(NEXWAYPOINT_ROOT . '/storage/receipts', $app['logger']),
-                    new ReceiptPdfBuilder(
-                        $tripRepo,
-                        $stayRepo,
-                        $propertyRepo,
-                        new AirportRepository($app['db'], $app['logger']),
-                    ),
-                    $tripRepo,
-                    $stayRepo,
-                    $app['logger'],
-                    ReceiptCaptureService::retentionDaysFromEnv(),
-                );
-                $receipt = $capture->generateForTrip((int) $trip->id, $user->id, null, $user->id);
-                header('Location: /receipts/download.php?id=' . (int) $receipt->id);
-                exit;
-            }
         }
     }
 }
@@ -207,13 +177,8 @@ $today = (new DateTimeImmutable('today'))->format('Y-m-d');
                 <button type="submit">Mark completed</button>
             </form>
         <?php endif; ?>
-        <form method="post" style="display: inline-block; margin-left: 0.75rem;">
-            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-            <input type="hidden" name="action" value="generate_receipt">
-            <button type="submit">Expense receipt PDF</button>
-        </form>
         <p class="hint" style="margin-top: 0.65rem;">
-            Receipts are also listed under <a href="/receipts/index.php">Receipts</a>.
+            Vendor receipts from mail import are listed under <a href="/receipts/index.php">Receipts</a>.
         </p>
     </div>
 </main>

@@ -8,11 +8,10 @@ use NexWaypoint\Core\Env;
 use NexWaypoint\Core\Logger;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
+use NexWaypoint\Receipts\EmailReceiptPdfBuilder;
 use NexWaypoint\Receipts\ExpenseReceiptRepository;
 use NexWaypoint\Receipts\ReceiptCaptureService;
 use NexWaypoint\Receipts\ReceiptFileStore;
-use NexWaypoint\Receipts\ReceiptPdfBuilder;
-use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
@@ -39,18 +38,13 @@ final class MailPollerFactory
         $receipts = null;
         if ($db->tableExists('expense_receipts')) {
             $fileStore = new ReceiptFileStore(NEXWAYPOINT_ROOT . '/storage/receipts', $logger);
-            $pdfBuilder = new ReceiptPdfBuilder(
-                $tripRepo,
-                $stayRepo,
-                $propertyRepo,
-                new AirportRepository($db, $logger),
-            );
             $receipts = new ReceiptCaptureService(
                 new ExpenseReceiptRepository($db, $logger),
                 $fileStore,
-                $pdfBuilder,
+                new EmailReceiptPdfBuilder(),
                 $tripRepo,
                 $stayRepo,
+                $propertyRepo,
                 $logger,
                 ReceiptCaptureService::retentionDaysFromEnv(),
             );

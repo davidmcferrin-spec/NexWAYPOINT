@@ -6,21 +6,25 @@ namespace NexWaypoint\Receipts;
 
 use NexWaypoint\Core\Env;
 use NexWaypoint\Core\Logger;
+use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Mail\EmailMessage;
 use NexWaypoint\Trips\TripRepository;
+use NexWaypoint\Trips\TripSegment;
 
 /**
- * Creates / replaces expense receipts from mail import, trip/stay generate, or upload.
+ * Archives expense receipts from mail import only:
+ * vendor PDF attachment when present, else a PDF of the vendor email body.
  */
 final class ReceiptCaptureService
 {
     public function __construct(
         private readonly ExpenseReceiptRepository $receipts,
         private readonly ReceiptFileStore $files,
-        private readonly ReceiptPdfBuilder $pdfBuilder,
+        private readonly EmailReceiptPdfBuilder $emailPdf,
         private readonly TripRepository $trips,
         private readonly HotelStayRepository $stays,
+        private readonly HotelPropertyRepository $properties,
         private readonly Logger $logger,
         private readonly int $retentionDays = 90,
     ) {
@@ -39,7 +43,8 @@ final class ReceiptCaptureService
     }
 
     /**
-     * After a successful confirm/change import: prefer vendor PDF attachment, else generate.
+     * After a successful confirm/change import: prefer vendor PDF attachment,
+     * else PDF of the vendor confirmation email itself.
      */
     public function captureFromImport(
         EmailMessage $message,
@@ -51,9 +56,10 @@ final class ReceiptCaptureService
         ?int $actorUserId = null,
     ): ?ExpenseReceipt {
         try {
+            $meta = $this->metaFromLinks($ownerUserId, $kind, $tripId, $hotelStayId);
+
             $pdfAttachment = $this->firstPdfAttachment($message);
             if ($pdfAttachment !== null) {
-                $meta = $this->metaFromLinks($ownerUserId, $kind, $tripId, $hotelStayId);
                 return $this->storeNew(
                     ownerUserId: $ownerUserId,
                     kind: $meta['kind'],
@@ -77,12 +83,39 @@ final class ReceiptCaptureService
                 );
             }
 
-            if ($tripId !== null) {
-                return $this->generateForTrip($tripId, $ownerUserId, $parseLogId, $actorUserId);
+            if (!$this->emailPdf->hasRenderableBody($message)) {
+                $this->logger->info('No vendor PDF attachment or email body for receipt', [
+                    'user_id' => $ownerUserId,
+                    'trip_id' => $tripId,
+                    'hotel_stay_id' => $hotelStayId,
+                ]);
+                return null;
             }
-            if ($hotelStayId !== null) {
-                return $this->generateForStay($hotelStayId, $ownerUserId, $parseLogId, $actorUserId);
-            }
+
+            $bytes = $this->emailPdf->build($message);
+            $filename = $this->safeFilename($meta['title'] . '-vendor-email') . '.pdf';
+
+            return $this->storeNew(
+                ownerUserId: $ownerUserId,
+                kind: $meta['kind'],
+                brand: $meta['brand'],
+                locationLabel: $meta['location_label'],
+                travelDate: $meta['travel_date'],
+                travelEndDate: $meta['travel_end_date'],
+                confirmationCode: $meta['confirmation_code'],
+                amount: $meta['amount'],
+                currency: $meta['currency'],
+                tripId: $tripId,
+                hotelStayId: $hotelStayId,
+                parseLogId: $parseLogId,
+                source: ExpenseReceipt::SOURCE_EMAIL_BODY,
+                title: $meta['title'] . ' (vendor email)',
+                originalFilename: $filename,
+                mimeType: 'application/pdf',
+                bytes: $bytes,
+                extension: 'pdf',
+                actorUserId: $actorUserId,
+            );
         } catch (\Throwable $e) {
             $this->logger->warning('Receipt capture from import failed', [
                 'error' => $e->getMessage(),
@@ -92,124 +125,6 @@ final class ReceiptCaptureService
             ]);
         }
         return null;
-    }
-
-    public function generateForTrip(
-        int $tripId,
-        int $ownerUserId,
-        ?int $parseLogId = null,
-        ?int $actorUserId = null,
-    ): ExpenseReceipt {
-        $trip = $this->trips->find($tripId);
-        if ($trip === null || $trip->ownerId !== $ownerUserId) {
-            throw new \RuntimeException('Trip not found for receipt generation');
-        }
-        $built = $this->pdfBuilder->buildForTrip($trip);
-        return $this->upsertGenerated(
-            ownerUserId: $ownerUserId,
-            existing: $this->receipts->findGeneratedForTrip($ownerUserId, $tripId),
-            built: $built,
-            parseLogId: $parseLogId,
-            actorUserId: $actorUserId,
-        );
-    }
-
-    public function generateForStay(
-        int $hotelStayId,
-        int $ownerUserId,
-        ?int $parseLogId = null,
-        ?int $actorUserId = null,
-    ): ExpenseReceipt {
-        $stay = $this->stays->find($hotelStayId);
-        if ($stay === null || $stay->userId !== $ownerUserId) {
-            throw new \RuntimeException('Hotel stay not found for receipt generation');
-        }
-        $built = $this->pdfBuilder->buildForStay($stay);
-        return $this->upsertGenerated(
-            ownerUserId: $ownerUserId,
-            existing: $this->receipts->findGeneratedForStay($ownerUserId, $hotelStayId),
-            built: $built,
-            parseLogId: $parseLogId,
-            actorUserId: $actorUserId,
-        );
-    }
-
-    /**
-     * @param array{
-     *   name: string,
-     *   type: string,
-     *   tmp_name: string,
-     *   error: int,
-     *   size: int
-     * } $file $_FILES element
-     */
-    public function storeUpload(
-        int $ownerUserId,
-        array $file,
-        string $kind,
-        string $locationLabel,
-        string $travelDate,
-        ?string $travelEndDate,
-        ?string $brand,
-        ?string $confirmationCode,
-        ?float $amount,
-        ?string $currency,
-        ?int $tripId,
-        ?int $hotelStayId,
-        ?string $title,
-        ?int $actorUserId = null,
-    ): ExpenseReceipt {
-        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            throw new \RuntimeException('Upload failed (error ' . (int) ($file['error'] ?? 0) . ')');
-        }
-        $size = (int) ($file['size'] ?? 0);
-        if ($size <= 0 || $size > 8 * 1024 * 1024) {
-            throw new \RuntimeException('Upload must be between 1 byte and 8 MB');
-        }
-        $tmp = (string) ($file['tmp_name'] ?? '');
-        if ($tmp === '' || !is_uploaded_file($tmp)) {
-            throw new \RuntimeException('Invalid upload');
-        }
-        $bytes = file_get_contents($tmp);
-        if ($bytes === false || $bytes === '') {
-            throw new \RuntimeException('Could not read uploaded file');
-        }
-
-        $origName = basename((string) ($file['name'] ?? 'receipt.bin'));
-        [$mime, $ext] = $this->detectUploadType($bytes, (string) ($file['type'] ?? ''), $origName);
-
-        $kind = in_array($kind, [
-            ExpenseReceipt::KIND_FLIGHT,
-            ExpenseReceipt::KIND_TRAIN,
-            ExpenseReceipt::KIND_HOTEL,
-            ExpenseReceipt::KIND_OTHER,
-        ], true) ? $kind : ExpenseReceipt::KIND_OTHER;
-
-        $title = $title !== null && trim($title) !== ''
-            ? trim($title)
-            : (ucfirst($kind) . ' · ' . $locationLabel);
-
-        return $this->storeNew(
-            ownerUserId: $ownerUserId,
-            kind: $kind,
-            brand: $brand !== null && trim($brand) !== '' ? trim($brand) : null,
-            locationLabel: trim($locationLabel) !== '' ? trim($locationLabel) : '—',
-            travelDate: $travelDate,
-            travelEndDate: $travelEndDate,
-            confirmationCode: $confirmationCode,
-            amount: $amount,
-            currency: $currency,
-            tripId: $tripId,
-            hotelStayId: $hotelStayId,
-            parseLogId: null,
-            source: ExpenseReceipt::SOURCE_UPLOAD,
-            title: $title,
-            originalFilename: $origName,
-            mimeType: $mime,
-            bytes: $bytes,
-            extension: $ext,
-            actorUserId: $actorUserId,
-        );
     }
 
     public function purgeExpired(?\DateTimeImmutable $asOf = null): int
@@ -222,70 +137,6 @@ final class ReceiptCaptureService
         $this->receipts->deleteByIds($ids);
         $this->logger->info('Purged expired expense receipts', ['count' => count($ids)]);
         return count($ids);
-    }
-
-    /**
-     * @param array{
-     *   bytes: string,
-     *   kind: string,
-     *   brand: ?string,
-     *   location_label: string,
-     *   travel_date: string,
-     *   travel_end_date: ?string,
-     *   confirmation_code: ?string,
-     *   amount: ?float,
-     *   currency: ?string,
-     *   title: string,
-     *   trip_id: ?int,
-     *   hotel_stay_id: ?int
-     * } $built
-     */
-    private function upsertGenerated(
-        int $ownerUserId,
-        ?ExpenseReceipt $existing,
-        array $built,
-        ?int $parseLogId,
-        ?int $actorUserId,
-    ): ExpenseReceipt {
-        $stored = $this->files->writeBytes($built['bytes'], 'pdf');
-        $expires = $this->expiresAt();
-        $filename = preg_replace('/[^a-zA-Z0-9._-]+/', '-', $built['title']) . '.pdf';
-
-        if ($existing !== null && $existing->id !== null) {
-            $this->files->deleteRelative($existing->filePath);
-            return $this->receipts->updateFileMeta(
-                (int) $existing->id,
-                $stored['file_path'],
-                $stored['file_size'],
-                'application/pdf',
-                $expires,
-                $filename,
-                $actorUserId,
-            );
-        }
-
-        return $this->receipts->create(new ExpenseReceipt(
-            id: null,
-            ownerUserId: $ownerUserId,
-            kind: $built['kind'],
-            brand: $built['brand'],
-            locationLabel: $built['location_label'],
-            travelDate: $built['travel_date'],
-            travelEndDate: $built['travel_end_date'],
-            confirmationCode: $built['confirmation_code'],
-            amount: $built['amount'],
-            currency: $built['currency'],
-            tripId: $built['trip_id'],
-            hotelStayId: $built['hotel_stay_id'],
-            parseLogId: $parseLogId,
-            source: ExpenseReceipt::SOURCE_GENERATED,
-            title: $built['title'],
-            originalFilename: $filename,
-            mimeType: 'application/pdf',
-            filePath: $stored['file_path'],
-            fileSize: $stored['file_size'],
-            expiresAt: $expires,
-        ), $actorUserId);
     }
 
     private function storeNew(
@@ -352,44 +203,68 @@ final class ReceiptCaptureService
         if ($tripId !== null) {
             $trip = $this->trips->find($tripId);
             if ($trip !== null && $trip->ownerId === $ownerUserId) {
-                $built = $this->pdfBuilder->buildForTrip($trip);
+                $segments = array_values(array_filter(
+                    $this->trips->segmentsForTrip((int) $trip->id),
+                    static fn (TripSegment $s): bool => $s->status !== 'cancelled'
+                ));
+                $metaKind = ExpenseReceipt::KIND_FLIGHT;
+                $brand = null;
+                $confirmation = null;
+                foreach ($segments as $segment) {
+                    if (in_array($segment->segmentType, ['flight', 'train'], true)) {
+                        $metaKind = $segment->segmentType === 'train'
+                            ? ExpenseReceipt::KIND_TRAIN
+                            : ExpenseReceipt::KIND_FLIGHT;
+                        $brand = $segment->carrier ?? $brand;
+                        $confirmation = $segment->confirmationCode ?? $confirmation;
+                        break;
+                    }
+                }
                 return [
-                    'kind' => $built['kind'],
-                    'brand' => $built['brand'],
-                    'location_label' => $built['location_label'],
-                    'travel_date' => $built['travel_date'],
-                    'travel_end_date' => $built['travel_end_date'],
-                    'confirmation_code' => $built['confirmation_code'],
-                    'amount' => $built['amount'],
-                    'currency' => $built['currency'],
-                    'title' => $built['title'],
+                    'kind' => $metaKind,
+                    'brand' => $brand,
+                    'location_label' => $trip->destinationCity,
+                    'travel_date' => $trip->startDate,
+                    'travel_end_date' => $trip->endDate,
+                    'confirmation_code' => $confirmation,
+                    'amount' => null,
+                    'currency' => null,
+                    'title' => ($metaKind === ExpenseReceipt::KIND_TRAIN ? 'Train' : 'Flight')
+                        . ' · ' . $trip->destinationCity,
                 ];
             }
         }
         if ($hotelStayId !== null) {
             $stay = $this->stays->find($hotelStayId);
             if ($stay !== null && $stay->userId === $ownerUserId) {
-                $built = $this->pdfBuilder->buildForStay($stay);
+                $property = $this->properties->find($stay->hotelPropertyId);
+                $name = $property?->hotelName ?? 'Hotel stay';
+                $cityBits = array_filter([
+                    $property?->city,
+                    $property?->stateRegion,
+                ], static fn ($v) => is_string($v) && trim($v) !== '');
+                $location = $cityBits !== [] ? implode(', ', $cityBits) : $name;
                 return [
-                    'kind' => $built['kind'],
-                    'brand' => $built['brand'],
-                    'location_label' => $built['location_label'],
-                    'travel_date' => $built['travel_date'],
-                    'travel_end_date' => $built['travel_end_date'],
-                    'confirmation_code' => $built['confirmation_code'],
-                    'amount' => $built['amount'],
-                    'currency' => $built['currency'],
-                    'title' => $built['title'],
+                    'kind' => ExpenseReceipt::KIND_HOTEL,
+                    'brand' => $property?->brand,
+                    'location_label' => $location,
+                    'travel_date' => $stay->stayStart,
+                    'travel_end_date' => $stay->stayEnd,
+                    'confirmation_code' => $stay->confirmationCode,
+                    'amount' => $stay->lastStayPrice,
+                    'currency' => $stay->currency,
+                    'title' => 'Hotel · ' . $name,
                 ];
             }
         }
         $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $metaKind = in_array($kind, [
+            ExpenseReceipt::KIND_FLIGHT,
+            ExpenseReceipt::KIND_TRAIN,
+            ExpenseReceipt::KIND_HOTEL,
+        ], true) ? $kind : ExpenseReceipt::KIND_OTHER;
         return [
-            'kind' => in_array($kind, [
-                ExpenseReceipt::KIND_FLIGHT,
-                ExpenseReceipt::KIND_TRAIN,
-                ExpenseReceipt::KIND_HOTEL,
-            ], true) ? $kind : ExpenseReceipt::KIND_OTHER,
+            'kind' => $metaKind,
             'brand' => null,
             'location_label' => 'Travel',
             'travel_date' => $today,
@@ -426,21 +301,10 @@ final class ReceiptCaptureService
         return null;
     }
 
-    /**
-     * @return array{0: string, 1: string} [mime, extension]
-     */
-    private function detectUploadType(string $bytes, string $reportedMime, string $filename): array
+    private function safeFilename(string $title): string
     {
-        $lower = strtolower($filename);
-        if (str_starts_with($bytes, '%PDF') || str_ends_with($lower, '.pdf') || str_contains($reportedMime, 'pdf')) {
-            return ['application/pdf', 'pdf'];
-        }
-        if (str_starts_with($bytes, "\xFF\xD8\xFF") || str_ends_with($lower, '.jpg') || str_ends_with($lower, '.jpeg')) {
-            return ['image/jpeg', 'jpg'];
-        }
-        if (str_starts_with($bytes, "\x89PNG") || str_ends_with($lower, '.png')) {
-            return ['image/png', 'png'];
-        }
-        throw new \RuntimeException('Only PDF, JPEG, or PNG receipts are accepted');
+        $safe = preg_replace('/[^a-zA-Z0-9._-]+/', '-', $title) ?? 'receipt';
+        $safe = trim($safe, '-');
+        return $safe !== '' ? $safe : 'receipt';
     }
 }

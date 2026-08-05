@@ -68,10 +68,10 @@ via HTTPS or `webcal://`. Rotate invalidates the old token. Requires
 **Expense receipts (2026-08-04):** Per-user receipt bin at `/receipts/`
 (date / location / brand / trip + download). Successful mail confirm/change
 imports archive a PDF under `storage/receipts/` — vendor MIME PDF attachment
-when present, else a generated itinerary/stay summary (`SimplePdf`, no
-Composer). Manual upload (PDF/JPG/PNG) and generate-from-trip/stay also
-supported. Retention `RECEIPT_RETENTION_DAYS` (default 90); purge runs at
-end of mail poll. Requires `expense_receipts` (`php scripts/migrate.php`).
+when present, else a PDF of the vendor confirmation email body (`SimplePdf`,
+no Composer). No manual upload and no synthetic trip/stay PDFs. Retention
+`RECEIPT_RETENTION_DAYS` (default 90); purge runs at end of mail poll.
+Requires `expense_receipts` (`php scripts/migrate.php`).
 
 **Not started:** Azure AD SSO, PWA/offline, push notifications.
 Mail auto-import stays on auto-create + notify (no pending-approval queue).
@@ -216,10 +216,10 @@ System-admin Mail review: Settings → Mail review (`is_system` only).
   fixing HSV→DEN style multi-zone days. Hotels stay on `APP_TIMEZONE`.
 - **Expense receipts are a durable file archive, not parse_log.** Short-lived
   `mail_raw` stays for system debug (7 days). User-facing PDFs live in
-  `expense_receipts` + `storage/receipts/` (~90 days), preferring vendor MIME
-  attachments over generated itinerary summaries. Generated PDFs are
-  confirmation helpers, not vendor folios (amounts only when already on the
-  stay).
+  `expense_receipts` + `storage/receipts/` (~90 days): vendor MIME PDF
+  attachments first, otherwise a PDF of the vendor confirmation email
+  (transaction text from the message itself). Never rebuild from trip/stay
+  rows — those summaries have no accounting value.
 
 ## Immediate next steps (suggested, not started)
 
