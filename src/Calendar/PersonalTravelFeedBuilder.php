@@ -13,15 +13,22 @@ use NexWaypoint\Users\User;
 /**
  * Builds ICS events for the feed owner's own travel:
  * timed transit legs + "In {city}" presence between legs (until next depart or trip end).
+ *
+ * Window: [asOf - daysBack, asOf + daysAhead]. Any overlapping trip is emitted
+ * in full (outbound before the window, return inside, etc.).
  */
 final class PersonalTravelFeedBuilder
 {
+    public const DEFAULT_DAYS_BACK = 14;
+    public const DEFAULT_DAYS_AHEAD = 90;
+
     private readonly TravelPresencePlanner $presence;
 
     public function __construct(
         private readonly TripRepository $trips,
         private readonly ?AirportRepository $airports = null,
-        private readonly int $daysAhead = 90,
+        private readonly int $daysBack = self::DEFAULT_DAYS_BACK,
+        private readonly int $daysAhead = self::DEFAULT_DAYS_AHEAD,
     ) {
         $this->presence = new TravelPresencePlanner($airports);
     }
@@ -38,7 +45,7 @@ final class PersonalTravelFeedBuilder
 
         $events = [];
 
-        foreach ($this->trips->findActiveOrUpcoming($ownerUserId, $this->daysAhead, $asOf) as $trip) {
+        foreach ($this->trips->findInDateWindow($ownerUserId, $this->daysBack, $this->daysAhead, $asOf) as $trip) {
             if ($trip->id === null || $trip->status === 'cancelled') {
                 continue;
             }

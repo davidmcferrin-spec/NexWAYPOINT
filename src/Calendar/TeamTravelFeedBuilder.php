@@ -16,9 +16,15 @@ use NexWaypoint\Visibility\VisibilityEngine;
 /**
  * Visibility-filtered team ICS: presence ("Name · Denver") between legs,
  * plus timed transit only when flight/carrier fields are visible.
+ *
+ * Window: [asOf - daysBack, asOf + daysAhead]. Any overlapping trip is emitted
+ * in full (same contract as PersonalTravelFeedBuilder).
  */
 final class TeamTravelFeedBuilder
 {
+    public const DEFAULT_DAYS_BACK = 14;
+    public const DEFAULT_DAYS_AHEAD = 90;
+
     private readonly TravelPresencePlanner $presence;
 
     public function __construct(
@@ -27,7 +33,8 @@ final class TeamTravelFeedBuilder
         private readonly VisibilityEngine $visibility,
         private readonly VisibilityBlockRepository $blocks,
         private readonly ?AirportRepository $airports = null,
-        private readonly int $daysAhead = 60,
+        private readonly int $daysBack = self::DEFAULT_DAYS_BACK,
+        private readonly int $daysAhead = self::DEFAULT_DAYS_AHEAD,
     ) {
         $this->presence = new TravelPresencePlanner($airports);
     }
@@ -46,7 +53,7 @@ final class TeamTravelFeedBuilder
         $events = [];
 
         foreach ($this->subjectsForFeed($feed) as $subject) {
-            foreach ($this->trips->findActiveOrUpcoming($subject->id, $this->daysAhead, $asOf) as $trip) {
+            foreach ($this->trips->findInDateWindow($subject->id, $this->daysBack, $this->daysAhead, $asOf) as $trip) {
                 if ($trip->id === null) {
                     continue;
                 }

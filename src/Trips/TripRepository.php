@@ -91,6 +91,38 @@ final class TripRepository
         return array_map(static fn (array $r) => Trip::fromRow($r), $rows);
     }
 
+    /**
+     * Trips that overlap [asOf - daysBack, asOf + daysAhead] inclusive.
+     * Used by calendar ICS feeds: if any day of the trip is in the window,
+     * the whole trip is returned (callers emit all legs / presence).
+     *
+     * @return Trip[]
+     */
+    public function findInDateWindow(
+        int $ownerId,
+        int $daysBack = 14,
+        int $daysAhead = 90,
+        ?\DateTimeImmutable $asOf = null,
+    ): array {
+        $asOf ??= new \DateTimeImmutable('today');
+        $daysBack = max(0, $daysBack);
+        $daysAhead = max(0, $daysAhead);
+        $rows = $this->db->fetchAll(
+            "SELECT * FROM trips
+             WHERE owner_id = :owner_id
+               AND status IN ('planned','active')
+               AND start_date <= :until
+               AND end_date >= :from
+             ORDER BY start_date ASC",
+            [
+                'owner_id' => $ownerId,
+                'from' => $asOf->modify("-{$daysBack} days")->format('Y-m-d'),
+                'until' => $asOf->modify("+{$daysAhead} days")->format('Y-m-d'),
+            ]
+        );
+        return array_map(static fn (array $r) => Trip::fromRow($r), $rows);
+    }
+
     public function create(Trip $trip, ?int $actorUserId = null): Trip
     {
         $data = $trip->toArray();

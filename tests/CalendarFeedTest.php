@@ -243,6 +243,156 @@ final class CalendarFeedTest extends NexWaypointTestCase
         );
     }
 
+    public function testFindInDateWindowOverlapsLookbackAndAhead(): void
+    {
+        $userId = $this->insertUser('cal_window');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $asOf = new \DateTimeImmutable('2026-08-07');
+
+        $inLookback = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Denver, CO',
+            startDate: '2026-07-20',
+            endDate: '2026-07-28', // ends inside 14-day lookback
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $tooOld = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Chicago, IL',
+            startDate: '2026-07-01',
+            endDate: '2026-07-10', // entirely before lookback
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $farAhead = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Seattle, WA',
+            startDate: '2026-11-20', // after +90d (2026-11-05)
+            endDate: '2026-11-25',
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $inAhead = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Atlanta, GA',
+            startDate: '2026-10-20',
+            endDate: '2026-10-22',
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+
+        $ids = array_map(
+            static fn (Trip $t) => (int) $t->id,
+            $tripRepo->findInDateWindow($userId, 14, 90, $asOf)
+        );
+
+        self::assertContains((int) $inLookback->id, $ids);
+        self::assertContains((int) $inAhead->id, $ids);
+        self::assertNotContains((int) $tooOld->id, $ids);
+        self::assertNotContains((int) $farAhead->id, $ids);
+    }
+
+    public function testPersonalFeedIncludesWholeTripWhenReturnInLookback(): void
+    {
+        $userId = $this->insertUser('cal_lookback_full');
+        if ($this->db->columnExists('users', 'home_city')) {
+            $this->db->execute(
+                'UPDATE users SET home_city = :c, home_state = :s WHERE id = :id',
+                ['c' => 'Huntsville', 's' => 'AL', 'id' => $userId]
+            );
+        }
+
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $asOf = new \DateTimeImmutable('2026-08-07');
+        // Outbound before the 14-day lookback; return still inside the window.
+        $outbound = new \DateTimeImmutable('2026-07-18');
+        $inbound = new \DateTimeImmutable('2026-07-28');
+
+        $trip = $tripRepo->create(new Trip(
+            id: null,
+            ownerId: $userId,
+            destinationCity: 'Denver, CO',
+            startDate: $outbound->format('Y-m-d'),
+            endDate: $inbound->format('Y-m-d'),
+            status: 'planned',
+            tripPurpose: null,
+            notes: null,
+            isPrivate: false,
+        ));
+        $tripRepo->addSegment(new TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '301',
+            confirmationCode: 'LB1',
+            origin: 'HSV',
+            destination: 'DEN',
+            departDt: $outbound->setTime(8, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $outbound->setTime(10, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+        $tripRepo->addSegment(new TripSegment(
+            id: null,
+            tripId: (int) $trip->id,
+            segmentType: 'flight',
+            segmentSubtype: null,
+            carrierId: null,
+            carrier: 'UA',
+            flightNumber: '302',
+            confirmationCode: 'LB1',
+            origin: 'DEN',
+            destination: 'HSV',
+            departDt: $inbound->setTime(16, 0)->format('Y-m-d H:i:s'),
+            arriveDt: $inbound->setTime(19, 0)->format('Y-m-d H:i:s'),
+            hotelStayId: null,
+            status: 'scheduled',
+            sourceParseLogId: null,
+        ));
+
+        $owner = (new UserRepository($this->db, $this->logger))->find($userId);
+        self::assertNotNull($owner);
+
+        $events = (new PersonalTravelFeedBuilder(
+            $tripRepo,
+            new AirportRepository(null, $this->logger),
+        ))->buildEvents($owner, $asOf);
+
+        $summaries = array_map(static fn (IcsEvent $e) => $e->summary, $events);
+        self::assertTrue(
+            (bool) array_filter($summaries, static fn (string $s) => str_contains($s, '301')),
+            'outbound before lookback still emitted'
+        );
+        self::assertTrue(
+            (bool) array_filter($summaries, static fn (string $s) => str_contains($s, '302')),
+            'return in lookback emitted'
+        );
+        self::assertTrue(
+            (bool) array_filter($summaries, static fn (string $s) => str_starts_with($s, 'In ') && str_contains($s, 'Denver')),
+            'presence for whole trip'
+        );
+
+        // Same trip must not appear under the old forward-only query.
+        self::assertSame([], $tripRepo->findActiveOrUpcoming($userId, 90, $asOf));
+    }
+
     public function testPersonalFeedSkipsCancelledSegments(): void
     {
         $userId = $this->insertUser('cal_cancel');
