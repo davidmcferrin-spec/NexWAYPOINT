@@ -97,6 +97,39 @@ $webcalUrl = static function (?string $httpsUrl): ?string {
     return preg_replace('#^https?#i', 'webcal', $httpsUrl);
 };
 
+/** Human label for calendar_feeds.last_accessed_at (null = never polled). */
+$formatLastFetched = static function (?CalendarFeed $feed): string {
+    $raw = $feed?->lastAccessedAt;
+    if ($raw === null || trim($raw) === '') {
+        return 'Last fetched: never — no calendar app has requested this URL yet.';
+    }
+    try {
+        $dt = new DateTimeImmutable($raw);
+    } catch (Exception) {
+        return 'Last fetched: ' . $raw;
+    }
+    $when = $dt->format('M j, Y g:i A T');
+    $seconds = (new DateTimeImmutable('now'))->getTimestamp() - $dt->getTimestamp();
+    if ($seconds < 0) {
+        return 'Last fetched: ' . $when;
+    }
+    if ($seconds < 60) {
+        $rel = 'just now';
+    } elseif ($seconds < 3600) {
+        $m = intdiv($seconds, 60);
+        $rel = $m . ' minute' . ($m === 1 ? '' : 's') . ' ago';
+    } elseif ($seconds < 86400) {
+        $h = intdiv($seconds, 3600);
+        $rel = $h . ' hour' . ($h === 1 ? '' : 's') . ' ago';
+    } elseif ($seconds < 86400 * 14) {
+        $d = intdiv($seconds, 86400);
+        $rel = $d . ' day' . ($d === 1 ? '' : 's') . ' ago';
+    } else {
+        return 'Last fetched: ' . $when;
+    }
+    return 'Last fetched: ' . $when . ' (' . $rel . ')';
+};
+
 $personalUrl = $feedUrl($personal);
 $teamUrl = $feedUrl($team);
 $teamModeAll = $team === null || $team->memberUserIds === null;
@@ -149,6 +182,7 @@ $selectedMembers = $team?->memberUserIds ?? [];
                 <input type="text" readonly id="personal-url" value="<?= htmlspecialchars($personalUrl, ENT_QUOTES) ?>">
             </label>
             <p class="hint">webcal: <?= htmlspecialchars((string) $webcalUrl($personalUrl), ENT_QUOTES) ?></p>
+            <p class="hint"><?= htmlspecialchars($formatLastFetched($personal), ENT_QUOTES) ?></p>
             <div class="row-actions">
                 <button type="button" class="secondary" data-copy="#personal-url">Copy URL</button>
                 <form method="post" class="inline-form" onsubmit="return confirm('Rotate this link? Your old subscribe URL will stop working.');">
@@ -178,6 +212,7 @@ $selectedMembers = $team?->memberUserIds ?? [];
                 <input type="text" readonly id="team-url" value="<?= htmlspecialchars($teamUrl, ENT_QUOTES) ?>">
             </label>
             <p class="hint">webcal: <?= htmlspecialchars((string) $webcalUrl($teamUrl), ENT_QUOTES) ?></p>
+            <p class="hint"><?= htmlspecialchars($formatLastFetched($team), ENT_QUOTES) ?></p>
             <div class="row-actions">
                 <button type="button" class="secondary" data-copy="#team-url">Copy URL</button>
                 <form method="post" class="inline-form" onsubmit="return confirm('Rotate this link? Your old subscribe URL will stop working.');">
