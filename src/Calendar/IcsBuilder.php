@@ -6,6 +6,7 @@ namespace NexWaypoint\Calendar;
 
 /**
  * Minimal RFC 5545 VCALENDAR writer (no Composer dependency).
+ * Tuned for Outlook internet-calendar subscribe (headers + folding + text).
  */
 final class IcsBuilder
 {
@@ -60,7 +61,7 @@ final class IcsBuilder
             $lines[] = 'LOCATION:' . $this->text($event->location);
         }
         if ($event->categories !== []) {
-            $lines[] = 'CATEGORIES:' . $this->text(implode(',', $event->categories));
+            $lines[] = $this->categoriesLine($event->categories);
         }
         $lines[] = 'STATUS:' . $this->text($event->status);
         $lines[] = 'SEQUENCE:' . max(0, $event->sequence);
@@ -74,13 +75,56 @@ final class IcsBuilder
         return array_map([$this, 'fold'], $lines);
     }
 
+    /**
+     * @param list<string> $categories
+     */
+    private function categoriesLine(array $categories): string
+    {
+        // Commas separate categories; escape only inside each value.
+        $parts = [];
+        foreach ($categories as $category) {
+            $category = trim($category);
+            if ($category === '') {
+                continue;
+            }
+            $parts[] = $this->text($category);
+        }
+        return 'CATEGORIES:' . implode(',', $parts);
+    }
+
     private function text(string $value): string
     {
+        $value = $this->outlookSafe($value);
         // Escape backslashes first so newline/`\,`/`\;` markers stay single-escaped.
         $value = str_replace('\\', '\\\\', $value);
         $value = str_replace(["\r\n", "\r", "\n"], '\\n', $value);
         $value = str_replace([',', ';'], ['\\,', '\\;'], $value);
         return $value;
+    }
+
+    /**
+     * Normalize punctuation Outlook's subscribe parser often rejects, without
+     * stripping accented city/person names.
+     */
+    private function outlookSafe(string $value): string
+    {
+        return strtr($value, [
+            '·' => '-',
+            '•' => '-',
+            '→' => '->',
+            '←' => '<-',
+            '—' => '-',
+            '–' => '-',
+            '’' => "'",
+            '‘' => "'",
+            '“' => '"',
+            '”' => '"',
+            "\u{00A0}" => ' ',
+            "\u{200B}" => '',
+            "\u{200C}" => '',
+            "\u{200D}" => '',
+            "\u{FEFF}" => '',
+        ]);
     }
 
     private function dateOnly(string $ymd): string
@@ -110,17 +154,46 @@ final class IcsBuilder
         }
     }
 
+    /**
+     * RFC 5545 §3.1: fold at 75 octets; never split a UTF-8 codepoint.
+     */
     private function fold(string $line): string
     {
         if (strlen($line) <= 75) {
             return $line;
         }
-        $out = substr($line, 0, 75);
-        $rest = substr($line, 75);
-        while ($rest !== '' && $rest !== false) {
-            $out .= "\r\n " . substr($rest, 0, 74);
-            $rest = substr($rest, 74);
+
+        $cut = $this->utf8SafeCut($line, 75);
+        $out = substr($line, 0, $cut);
+        $rest = substr($line, $cut);
+        while ($rest !== '') {
+            $cut = $this->utf8SafeCut($rest, 74);
+            $out .= "\r\n " . substr($rest, 0, $cut);
+            $rest = substr($rest, $cut);
         }
         return $out;
+    }
+
+    private function utf8SafeCut(string $value, int $maxOctets): int
+    {
+        $len = strlen($value);
+        if ($len <= $maxOctets) {
+            return $len;
+        }
+
+        $cut = $maxOctets;
+        while ($cut > 0 && (ord($value[$cut]) & 0xC0) === 0x80) {
+            $cut--;
+        }
+
+        if ($cut === 0) {
+            // Pathological: single codepoint longer than the fold limit.
+            $cut = 1;
+            while ($cut < $len && (ord($value[$cut]) & 0xC0) === 0x80) {
+                $cut++;
+            }
+        }
+
+        return $cut;
     }
 }

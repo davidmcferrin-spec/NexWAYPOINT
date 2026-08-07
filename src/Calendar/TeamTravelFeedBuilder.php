@@ -14,7 +14,7 @@ use NexWaypoint\Visibility\VisibilityBlockRepository;
 use NexWaypoint\Visibility\VisibilityEngine;
 
 /**
- * Visibility-filtered team ICS: presence ("Name · Denver") between legs,
+ * Visibility-filtered team ICS: presence ("Name - Denver") between legs,
  * plus timed transit only when flight/carrier fields are visible.
  *
  * Window: [asOf - daysBack, asOf + daysAhead]. Any overlapping trip is emitted
@@ -170,7 +170,7 @@ final class TeamTravelFeedBuilder
             $city = null;
         }
         $name = $subject->displayName;
-        $summary = $city !== null ? $name . ' · ' . $city : $name . ' · Traveling';
+        $summary = $city !== null ? $name . ' - ' . $city : $name . ' - Traveling';
 
         $desc = [];
         if ($canPurpose && $trip->tripPurpose !== null && trim($trip->tripPurpose) !== '') {
@@ -202,7 +202,7 @@ final class TeamTravelFeedBuilder
         $city = $window['city'];
         return new IcsEvent(
             uid: 'nxwp-team-presence-' . $subject->id . '-' . $window['after_segment_id'] . '@nexwaypoint',
-            summary: $subject->displayName . ' · ' . $city,
+            summary: $subject->displayName . ' - ' . $city,
             description: null,
             location: $city,
             dtStart: $window['start']->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
@@ -251,9 +251,9 @@ final class TeamTravelFeedBuilder
             }
         }
 
-        $summary = implode(' · ', array_filter($bits, static fn (string $b): bool => $b !== ''));
+        $summary = implode(' - ', array_filter($bits, static fn (string $b): bool => $b !== ''));
         if ($summary === $subject->displayName) {
-            $summary .= ' · Flight';
+            $summary .= ' - Flight';
         }
 
         return new IcsEvent(

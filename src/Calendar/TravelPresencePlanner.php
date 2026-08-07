@@ -125,12 +125,13 @@ final class TravelPresencePlanner
 
     public function routeLabel(?string $origin, ?string $destination): string
     {
+        // ASCII arrow — Outlook internet-calendar subscribe is flaky with →.
         if ($this->airports !== null) {
-            return $this->airports->routeLabel($origin, $destination);
+            return $this->airports->routeLabel($origin, $destination, ' -> ');
         }
         $o = $origin !== null && $origin !== '' ? $origin : '?';
         $d = $destination !== null && $destination !== '' ? $destination : '?';
-        return $o . ' → ' . $d;
+        return $o . ' -> ' . $d;
     }
 
     private function cityLabel(?string $airportCode, Trip $trip): string

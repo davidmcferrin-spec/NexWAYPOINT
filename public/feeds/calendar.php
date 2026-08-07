@@ -56,7 +56,7 @@ $ics = new IcsBuilder();
 
 if ($feed->kind === CalendarFeed::KIND_PERSONAL) {
     $events = (new PersonalTravelFeedBuilder($tripRepo, $airports))->buildEvents($owner);
-    $calName = 'NexWAYPOINT · ' . $owner->displayName;
+    $calName = 'NexWAYPOINT - ' . $owner->displayName;
     $filename = 'nexwaypoint-personal.ics';
 } else {
     $ruleRepo = new VisibilityRuleRepository($db);
@@ -69,15 +69,18 @@ if ($feed->kind === CalendarFeed::KIND_PERSONAL) {
         $blocks,
         $airports,
     ))->buildEvents($feed);
-    $calName = 'NexWAYPOINT · Team';
+    $calName = 'NexWAYPOINT - Team';
     $filename = 'nexwaypoint-team.ics';
 }
 
 $body = $ics->build($calName, $events);
 $feedRepo->touchAccess($feed->id);
 
-header('Content-Type: text/calendar; charset=utf-8');
-header('Content-Disposition: inline; filename="' . $filename . '"');
-header('Cache-Control: private, max-age=300');
+// Outlook subscribe is pickier than file import: method= must match METHOD:PUBLISH.
+header('Content-Type: text/calendar; charset=utf-8; method=PUBLISH');
+header('Content-Disposition: attachment; filename="' . $filename . '"');
+header('Content-Length: ' . (string) strlen($body));
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
 header('X-Content-Type-Options: nosniff');
 echo $body;

@@ -83,13 +83,38 @@ final class CalendarFeedTest extends NexWaypointTestCase
         ]);
 
         self::assertStringContainsString('BEGIN:VCALENDAR', $ics);
+        self::assertStringContainsString('METHOD:PUBLISH', $ics);
         self::assertStringContainsString('X-WR-CALNAME:Test Cal', $ics);
         self::assertStringContainsString('UID:nxwp-test-1@nexwaypoint', $ics);
         self::assertStringContainsString('DTSTART:20260814T130000Z', $ics);
         self::assertStringContainsString('DTSTART;VALUE=DATE:20260814', $ics);
         self::assertStringContainsString('DTEND;VALUE=DATE:20260817', $ics);
         self::assertStringContainsString('DESCRIPTION:Line1\\nLine2\\; special\\, chars', $ics);
+        // Decorative unicode normalized for Outlook; CATEGORIES commas stay separators.
+        self::assertStringContainsString('SUMMARY:Flight - HSV -> DEN', $ics);
+        self::assertStringContainsString('LOCATION:HSV -> DEN', $ics);
+        self::assertStringContainsString('SUMMARY:Trip - Denver', $ics);
+        self::assertStringContainsString('CATEGORIES:NexWAYPOINT,Flight', $ics);
+        self::assertStringNotContainsString('NexWAYPOINT\\,Flight', $ics);
         self::assertStringEndsWith("\r\n", $ics);
+    }
+
+    public function testIcsBuilderFoldsWithoutSplittingUtf8(): void
+    {
+        // Long prefix so the fold lands near a multi-byte city name character.
+        $summary = str_repeat('A', 70) . 'São Paulo';
+        $ics = (new IcsBuilder())->build('Fold Cal', [
+            new IcsEvent(
+                uid: 'nxwp-fold@nexwaypoint',
+                summary: $summary,
+                dtStart: '2026-08-14T13:00:00Z',
+                dtEnd: '2026-08-14T14:00:00Z',
+                allDay: false,
+            ),
+        ]);
+
+        self::assertSame(1, preg_match('//u', $ics), 'folded ICS must remain valid UTF-8');
+        self::assertStringContainsString('São Paulo', str_replace(["\r\n ", "\r\n"], '', $ics));
     }
 
     public function testPersonalFeedIncludesTripAndFlight(): void
@@ -145,7 +170,7 @@ final class CalendarFeedTest extends NexWaypointTestCase
             'expected In Denver presence after arrival'
         );
         self::assertFalse(
-            (bool) array_filter($summaries, static fn (string $s) => str_starts_with($s, 'Trip ·')),
+            (bool) array_filter($summaries, static fn (string $s) => str_starts_with($s, 'Trip -')),
             'trip all-day should be omitted when transit legs exist'
         );
 

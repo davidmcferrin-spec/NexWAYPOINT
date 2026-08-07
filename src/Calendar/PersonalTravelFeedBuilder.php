@@ -77,7 +77,7 @@ final class PersonalTravelFeedBuilder
     private function tripAllDay(Trip $trip): IcsEvent
     {
         $endExclusive = $this->exclusiveEndDate($trip->endDate);
-        $summary = 'Trip · ' . trim($trip->destinationCity);
+        $summary = 'Trip - ' . trim($trip->destinationCity);
         $descParts = [];
         if ($trip->tripPurpose !== null && trim($trip->tripPurpose) !== '') {
             $descParts[] = trim($trip->tripPurpose);
@@ -112,7 +112,7 @@ final class PersonalTravelFeedBuilder
         return new IcsEvent(
             uid: 'nxwp-presence-' . $window['after_segment_id'] . '@nexwaypoint',
             summary: 'In ' . $city,
-            description: 'Trip · ' . trim($trip->destinationCity),
+            description: 'Trip - ' . trim($trip->destinationCity),
             location: $city,
             dtStart: $window['start']->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
             dtEnd: $window['end']->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
@@ -149,14 +149,14 @@ final class PersonalTravelFeedBuilder
         $route = $this->presence->routeLabel($segment->origin, $segment->destination);
         $summary = trim(implode(' ', $bits));
         if ($route !== '') {
-            $summary = $summary !== '' ? $summary . ' · ' . $route : $route;
+            $summary = $summary !== '' ? $summary . ' - ' . $route : $route;
         }
         if ($summary === '') {
             $summary = $kind;
         }
 
         $desc = [];
-        $desc[] = $kind . ' · ' . trim($trip->destinationCity);
+        $desc[] = $kind . ' - ' . trim($trip->destinationCity);
         if ($segment->confirmationCode !== null && trim($segment->confirmationCode) !== '') {
             $desc[] = 'Confirmation: ' . trim($segment->confirmationCode);
         }
