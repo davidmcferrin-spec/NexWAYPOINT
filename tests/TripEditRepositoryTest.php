@@ -243,6 +243,27 @@ final class TripEditRepositoryTest extends NexWaypointTestCase
         self::assertSame('LAX', $multi['trip']->destinationCity);
     }
 
+    public function testMultiCityOneWayDestinationIsFirstOvernightNotLastAirport(): void
+    {
+        $userId = $this->insertUser('traveler');
+        $trips = new TripRepository($this->db, $this->logger);
+
+        $result = $trips->upsertItineraryByConfirmation($userId, 'NTSHWH', [
+            [
+                'origin' => 'HSV', 'destination' => 'DFW',
+                'depart_dt' => '2026-08-24 07:00:00', 'arrive_dt' => '2026-08-24 09:10:00',
+                'flight_number' => '3634',
+            ],
+            [
+                'origin' => 'DFW', 'destination' => 'LGA',
+                'depart_dt' => '2026-08-26 07:34:00', 'arrive_dt' => '2026-08-26 12:02:00',
+                'flight_number' => '1609',
+            ],
+        ], null, $userId);
+
+        self::assertSame('DFW', $result['trip']->destinationCity);
+    }
+
     public function testReplaceTripLegsMixedFlightAndTrain(): void
     {
         $userId = $this->insertUser('traveler');

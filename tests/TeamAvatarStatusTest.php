@@ -603,6 +603,97 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertStringContainsString('Early', (string) $result['upcoming']);
     }
 
+    public function testMultiCityNextIsFirstStayThenSecondCity(): void
+    {
+        $userId = $this->insertUser('dave_multicity');
+        $userRepo = new UserRepository($this->db, $this->logger);
+        $userRepo->updateHomeLocation($userId, 'Huntsville', 'AL', 34.7304, -86.5861, $userId);
+        $user = $userRepo->find($userId);
+        self::assertNotNull($user);
+
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $imported = $tripRepo->upsertItineraryByConfirmation($userId, 'NTSHWH', [
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'American Airlines',
+                'flight_number' => '3634',
+                'origin' => 'HSV',
+                'destination' => 'DFW',
+                'depart_dt' => '2026-08-24 07:00:00',
+                'arrive_dt' => '2026-08-24 09:10:00',
+            ],
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'American Airlines',
+                'flight_number' => '1609',
+                'origin' => 'DFW',
+                'destination' => 'LGA',
+                'depart_dt' => '2026-08-26 07:34:00',
+                'arrive_dt' => '2026-08-26 12:02:00',
+            ],
+        ], null, $userId);
+        $trip = $imported['trip'];
+
+        $resolver = new TeamLocationResolver(
+            $tripRepo,
+            new HotelStayRepository($this->db, $this->logger),
+            new HotelPropertyRepository($this->db, $this->logger),
+            new Geocoder($this->logger, sys_get_temp_dir() . '/nx_geocode_multicity'),
+            new AirportRepository(null, $this->logger),
+        );
+
+        $atHome = $resolver->resolveWithUpcoming(
+            $user,
+            ['status' => 'home', 'label' => 'Home', 'detail' => []],
+            true,
+            $trip,
+            new \DateTimeImmutable('2026-08-13 12:00:00'),
+        );
+        self::assertNotNull($atHome['next']);
+        self::assertSame('Dallas/Fort Worth, TX (DFW)', $atHome['next']['city_label']);
+        self::assertSame('Aug 24', $atHome['next']['dates']);
+        self::assertSame('Early', $atHome['next']['time_of_day']);
+
+        $inDallas = $resolver->resolveWithUpcoming(
+            $user,
+            [
+                'status' => 'remote',
+                'label' => 'Working Remote · Dallas/Fort Worth, TX',
+                'detail' => [
+                    'trip_id' => $trip->id,
+                    'destination' => 'DFW',
+                    'location_city' => 'Dallas/Fort Worth, TX',
+                    'from_itinerary' => true,
+                ],
+            ],
+            true,
+            null,
+            new \DateTimeImmutable('2026-08-25 12:00:00'),
+        );
+        self::assertNotNull($inDallas['next']);
+        self::assertSame('New York, NY (LGA)', $inDallas['next']['city_label']);
+        self::assertSame('Aug 26', $inDallas['next']['dates']);
+        self::assertSame('Early', $inDallas['next']['time_of_day']);
+
+        $inNewYork = $resolver->resolveWithUpcoming(
+            $user,
+            [
+                'status' => 'remote',
+                'label' => 'Working Remote · New York, NY',
+                'detail' => [
+                    'trip_id' => $trip->id,
+                    'destination' => 'LGA',
+                    'location_city' => 'New York, NY',
+                    'from_itinerary' => true,
+                ],
+            ],
+            true,
+            null,
+            new \DateTimeImmutable('2026-08-26 15:00:00'),
+        );
+        self::assertNull($inNewYork['next']);
+    }
+
     public function testUpcomingFinderSkipsPrivateTripsForOthers(): void
     {
         $ownerId = $this->insertUser('owner');
@@ -864,6 +955,50 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertSame('stay', $itin[1]['type']);
         self::assertStringContainsString('In DEN', $itin[1]['label']);
         self::assertStringNotContainsString('Layover', $itin[1]['label']);
+    }
+
+    public function testTravelPreviewMultiCityListsStayCitiesInOrder(): void
+    {
+        $ownerId = $this->insertUser('flyer_mc');
+        $viewerId = $this->insertUser('peer_mc');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+
+        $tripRepo->upsertItineraryByConfirmation($ownerId, 'NTSHWH', [
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'American Airlines',
+                'flight_number' => '3634',
+                'origin' => 'HSV',
+                'destination' => 'DFW',
+                'depart_dt' => '2026-08-24 07:00:00',
+                'arrive_dt' => '2026-08-24 09:10:00',
+            ],
+            [
+                'segment_type' => 'flight',
+                'carrier' => 'American Airlines',
+                'flight_number' => '1609',
+                'origin' => 'DFW',
+                'destination' => 'LGA',
+                'depart_dt' => '2026-08-26 07:34:00',
+                'arrive_dt' => '2026-08-26 12:02:00',
+            ],
+        ], null, $ownerId);
+
+        $builder = new TeamTravelPreviewBuilder(
+            $tripRepo,
+            new VisibilityEngine(new UserRepository($this->db, $this->logger), new VisibilityRuleRepository($this->db)),
+            new VisibilityBlockRepository($this->db),
+            null,
+            null,
+            new AirportRepository(null, $this->logger),
+        );
+
+        $preview = $builder->build($viewerId, $ownerId, 21);
+        self::assertCount(1, $preview);
+        self::assertSame('Dallas/Fort Worth, TX then New York, NY', $preview[0]['destination']);
+        $types = array_column($preview[0]['itinerary'], 'type');
+        self::assertSame(['leg', 'stay', 'leg'], $types);
+        self::assertStringContainsString('In Dallas/Fort Worth, TX', $preview[0]['itinerary'][1]['label']);
     }
 
     public function testTravelPreviewRedactsCityOnItineraryWhenDenied(): void

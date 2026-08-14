@@ -694,8 +694,9 @@ final class TripRepository
 
     /**
      * Pick a display destination for the trip.
-     * Round-trips (last dest ≈ first origin) use the outbound peak city,
-     * not the home airport on the return leg.
+     * Overnight / open-ended arrivals (gap > 3h, or last dest ≠ first origin)
+     * win over the final airport — so HSV→DFW (stay)→LGA is Dallas, not LGA.
+     * Round-trips with no timed stays still use the outbound peak city.
      *
      * @param list<array<string, mixed>> $legs
      */
@@ -703,6 +704,11 @@ final class TripRepository
     {
         if ($legs === []) {
             return null;
+        }
+
+        $firstStay = (new ItineraryStayPlanner())->firstStayDestination($legs);
+        if ($firstStay !== null && $firstStay !== '') {
+            return $firstStay;
         }
 
         $firstOrigin = strtoupper(trim((string) ($legs[0]['origin'] ?? '')));

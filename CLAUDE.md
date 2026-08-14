@@ -39,8 +39,8 @@ global-properties migration).
 `You are: <Status>` override (remote requires city/state), dashboard
 Table / Cards / Map views (`localStorage` preference) with Leaflet city
 clusters → face markers. Map pins = current location only. Table/cards show
-Current + Next (city + dates when a later trip exists). Avatar/row/card click
-opens a 21-day travel look-ahead modal.
+Current + Next (next overnight stay city + that city’s date/time, or Home
+on a return). Avatar/row/card click opens a 21-day travel look-ahead modal.
 
 **Complex itinerary (2026-07-20):** `TripStatusEngine` phases are pre-flight /
 en_route / post-flight (45m windows), layover (gap ≤3h), itinerary remote
@@ -56,6 +56,16 @@ Flight or Train; hotels attach via `hotel_stay_id` (existing stay or create
 inline; multiple stays per trip OK). Long transit gaps use `at_hotel` when
 a linked hotel covers `now`. `/flights/add.php` and `/trains/add.php`
 redirect to the builder.
+
+**Multi-city one-ways (2026-08-13):** Overnight arrivals (gap >3h) and an
+open-ended last city (no return to first origin) are stay cities via
+`ItineraryStayPlanner`. Mail import still writes every parsed leg; trip
+`destination_city` is the **first stay** (HSV→DFW stay→LGA is Dallas, not
+LGA). Dashboard Next is the next stay city with that inbound’s date/time
+(Dallas Aug 24 Early, then New York Aug 26 Early) — not the trip’s last
+airport. After the last landing, status stays itinerary-remote in that city
+through `end_date` instead of snapping to Home at +45m. Round-trips and
+same-day connections are unchanged. Confirmation parsers were not widened.
 
 **Calendar feeds (2026-08-04):** Settings → Calendar feeds issues per-user
 secret ICS URLs (`/feeds/calendar.php?t=…`) for (1) personal travel

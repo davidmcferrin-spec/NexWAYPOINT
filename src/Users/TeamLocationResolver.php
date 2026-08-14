@@ -8,6 +8,7 @@ use NexWaypoint\Hotels\Geocoder;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\AirportRepository;
+use NexWaypoint\Trips\ItineraryStayPlanner;
 use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripSegment;
@@ -22,8 +23,9 @@ use NexWaypoint\Trips\TripSegment;
  * to labels like "Dallas/Fort Worth, TX (DFW)".
  * Returns null when destination detail is visibility-redacted or unresolved.
  *
- * "Next" is the soonest location change a viewer should care about: return
- * Home (re-base) while away, otherwise the next visible trip destination.
+ * "Next" is the soonest location change a viewer should care about:
+ * the next overnight/open-ended stay city on the active trip, else return
+ * Home (re-base) while away, else the first stay city of a later trip.
  * Dates include an early/afternoon/evening/late bucket when a wall-clock
  * depart/arrive time is known.
  */
@@ -128,6 +130,10 @@ final class TeamLocationResolver
         $candidates = [];
 
         if (!$atBase && $activeTripId > 0) {
+            $stayNext = $this->candidateNextStayOnTrip($activeTripId, $now, $status);
+            if ($stayNext !== null) {
+                $candidates[] = $stayNext;
+            }
             $homeNext = $this->candidateReturnHome($user, $activeTripId, $now, $status['status']);
             if ($homeNext !== null) {
                 $candidates[] = $homeNext;
@@ -304,10 +310,57 @@ final class TeamLocationResolver
     }
 
     /**
+     * Next overnight city still ahead on the trip the subject is already on.
+     *
+     * @param array{status: string, label: string, detail: array<string, mixed>} $status
+     * @return array{sort_at: \DateTimeImmutable, next: array{city_label: string, dates: string, time_of_day: string|null}}|null
+     */
+    private function candidateNextStayOnTrip(int $tripId, \DateTimeImmutable $now, array $status): ?array
+    {
+        $stays = (new ItineraryStayPlanner($this->airports))->staysFromSegments(
+            $this->transitSegmentsForTrip($tripId)
+        );
+        if ($stays === []) {
+            return null;
+        }
+
+        $detail = $status['detail'] ?? [];
+        $currentDest = strtoupper(trim((string) ($detail['destination'] ?? '')));
+        $headingThere = in_array($status['status'], [
+            'pre_flight', 'en_route', 'post_flight', 'layover', 'delayed',
+        ], true);
+
+        foreach ($stays as $stay) {
+            $departInstant = $this->wallClockInstant($stay['origin'], $stay['depart_dt']);
+            if ($departInstant <= $now) {
+                continue;
+            }
+            if ($headingThere && $currentDest !== '' && $stay['destination'] === $currentDest) {
+                continue;
+            }
+            $fromStay = $this->candidateFromStay($stay);
+            if ($fromStay !== null) {
+                return $fromStay;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @return array{sort_at: \DateTimeImmutable, next: array{city_label: string, dates: string, time_of_day: string|null}}|null
      */
     private function candidateUpcomingTrip(Trip $trip): ?array
     {
+        $transit = $this->transitSegmentsForTrip((int) ($trip->id ?? 0));
+        $stays = (new ItineraryStayPlanner($this->airports))->staysFromSegments($transit);
+        if ($stays !== []) {
+            $fromStay = $this->candidateFromStay($stays[0]);
+            if ($fromStay !== null) {
+                return $fromStay;
+            }
+        }
+
         $upcomingPin = $this->resolveUpcomingDestination($trip->destinationCity);
         if ($upcomingPin === null) {
             return null;
@@ -315,7 +368,6 @@ final class TeamLocationResolver
 
         $timeOfDay = null;
         $sortAt = null;
-        $transit = $this->transitSegmentsForTrip((int) ($trip->id ?? 0));
         if ($transit !== [] && $transit[0]->departDt !== null) {
             $timeOfDay = self::timeOfDayBucket((string) $transit[0]->departDt);
             $sortAt = $this->wallClockInstant($transit[0]->origin, (string) $transit[0]->departDt);
@@ -337,6 +389,46 @@ final class TeamLocationResolver
                 'time_of_day' => $timeOfDay,
             ],
         ];
+    }
+
+    /**
+     * @param array{origin: string, destination: string, depart_dt: string, arrive_dt: ?string} $stay
+     * @return array{sort_at: \DateTimeImmutable, next: array{city_label: string, dates: string, time_of_day: string|null}}|null
+     */
+    private function candidateFromStay(array $stay): ?array
+    {
+        $label = $this->stayCityLabel($stay['destination']);
+        if ($label === null || $label === '') {
+            return null;
+        }
+
+        return [
+            'sort_at' => $this->wallClockInstant($stay['origin'], $stay['depart_dt']),
+            'next' => [
+                'city_label' => $label,
+                'dates' => self::formatSingleDate($stay['depart_dt']),
+                'time_of_day' => self::timeOfDayBucket($stay['depart_dt']),
+            ],
+        ];
+    }
+
+    private function stayCityLabel(string $code): ?string
+    {
+        $code = trim($code);
+        if ($code === '') {
+            return null;
+        }
+        $iata = AirportRepository::normalizeIata($code);
+        if ($this->airports !== null && $iata !== null && $this->airports->has($iata)) {
+            return $this->airports->labelFor($iata);
+        }
+        // Bare IATA without a catalog lookup is not a display name — fall back
+        // to trips.destination_city (e.g. "Chicago, IL") in the caller.
+        if ($iata !== null && strtoupper($code) === $iata) {
+            return null;
+        }
+        $pin = $this->fromCityState($code, null);
+        return $pin['city_label'] ?? null;
     }
 
     /**

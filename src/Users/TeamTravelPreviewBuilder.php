@@ -7,6 +7,8 @@ namespace NexWaypoint\Users;
 use NexWaypoint\Hotels\HotelPropertyRepository;
 use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\AirportRepository;
+use NexWaypoint\Trips\ItineraryStayPlanner;
+use NexWaypoint\Trips\Trip;
 use NexWaypoint\Trips\TripSegment;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Visibility\VisibilityBlockRepository;
@@ -95,8 +97,9 @@ final class TeamTravelPreviewBuilder
             $canCarrier = $isSelf || in_array('carrier', $fields, true);
             $canHotelName = $isSelf || in_array('hotel_name', $fields, true);
 
+            $segments = $this->trips->segmentsForTrip($trip->id);
             $itinerary = $this->buildItinerary(
-                $this->trips->segmentsForTrip($trip->id),
+                $segments,
                 $canCity,
                 $canDates,
                 $canFlight,
@@ -111,7 +114,7 @@ final class TeamTravelPreviewBuilder
                 continue;
             }
 
-            $destination = $canCity ? trim($trip->destinationCity) : null;
+            $destination = $canCity ? $this->destinationLabel($trip, $segments) : null;
             if ($destination === '') {
                 $destination = null;
             }
@@ -141,6 +144,31 @@ final class TeamTravelPreviewBuilder
         }
 
         return $out;
+    }
+
+    /**
+     * Multi-city trips list overnight cities in order (Dallas then New York).
+     * Single-stay / no-segment trips keep destination_city.
+     *
+     * @param TripSegment[] $segments
+     */
+    private function destinationLabel(Trip $trip, array $segments): string
+    {
+        $stays = (new ItineraryStayPlanner($this->airports))->staysFromSegments($segments);
+        if (count($stays) >= 2) {
+            $parts = [];
+            foreach ($stays as $stay) {
+                $label = $this->placeLabel($stay['destination']);
+                if ($label !== '') {
+                    $parts[] = $label;
+                }
+            }
+            if (count($parts) >= 2) {
+                return implode(' then ', $parts);
+            }
+        }
+
+        return trim($trip->destinationCity);
     }
 
     /**

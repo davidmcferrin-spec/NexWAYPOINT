@@ -176,6 +176,15 @@ final class TripStatusEngine
 
                 $next = $transit[$i + 1] ?? null;
                 if ($next === null || $next->departDt === null) {
+                    // Last arrival with no return: stay in that city until the
+                    // trip drops out of the active window (end_date), instead
+                    // of snapping to Home 45 minutes after landing.
+                    if ($now > $postEnd) {
+                        $openEnded = $this->openEndedLastCity($transit, $segment, $segments, $now);
+                        if ($openEnded !== null) {
+                            return $openEnded;
+                        }
+                    }
                     continue;
                 }
                 $nextDepart = $this->departInstant($next);
@@ -219,6 +228,44 @@ final class TripStatusEngine
         }
 
         return null;
+    }
+
+    /**
+     * After the last transit leg, keep itinerary-remote at the arrived city
+     * when this is not a re-base to the trip's first origin.
+     *
+     * @param TripSegment[] $transit
+     * @param TripSegment[] $segments
+     * @return array{status: string, label: string, detail: array<string, mixed>}|null
+     */
+    private function openEndedLastCity(
+        array $transit,
+        TripSegment $segment,
+        array $segments,
+        \DateTimeImmutable $now,
+    ): ?array {
+        $firstOrigin = strtoupper(trim((string) ($transit[0]->origin ?? '')));
+        $destCode = strtoupper(trim((string) ($segment->destination ?? '')));
+        if ($destCode === '' || ($firstOrigin !== '' && $destCode === $firstOrigin)) {
+            return null;
+        }
+
+        $hotelHit = $this->hotelAt($segments, $now);
+        if ($hotelHit !== null) {
+            return $hotelHit;
+        }
+
+        $city = $this->locationCity($segment->destination) ?? 'destination';
+        return $this->result(
+            'remote',
+            "Working Remote · {$city}",
+            $segment,
+            [
+                'location_city' => $this->locationCity($segment->destination),
+                'location_state' => null,
+                'from_itinerary' => true,
+            ]
+        );
     }
 
     /**

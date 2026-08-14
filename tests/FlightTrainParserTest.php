@@ -69,6 +69,65 @@ HTML;
         self::assertSame('2026-09-01 10:00:00', $result['segments'][0]['depart_dt']);
     }
 
+    public function testAmericanAirlinesJsonLdMultiCityTwoStays(): void
+    {
+        $html = <<<'HTML'
+<html><head>
+<script type="application/ld+json">
+[
+  {
+    "@type": "FlightReservation",
+    "reservationNumber": "NTSHWH",
+    "reservationFor": {
+      "@type": "Flight",
+      "flightNumber": "AA 3634",
+      "airline": {"@type": "Airline", "iataCode": "AA", "name": "American Airlines"},
+      "departureAirport": {"@type": "Airport", "iataCode": "HSV"},
+      "arrivalAirport": {"@type": "Airport", "iataCode": "DFW"},
+      "departureTime": "2026-08-24T07:00Z",
+      "arrivalTime": "2026-08-24T09:10Z"
+    }
+  },
+  {
+    "@type": "FlightReservation",
+    "reservationNumber": "NTSHWH",
+    "reservationFor": {
+      "@type": "Flight",
+      "flightNumber": "AA 1609",
+      "airline": {"@type": "Airline", "iataCode": "AA", "name": "American Airlines"},
+      "departureAirport": {"@type": "Airport", "iataCode": "DFW"},
+      "arrivalAirport": {"@type": "Airport", "iataCode": "LGA"},
+      "departureTime": "2026-08-26T07:34Z",
+      "arrivalTime": "2026-08-26T12:02Z"
+    }
+  }
+]
+</script>
+</head><body>Confirmation code: NTSHWH</body></html>
+HTML;
+
+        $parser = new AmericanAirlinesParser();
+        $result = $parser->parse($this->message(
+            'no-reply@info.email.aa.com',
+            'Your trip confirmation (HSV - DFW)',
+            '',
+            $html
+        ));
+
+        self::assertNotNull($result);
+        self::assertSame('confirm', $result['event']);
+        self::assertSame('NTSHWH', $result['confirmation_code']);
+        self::assertCount(2, $result['segments']);
+        self::assertSame('HSV', $result['segments'][0]['origin']);
+        self::assertSame('DFW', $result['segments'][0]['destination']);
+        self::assertSame('3634', $result['segments'][0]['flight_number']);
+        self::assertSame('DFW', $result['segments'][1]['origin']);
+        self::assertSame('LGA', $result['segments'][1]['destination']);
+        self::assertSame('1609', $result['segments'][1]['flight_number']);
+        self::assertSame('2026-08-24 07:00:00', $result['segments'][0]['depart_dt']);
+        self::assertSame('2026-08-26 07:34:00', $result['segments'][1]['depart_dt']);
+    }
+
     public function testAmericanAirlinesCancel(): void
     {
         $parser = new AmericanAirlinesParser();
@@ -154,6 +213,68 @@ TXT;
         self::assertSame('HSV', $result['segments'][1]['destination']);
         self::assertSame('2026-08-06 20:00:00', $result['segments'][1]['depart_dt']);
         self::assertSame('2026-08-06 21:56:00', $result['segments'][1]['arrive_dt']);
+    }
+
+    public function testAmericanAirlinesPlainMultiCityTwoOvernightStays(): void
+    {
+        $plain = <<<'TXT'
+Confirmation code: NTSHWH
+
+Monday, August 24, 2026
+
+HSV
+
+Huntsville
+
+7:00 AM
+
+AA 3634
+
+Operated by Envoy Air as American Eagle
+
+DFW
+
+Dallas/Fort Worth
+
+9:10 AM
+
+Wednesday, August 26, 2026
+
+DFW
+
+Dallas/Fort Worth
+
+7:34 AM
+
+AA 1609
+
+LGA
+
+New York La Guardia
+
+12:02 PM
+
+Manage your trip
+
+Your purchase
+TXT;
+
+        $parser = new AmericanAirlinesParser();
+        $result = $parser->parse($this->message(
+            'no-reply@info.email.aa.com',
+            'Your trip confirmation (HSV - DFW)',
+            $plain
+        ));
+
+        self::assertNotNull($result);
+        self::assertSame('confirm', $result['event']);
+        self::assertCount(2, $result['segments']);
+        self::assertSame('HSV', $result['segments'][0]['origin']);
+        self::assertSame('DFW', $result['segments'][0]['destination']);
+        self::assertSame('DFW', $result['segments'][1]['origin']);
+        self::assertSame('LGA', $result['segments'][1]['destination']);
+        self::assertSame('2026-08-24 07:00:00', $result['segments'][0]['depart_dt']);
+        self::assertSame('2026-08-26 07:34:00', $result['segments'][1]['depart_dt']);
     }
 
     public function testAmericanAirlinesPlainSameDayConnection(): void

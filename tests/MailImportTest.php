@@ -166,6 +166,43 @@ final class MailImportTest extends NexWaypointTestCase
         self::assertSame('scheduled', $result['segments'][0]->status);
     }
 
+    public function testMultiCityOneWayDestinationIsFirstOvernightCity(): void
+    {
+        $userId = $this->insertUser('dave');
+        $trips = new TripRepository($this->db, $this->logger);
+        $carriers = new CarrierRepository($this->db, $this->logger);
+        $carrier = $carriers->findOrCreateByIata($userId, 'AA', 'American Airlines', $userId);
+
+        $result = $trips->upsertItineraryByConfirmation($userId, 'NTSHWH', [
+            [
+                'segment_type' => 'flight',
+                'carrier_id' => $carrier->id,
+                'carrier' => $carrier->name,
+                'flight_number' => '3634',
+                'origin' => 'HSV',
+                'destination' => 'DFW',
+                'depart_dt' => '2026-08-24 07:00:00',
+                'arrive_dt' => '2026-08-24 09:10:00',
+            ],
+            [
+                'segment_type' => 'flight',
+                'carrier_id' => $carrier->id,
+                'carrier' => $carrier->name,
+                'flight_number' => '1609',
+                'origin' => 'DFW',
+                'destination' => 'LGA',
+                'depart_dt' => '2026-08-26 07:34:00',
+                'arrive_dt' => '2026-08-26 12:02:00',
+            ],
+        ], null, $userId);
+
+        self::assertTrue($result['created']);
+        self::assertCount(2, $result['segments']);
+        self::assertSame('DFW', $result['trip']->destinationCity);
+        self::assertSame('2026-08-24', $result['trip']->startDate);
+        self::assertSame('2026-08-26', $result['trip']->endDate);
+    }
+
     public function testHotelUpsertAndCancelByConfirmation(): void
     {
         $userId = $this->insertUser('dave');
