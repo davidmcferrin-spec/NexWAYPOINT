@@ -264,6 +264,28 @@ final class TripEditRepositoryTest extends NexWaypointTestCase
         self::assertSame('DFW', $result['trip']->destinationCity);
     }
 
+    public function testCrossTimezoneConnectionDoesNotCountAsOvernightStay(): void
+    {
+        $userId = $this->insertUser('traveler');
+        $trips = new TripRepository($this->db, $this->logger);
+
+        $result = $trips->upsertItineraryByConfirmation($userId, 'REDEYE1', [
+            [
+                'origin' => 'HSV', 'destination' => 'LAX',
+                'depart_dt' => '2026-08-10 16:00:00', 'arrive_dt' => '2026-08-10 21:30:00',
+                'flight_number' => '1',
+            ],
+            [
+                'origin' => 'JFK', 'destination' => 'BOS',
+                'depart_dt' => '2026-08-11 01:00:00', 'arrive_dt' => '2026-08-11 02:15:00',
+                'flight_number' => '2',
+            ],
+        ], null, $userId);
+
+        // Naive 21:30→01:00 is 3.5h (LAX stay). Airport TZs: 30m → open-ended BOS.
+        self::assertSame('BOS', $result['trip']->destinationCity);
+    }
+
     public function testReplaceTripLegsMixedFlightAndTrain(): void
     {
         $userId = $this->insertUser('traveler');

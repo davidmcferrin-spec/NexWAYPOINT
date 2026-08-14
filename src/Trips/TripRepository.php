@@ -11,6 +11,8 @@ use NexWaypoint\Hotels\HotelStayRepository;
 
 final class TripRepository
 {
+    private ?ItineraryStayPlanner $stayPlanner = null;
+
     public function __construct(
         private readonly Database $db,
         private readonly Logger $logger,
@@ -706,7 +708,7 @@ final class TripRepository
             return null;
         }
 
-        $firstStay = (new ItineraryStayPlanner())->firstStayDestination($legs);
+        $firstStay = $this->itineraryStayPlanner()->firstStayDestination($legs);
         if ($firstStay !== null && $firstStay !== '') {
             return $firstStay;
         }
@@ -725,6 +727,18 @@ final class TripRepository
         $last = $legs[count($legs) - 1];
         $dest = $last['destination'] ?? null;
         return is_string($dest) && trim($dest) !== '' ? trim($dest) : null;
+    }
+
+    /**
+     * Gap math must use origin TZ for depart and destination TZ for arrive
+     * (same as TripStatusEngine). Do not construct ItineraryStayPlanner
+     * without airports — naive wall-clock diffs misclassify connections.
+     */
+    private function itineraryStayPlanner(): ItineraryStayPlanner
+    {
+        return $this->stayPlanner ??= new ItineraryStayPlanner(
+            new AirportRepository($this->db, $this->logger)
+        );
     }
 
     /**
