@@ -5,7 +5,7 @@ declare(strict_types=1);
 use NexWaypoint\Core\Csrf;
 use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
-use NexWaypoint\Trips\Trip;
+use NexWaypoint\Trips\TripAutoCompleter;
 use NexWaypoint\Trips\TripRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
@@ -14,6 +14,7 @@ $user = $app['auth']->requireAuth();
 $tripRepo = new TripRepository($app['db'], $app['logger']);
 $carrierRepo = new CarrierRepository($app['db'], $app['logger']);
 $airports = new AirportRepository($app['db'], $app['logger']);
+(new TripAutoCompleter($tripRepo, $app['logger'], $airports))->completeForOwner($user->id);
 
 $id = isset($_GET['id']) ? (int) $_GET['id'] : 0;
 $trip = $tripRepo->find($id);
@@ -37,17 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $trip = $tripRepo->find((int) $trip->id) ?? $trip;
             $message = $trip->isPrivate ? 'Trip marked private.' : 'Trip is visible per your sharing settings.';
         } elseif ($action === 'mark_completed' && in_array($trip->status, ['planned', 'active'], true)) {
-            $trip = $tripRepo->update(new Trip(
-                id: $trip->id,
-                ownerId: $trip->ownerId,
-                destinationCity: $trip->destinationCity,
-                startDate: $trip->startDate,
-                endDate: $trip->endDate,
-                status: 'completed',
-                tripPurpose: $trip->tripPurpose,
-                notes: $trip->notes,
-                isPrivate: $trip->isPrivate,
-            ), $user->id);
+            $trip = $tripRepo->markCompleted((int) $trip->id, $user->id) ?? $trip;
             $message = 'Trip marked completed.';
         }
     }

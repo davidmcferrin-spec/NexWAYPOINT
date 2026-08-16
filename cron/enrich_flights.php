@@ -19,6 +19,7 @@ use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\FlightAwareClient;
 use NexWaypoint\Trips\FlightStatusRepository;
 use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Trips\TripAutoCompleter;
 use NexWaypoint\Trips\TripRepository;
 
 $app = require dirname(__DIR__) . '/config/bootstrap.php';
@@ -94,10 +95,22 @@ try {
         }
     }
 
+    $completed = 0;
+    try {
+        $completed = (new TripAutoCompleter(
+            $tripRepo,
+            $logger,
+            new AirportRepository($db, $logger),
+        ))->completeDue();
+    } catch (\Throwable $e) {
+        $logger->warning('Trip auto-complete after enrichment failed', ['error' => $e->getMessage()]);
+    }
+
     $logger->info('Flight enrichment sweep complete', [
         'enriched' => $enriched,
         'skipped' => $skipped,
         'failed' => $failed,
+        'trips_auto_completed' => $completed,
     ]);
 
     if ($failed > 0 && $enriched === 0 && $segmentCount > 0) {

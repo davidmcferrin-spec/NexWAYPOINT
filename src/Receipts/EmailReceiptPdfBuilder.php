@@ -9,7 +9,8 @@ use NexWaypoint\Mail\ForwardedMailNormalizer;
 
 /**
  * Renders a vendor confirmation email (direct or forwarded) into a text PDF.
- * Uses the same dequoted body parsers see — not DB trip/stay reconstruction.
+ * Prefers cleaned HTML (style/script stripped) over a junk text/plain part.
+ * Not a visual HTML renderer — no Composer / browser on DreamHost.
  */
 final class EmailReceiptPdfBuilder
 {
@@ -55,19 +56,97 @@ final class EmailReceiptPdfBuilder
         return $this->bodyText($message) !== '';
     }
 
-    private function bodyText(EmailMessage $message): string
+    public function bodyText(EmailMessage $message): string
     {
-        $text = trim($message->bestText());
-        if ($text !== '') {
-            return $text;
+        $fromHtml = $this->fromHtml($message->bodyHtml);
+        $fromPlain = $this->fromPlain($message->bodyPlain);
+
+        if ($fromHtml !== '' && ($fromPlain === '' || self::looksLikeStylesheet($fromPlain))) {
+            return $fromHtml;
         }
-        $html = trim($message->bodyHtml);
+        if ($fromHtml !== '' && strlen($fromHtml) >= strlen($fromPlain)) {
+            return $fromHtml;
+        }
+        if ($fromPlain !== '') {
+            return $fromPlain;
+        }
+        return $fromHtml;
+    }
+
+    private function fromHtml(string $html): string
+    {
+        $html = trim($html);
         if ($html === '') {
             return '';
         }
-        return trim(ForwardedMailNormalizer::dequoteText(
-            html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')
-        ));
+        $text = ForwardedMailNormalizer::htmlToText($html);
+        $text = trim(ForwardedMailNormalizer::dequoteText($text));
+        return self::stripLeakedCss($text);
+    }
+
+    private function fromPlain(string $plain): string
+    {
+        $plain = trim($plain);
+        if ($plain === '') {
+            return '';
+        }
+        return self::stripLeakedCss(trim(ForwardedMailNormalizer::dequoteText($plain)));
+    }
+
+    /**
+     * Drop leftover stylesheet lines (strip_tags leaves <style> contents).
+     */
+    public static function stripLeakedCss(string $text): string
+    {
+        $text = preg_replace('/@media[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/s', "\n", $text) ?? $text;
+        $text = preg_replace('/:root\s*\{[^{}]*\}/s', "\n", $text) ?? $text;
+
+        $kept = [];
+        foreach (preg_split('/\R/u', $text) ?: [] as $line) {
+            $trim = trim($line);
+            if ($trim === '') {
+                $kept[] = '';
+                continue;
+            }
+            if (self::isCssLine($trim)) {
+                continue;
+            }
+            $kept[] = $line;
+        }
+
+        $out = implode("\n", $kept);
+        $out = preg_replace("/\n{3,}/", "\n\n", $out) ?? $out;
+        return trim($out);
+    }
+
+    public static function looksLikeStylesheet(string $text): bool
+    {
+        if ($text === '') {
+            return false;
+        }
+        $hits = preg_match_all('/!important|:root\s*\{|@media\s+|mso-|proton-disabled/i', $text);
+        return is_int($hits) && $hits >= 3;
+    }
+
+    private static function isCssLine(string $line): bool
+    {
+        if (str_contains($line, '!important')) {
+            return true;
+        }
+        if (preg_match('/^[:@.#][\w-]*\s*\{/', $line) === 1) {
+            return true;
+        }
+        if (preg_match('/[{}]\s*$/', $line) === 1 && preg_match('/[{}:;]/', $line) === 1) {
+            return true;
+        }
+        if (
+            preg_match('/;\s*$/', $line) === 1
+            && preg_match('/:\s*[^;]+;/', $line) === 1
+            && preg_match('/(\d+px|#([0-9a-fA-F]{3,8})|rgba?\(|hsl\()/i', $line) === 1
+        ) {
+            return true;
+        }
+        return false;
     }
 
     private function oneLine(string $text): string

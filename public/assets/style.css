@@ -479,7 +479,7 @@ button.address-search-item:hover {
     color: var(--accent);
 }
 
-.container { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
+.container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
 .container.container-wide { max-width: min(1400px, 100%); }
 
 .table-scroll {

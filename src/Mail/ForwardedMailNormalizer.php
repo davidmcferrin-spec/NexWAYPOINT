@@ -242,6 +242,18 @@ final class ForwardedMailNormalizer
         return null;
     }
 
+    /**
+     * HTML → readable text: drop script/style (not just the tags), keep
+     * block breaks. Used by receipt PDFs and as a plain-part fallback.
+     */
+    public static function htmlToText(string $html): string
+    {
+        $text = self::htmlToRoughText($html);
+        $text = preg_replace("/[ \t]+/", ' ', $text) ?? $text;
+        $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
+        return trim($text);
+    }
+
     private static function htmlToRoughText(string $html): string
     {
         $text = preg_replace('#(?is)<script[^>]*>.*?</script>#', ' ', $html) ?? $html;

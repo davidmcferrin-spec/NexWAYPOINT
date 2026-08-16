@@ -38,6 +38,50 @@ final class TripRepository
     }
 
     /**
+     * Planned or active trips, optionally for one owner.
+     *
+     * @return Trip[]
+     */
+    public function findOpen(?int $ownerId = null): array
+    {
+        if ($ownerId !== null) {
+            $rows = $this->db->fetchAll(
+                "SELECT * FROM trips
+                 WHERE owner_id = :owner_id AND status IN ('planned','active')
+                 ORDER BY start_date DESC",
+                ['owner_id' => $ownerId]
+            );
+        } else {
+            $rows = $this->db->fetchAll(
+                "SELECT * FROM trips
+                 WHERE status IN ('planned','active')
+                 ORDER BY start_date DESC"
+            );
+        }
+        return array_map(static fn (array $r) => Trip::fromRow($r), $rows);
+    }
+
+    public function markCompleted(int $tripId, ?int $actorUserId = null): ?Trip
+    {
+        $trip = $this->find($tripId);
+        if ($trip === null || !in_array($trip->status, ['planned', 'active'], true)) {
+            return $trip;
+        }
+
+        return $this->update(new Trip(
+            id: $trip->id,
+            ownerId: $trip->ownerId,
+            destinationCity: $trip->destinationCity,
+            startDate: $trip->startDate,
+            endDate: $trip->endDate,
+            status: 'completed',
+            tripPurpose: $trip->tripPurpose,
+            notes: $trip->notes,
+            isPrivate: $trip->isPrivate,
+        ), $actorUserId);
+    }
+
+    /**
      * Filter the owner's trips for the history UI.
      *
      * @param 'all'|'upcoming'|'past'|'cancelled' $scope

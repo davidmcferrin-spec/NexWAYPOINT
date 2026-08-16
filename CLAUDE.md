@@ -39,7 +39,7 @@ global-properties migration).
 `You are: <Status>` override (remote requires city/state), dashboard
 Table / Cards / Calendar / Map views (`localStorage` preference) with Leaflet
 city clusters → face markers. Map pins = current location only. Table/cards
-show Status, **The Week** / **Next Week** (stay cities overlapping those
+show Status, **This Week** / **Next Week** (stay cities overlapping those
 Sun–Sat calendar weeks, joined with →), and **Next** (next travel action +
 date + Early/Afternoon/Evening/Late). Rows follow the solid-line org tree
 (manager, then reports A–Z). Calendar is a 21-day Gantt (columns = dates,
@@ -72,6 +72,10 @@ LGA). Dashboard Next is the next stay city with that inbound’s date/time
 airport. After the last landing, status stays itinerary-remote in that city
 through `end_date` instead of snapping to Home at +45m. Round-trips and
 same-day connections are unchanged. Confirmation parsers were not widened.
+Trips list defaults to Upcoming (current + future). After a re-base home
+(last dest = first origin), `TripAutoCompleter` marks the trip completed
+once Home has lasted 2 hours past the 45m post-flight window (list,
+dashboard, view, mail/enrich cron). Open-ended last cities stay open.
 
 **Calendar feeds (2026-08-04):** Settings → Calendar feeds issues per-user
 secret ICS URLs (`/feeds/calendar.php?t=…`) for (1) personal travel
@@ -86,8 +90,11 @@ old token. Requires `calendar_feeds` (`php scripts/migrate.php`).
 **Expense receipts (2026-08-04):** Per-user receipt bin at `/receipts/`
 (date / location / brand / trip + download). Successful mail confirm/change
 imports archive a PDF under `storage/receipts/` — vendor MIME PDF attachment
-when present, else a PDF of the vendor confirmation email body (`SimplePdf`,
-no Composer). No manual upload and no synthetic trip/stay PDFs. Retention
+when present, else a text PDF of the vendor confirmation email (`SimplePdf`,
+no Composer) from cleaned HTML (style/script stripped — not a visual render).
+Download name is kind + airport codes + travel dates
+(`Flight-HSV-LGA-2026-08-17-2026-08-20-vendor-email.pdf`). No manual upload
+and no synthetic trip/stay PDFs. Retention
 `RECEIPT_RETENTION_DAYS` (default 90); purge runs at end of mail poll.
 Requires `expense_receipts` (`php scripts/migrate.php`).
 

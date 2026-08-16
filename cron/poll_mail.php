@@ -13,6 +13,9 @@ declare(strict_types=1);
 use NexWaypoint\Core\CronRunRepository;
 use NexWaypoint\Core\Env;
 use NexWaypoint\Mail\MailPollerFactory;
+use NexWaypoint\Trips\AirportRepository;
+use NexWaypoint\Trips\TripAutoCompleter;
+use NexWaypoint\Trips\TripRepository;
 
 $app = require dirname(__DIR__) . '/config/bootstrap.php';
 /** @var \NexWaypoint\Core\Logger $logger */
@@ -30,6 +33,16 @@ try {
     $poller = MailPollerFactory::create($app, $source, $sourceName);
 
     $result = $poller->run();
+
+    try {
+        (new TripAutoCompleter(
+            new TripRepository($db, $logger),
+            $logger,
+            new AirportRepository($db, $logger),
+        ))->completeDue();
+    } catch (\Throwable $e) {
+        $logger->warning('Trip auto-complete after mail poll failed', ['error' => $e->getMessage()]);
+    }
 
     $fetched = (int) ($result['fetched'] ?? 0);
     $success = (int) ($result['success'] ?? 0);

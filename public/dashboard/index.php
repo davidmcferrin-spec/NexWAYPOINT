@@ -10,6 +10,7 @@ use NexWaypoint\Hotels\HotelStayRepository;
 use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
 use NexWaypoint\Trips\NotificationRepository;
+use NexWaypoint\Trips\TripAutoCompleter;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\TeamGanttPalette;
@@ -45,6 +46,7 @@ $locationResolver = new TeamLocationResolver(
     new Geocoder($logger),
     $airports,
 );
+(new TripAutoCompleter($tripRepo, $logger, $airports))->completeForOwner($user->id);
 $upcomingFinder = new TeamUpcomingTripFinder($tripRepo, $visibilityEngine, $blockRepo);
 $travelPreview = new TeamTravelPreviewBuilder(
     $tripRepo,
@@ -407,7 +409,7 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                 <p class="empty-state">No other active teammates yet.</p>
             <?php else: ?>
                 <table>
-                    <thead><tr><th>Teammate</th><th>Status</th><th>The Week</th><th>Next Week</th><th>Next</th></tr></thead>
+                    <thead><tr><th>Teammate</th><th>Status</th><th>This Week</th><th>Next Week</th><th>Next</th></tr></thead>
                     <tbody>
                         <?php foreach ($team as $entry): ?>
                             <tr class="team-row-clickable"
@@ -496,7 +498,7 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                             <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
                             <div class="team-card-places">
                                 <p class="team-place">
-                                    <span class="team-place-label">The Week</span>
+                                    <span class="team-place-label">This Week</span>
                                     <?php if (!empty($entry['week'])): ?>
                                         <?= htmlspecialchars((string) $entry['week'], ENT_QUOTES) ?>
                                     <?php else: ?>

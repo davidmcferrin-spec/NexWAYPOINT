@@ -187,6 +187,7 @@ final class ExpenseReceiptTest extends NexWaypointTestCase
         self::assertSame('ABCXYZ', $receipt->confirmationCode);
         self::assertSame('application/pdf', $receipt->mimeType);
         self::assertStringContainsString('vendor email', $receipt->title);
+        self::assertSame('Flight-HSV-DEN-2026-09-10-2026-09-12-vendor-email.pdf', $receipt->originalFilename);
 
         $absolute = (new ReceiptFileStore($this->receiptDir, $this->logger))->absolutePath($receipt->filePath);
         self::assertNotNull($absolute);
@@ -250,6 +251,54 @@ final class ExpenseReceiptTest extends NexWaypointTestCase
         self::assertSame('HIL123', $receipt->confirmationCode);
         self::assertSame(189.50, $receipt->amount);
         self::assertStringContainsString('Huntsville', $receipt->locationLabel);
+        self::assertSame('Hotel-Huntsville-AL-2026-09-20-2026-09-22-vendor-email.pdf', $receipt->originalFilename);
+    }
+
+    public function testEmailPdfStripsStylesheetAndKeepsItinerary(): void
+    {
+        $html = <<<HTML
+<html><head><style>
+:root { proton-disabled-Color-scheme: light dark; }
+h1 { font-family: Arial; color:#003366 !important; }
+@media only screen and (max-width: 600px) { .container { width: 100% !important; } }
+</style></head><body>
+<h1>You’re all set.</h1>
+<p>Confirmation Number</p>
+<p>GPHV3A</p>
+<table>
+<tr><td>HUNTSVILLE</td><td>07:10AM</td></tr>
+<tr><td>NYC-LAGUARDIA</td><td>10:33AM</td></tr>
+</table>
+<p>TICKET AMOUNT \$1136.79 USD</p>
+</body></html>
+HTML;
+        $plainDump = "Sent with Proton Mail\n:root { proton-disabled-Color-scheme: light dark; }\n"
+            . "h1 { font-family: Arial; color:#003366 !important; }\n"
+            . "@media only screen and (max-width: 600px) { .container { width: 100% !important; } }\n"
+            . "GPHV3A buried after css";
+
+        $message = new EmailMessage(
+            uid: 'delta-html',
+            fromAddress: 'david.mcferrin@pm.me',
+            subject: 'Fw: Your Flight Receipt - DAVID M MCFERRIN 17AUG26',
+            receivedAt: new \DateTimeImmutable('2026-08-13 15:49:39'),
+            bodyPlain: $plainDump,
+            bodyHtml: $html,
+        );
+
+        $builder = new EmailReceiptPdfBuilder();
+        $text = $builder->bodyText($message);
+        self::assertStringContainsString('GPHV3A', $text);
+        self::assertStringContainsString('HUNTSVILLE', $text);
+        self::assertStringContainsString('1136.79', $text);
+        self::assertStringNotContainsString('!important', $text);
+        self::assertStringNotContainsString('proton-disabled', $text);
+        self::assertStringNotContainsString('font-family', $text);
+
+        $pdf = $builder->build($message);
+        self::assertStringStartsWith('%PDF', $pdf);
+        self::assertStringContainsString('GPHV3A', $pdf);
+        self::assertStringNotContainsString('!important', $pdf);
     }
 
     public function testCaptureSkipsWhenNoAttachmentAndNoBody(): void

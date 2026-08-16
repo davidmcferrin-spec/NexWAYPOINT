@@ -93,7 +93,7 @@ final class ReceiptCaptureService
             }
 
             $bytes = $this->emailPdf->build($message);
-            $filename = $this->safeFilename($meta['title'] . '-vendor-email') . '.pdf';
+            $filename = $this->safeFilename($this->vendorEmailFilename($meta)) . '.pdf';
 
             return $this->storeNew(
                 ownerUserId: $ownerUserId,
@@ -195,7 +195,8 @@ final class ReceiptCaptureService
      *   confirmation_code: ?string,
      *   amount: ?float,
      *   currency: ?string,
-     *   title: string
+     *   title: string,
+     *   route: ?string
      * }
      */
     private function metaFromLinks(int $ownerUserId, string $kind, ?int $tripId, ?int $hotelStayId): array
@@ -220,6 +221,8 @@ final class ReceiptCaptureService
                         break;
                     }
                 }
+                $route = $this->routeFromSegments($segments);
+                $place = $route ?? $trip->destinationCity;
                 return [
                     'kind' => $metaKind,
                     'brand' => $brand,
@@ -230,7 +233,8 @@ final class ReceiptCaptureService
                     'amount' => null,
                     'currency' => null,
                     'title' => ($metaKind === ExpenseReceipt::KIND_TRAIN ? 'Train' : 'Flight')
-                        . ' · ' . $trip->destinationCity,
+                        . ' · ' . $place,
+                    'route' => $route,
                 ];
             }
         }
@@ -254,6 +258,7 @@ final class ReceiptCaptureService
                     'amount' => $stay->lastStayPrice,
                     'currency' => $stay->currency,
                     'title' => 'Hotel · ' . $name,
+                    'route' => null,
                 ];
             }
         }
@@ -273,7 +278,81 @@ final class ReceiptCaptureService
             'amount' => null,
             'currency' => null,
             'title' => 'Travel receipt',
+            'route' => null,
         ];
+    }
+
+    /**
+     * Consecutive airport/station codes (HSV-LGA-HSV), skipping duplicate connections.
+     *
+     * @param TripSegment[] $segments
+     */
+    private function routeFromSegments(array $segments): ?string
+    {
+        $codes = [];
+        foreach ($segments as $segment) {
+            if (!in_array($segment->segmentType, ['flight', 'train'], true)) {
+                continue;
+            }
+            foreach ([$segment->origin, $segment->destination] as $raw) {
+                $code = strtoupper(trim((string) $raw));
+                if ($code === '' || !preg_match('/^[A-Z]{3,4}$/', $code)) {
+                    continue;
+                }
+                if ($codes === [] || end($codes) !== $code) {
+                    $codes[] = $code;
+                }
+            }
+        }
+        return $codes !== [] ? implode('-', $codes) : null;
+    }
+
+    /**
+     * @param array{
+     *   kind: string,
+     *   location_label: string,
+     *   travel_date: string,
+     *   travel_end_date: ?string,
+     *   route: ?string
+     * } $meta
+     */
+    private function vendorEmailFilename(array $meta): string
+    {
+        $kind = match ($meta['kind']) {
+            ExpenseReceipt::KIND_TRAIN => 'Train',
+            ExpenseReceipt::KIND_HOTEL => 'Hotel',
+            default => 'Flight',
+        };
+        $place = trim((string) ($meta['route'] ?? ''));
+        if ($place === '') {
+            $place = trim($meta['location_label']);
+        }
+        $parts = [$kind];
+        if ($place !== '' && $place !== 'Travel') {
+            $parts[] = $place;
+        }
+        $start = $this->dateSlug($meta['travel_date']);
+        if ($start !== null) {
+            $parts[] = $start;
+        }
+        $end = $this->dateSlug($meta['travel_end_date'] ?? null);
+        if ($end !== null && $end !== $start) {
+            $parts[] = $end;
+        }
+        $parts[] = 'vendor-email';
+        return implode('-', $parts);
+    }
+
+    private function dateSlug(?string $raw): ?string
+    {
+        if ($raw === null || trim($raw) === '') {
+            return null;
+        }
+        try {
+            return (new \DateTimeImmutable($raw))->format('Y-m-d');
+        } catch (\Exception) {
+            return null;
+        }
     }
 
     /**

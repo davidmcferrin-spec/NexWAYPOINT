@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use NexWaypoint\Trips\AirportRepository;
 use NexWaypoint\Trips\CarrierRepository;
+use NexWaypoint\Trips\TripAutoCompleter;
 use NexWaypoint\Trips\TripRepository;
 
 $app = require dirname(__DIR__, 2) . '/config/bootstrap.php';
@@ -12,10 +13,11 @@ $user = $app['auth']->requireAuth();
 $tripRepo = new TripRepository($app['db'], $app['logger']);
 $carrierRepo = new CarrierRepository($app['db'], $app['logger']);
 $airports = new AirportRepository($app['db'], $app['logger']);
+(new TripAutoCompleter($tripRepo, $app['logger'], $airports))->completeForOwner($user->id);
 
-$scope = (string) ($_GET['scope'] ?? 'all');
+$scope = (string) ($_GET['scope'] ?? 'upcoming');
 if (!in_array($scope, ['all', 'upcoming', 'past', 'cancelled'], true)) {
-    $scope = 'all';
+    $scope = 'upcoming';
 }
 
 $trips = $tripRepo->searchForOwner($user->id, $scope);
@@ -61,7 +63,7 @@ $statusBadge = static function (string $status): string {
     </div>
 
     <nav class="settings-nav" aria-label="Trip filters">
-        <?php foreach (['all' => 'All', 'upcoming' => 'Upcoming', 'past' => 'Past', 'cancelled' => 'Cancelled'] as $key => $label): ?>
+        <?php foreach (['upcoming' => 'Upcoming', 'all' => 'All', 'past' => 'Past', 'cancelled' => 'Cancelled'] as $key => $label): ?>
             <a class="<?= $scope === $key ? 'settings-nav-link is-active' : 'settings-nav-link' ?>"
                href="/trips/list.php?scope=<?= htmlspecialchars($key, ENT_QUOTES) ?>"><?= htmlspecialchars($label, ENT_QUOTES) ?></a>
         <?php endforeach; ?>
@@ -70,7 +72,7 @@ $statusBadge = static function (string $status): string {
     <?php if ($trips === []): ?>
         <p class="empty-state">
             No <?= htmlspecialchars(strtolower($scopeLabel), ENT_QUOTES) ?> trips yet.
-            <?php if ($scope === 'all'): ?>
+            <?php if (in_array($scope, ['upcoming', 'all'], true)): ?>
                 <a href="/trips/builder.php">Add a trip</a> or forward a confirmation to your mail inbox.
             <?php endif; ?>
         </p>
