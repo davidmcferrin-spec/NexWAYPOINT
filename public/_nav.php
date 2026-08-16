@@ -59,6 +59,29 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
         };
     }
 }
+
+if (!function_exists('nexwaypoint_initials')) {
+    function nexwaypoint_initials(string $name): string
+    {
+        $parts = preg_split('/\s+/', trim($name)) ?: [];
+        $letters = '';
+        foreach ($parts as $part) {
+            if ($part === '') {
+                continue;
+            }
+            $letters .= strtoupper(substr($part, 0, 1));
+            if (strlen($letters) >= 2) {
+                break;
+            }
+        }
+        return $letters !== '' ? $letters : '?';
+    }
+}
+
+$navInitials = nexwaypoint_initials($user->displayName);
+$navAlertLabel = $unreadCount > 0
+    ? ($unreadCount > 9 ? '9+' : (string) $unreadCount) . ' unread alerts'
+    : 'Account menu';
 ?>
 <nav class="navbar">
     <div class="navbar-brand"><a href="/dashboard/index.php">NexWAYPOINT</a></div>
@@ -74,21 +97,44 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
         <a href="/trips/list.php">Trips</a>
-        <a href="/receipts/index.php">Receipts</a>
         <a href="/hotels/properties.php">Hotels</a>
         <a href="/hotels/map.php">Map</a>
-        <span class="navbar-sep" aria-hidden="true"></span>
-        <a href="/hotels/add.php">Log stay</a>
-        <a href="/trips/builder.php">Add trip</a>
-        <span class="navbar-sep" aria-hidden="true"></span>
-        <div class="nav-dropdown">
-            <a href="/settings/index.php" class="nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">Settings</a>
-            <div class="nav-dropdown-menu" role="menu">
+        <?php require __DIR__ . '/_theme_toggle.php'; ?>
+        <div class="nav-dropdown nav-account">
+            <button type="button"
+                class="nav-account-trigger"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-label="<?= htmlspecialchars($navAlertLabel, ENT_QUOTES) ?>"
+                title="<?= htmlspecialchars($user->displayName, ENT_QUOTES) ?>">
+                <?php if ($user->hasPhoto()): ?>
+                    <img class="avatar-circle avatar-sm"
+                        src="/media/avatar.php?id=<?= (int) $user->id ?>"
+                        alt=""
+                        style="object-position: <?= (float) $user->photoFocusX ?>% <?= (float) $user->photoFocusY ?>%;">
+                <?php else: ?>
+                    <span class="avatar-circle avatar-sm avatar-fallback"><?= htmlspecialchars($navInitials, ENT_QUOTES) ?></span>
+                <?php endif; ?>
+                <?php if ($unreadCount > 0): ?>
+                    <span class="nav-account-badge"><?= $unreadCount > 9 ? '9+' : (int) $unreadCount ?></span>
+                <?php endif; ?>
+            </button>
+            <div class="nav-dropdown-menu nav-account-menu" role="menu">
+                <a role="menuitem" href="/alerts/index.php">
+                    Alerts
+                    <?php if ($unreadCount > 0): ?>
+                        <span class="nav-account-menu-count"><?= (int) $unreadCount ?></span>
+                    <?php endif; ?>
+                </a>
+                <a role="menuitem" href="/receipts/index.php">Receipts</a>
+                <a role="menuitem" href="/hotels/add.php">Log stay</a>
+                <a role="menuitem" href="/trips/builder.php">Add trip</a>
+                <span class="nav-dropdown-sep" aria-hidden="true"></span>
                 <a role="menuitem" href="/settings/profile.php">My profile</a>
                 <a role="menuitem" href="/settings/index.php">Overview</a>
                 <a role="menuitem" href="/settings/emails.php">My emails</a>
                 <a role="menuitem" href="/settings/visibility.php">Sharing</a>
-                <a role="menuitem" href="/receipts/index.php">Receipts</a>
+                <a role="menuitem" href="/settings/calendars.php">Calendar feeds</a>
                 <?php if ($navIsAdmin): ?>
                     <span class="nav-dropdown-sep" aria-hidden="true"></span>
                     <a role="menuitem" href="/settings/site.php">Site catalogs</a>
@@ -97,24 +143,14 @@ if (!function_exists('nexwaypoint_status_badge_class')) {
                     <a role="menuitem" href="/settings/jobs.php">Cron / service status</a>
                     <a role="menuitem" href="/settings/users.php">Users</a>
                 <?php endif; ?>
+                <?php if ($user->isSystem): ?>
+                    <span class="nav-dropdown-sep" aria-hidden="true"></span>
+                    <a role="menuitem" href="/settings/mail-review.php">Mail review</a>
+                <?php endif; ?>
+                <span class="nav-dropdown-sep" aria-hidden="true"></span>
+                <a role="menuitem" href="/logout.php">Sign out</a>
             </div>
         </div>
-        <span class="navbar-account">
-            <a class="navbar-profile" href="/settings/profile.php" title="My profile"><?= htmlspecialchars($user->displayName, ENT_QUOTES) ?></a>
-            <span class="navbar-account-sep" aria-hidden="true">·</span>
-            <a class="navbar-alerts<?= $unreadCount > 0 ? ' has-unread' : '' ?>"
-                href="/alerts/index.php"
-                title="Travel alerts from email imports and flight status">
-                <?php if ($unreadCount > 0): ?>
-                    <?= $unreadCount ?> alert<?= $unreadCount === 1 ? '' : 's' ?>
-                <?php else: ?>
-                    Alerts
-                <?php endif; ?>
-            </a>
-            <span class="navbar-account-sep" aria-hidden="true">·</span>
-            <a class="navbar-signout" href="/logout.php">Sign out</a>
-        </span>
-        <?php require __DIR__ . '/_theme_toggle.php'; ?>
     </div>
 </nav>
 <?php if (isset($statusFlash) && is_array($statusFlash) && ($statusFlash['type'] ?? '') === 'success'): ?>

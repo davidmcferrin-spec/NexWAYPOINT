@@ -36,7 +36,8 @@ global-properties migration).
 
 **Team board UX (2026-08-16):** profile photo upload with face-center crop
 (Settings → My profile), home city for map pins, nav-centered
-`You are: <Status>` override (remote requires city/state), dashboard
+`You are: <Status>` override (remote requires city/state), avatar menu
+(alerts badge + Receipts / Log stay / Add trip / Settings / Sign out), dashboard
 Table / Cards / Calendar / Map views (`localStorage` preference) with Leaflet
 city clusters → face markers. Map pins = current location only. Table/cards
 show Status, **This Week** / **Next Week** (stay cities overlapping those

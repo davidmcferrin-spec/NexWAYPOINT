@@ -166,30 +166,62 @@ a:hover {
     background: var(--border);
     margin: 0 0.15rem;
 }
-.navbar-account {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.25rem 0.35rem;
+.nav-account {
     margin-left: 0.15rem;
-    font-size: 0.85rem;
-    color: var(--text-dim, var(--muted));
 }
-.navbar-account a {
-    font-size: 0.85rem;
-    color: var(--text-dim, var(--muted));
-    padding: 0.15rem 0.2rem;
+.nav-account-trigger {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0.1rem;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    border-radius: 50%;
 }
-.navbar-account a:hover { color: var(--accent); }
-.navbar-account-sep {
-    color: var(--border);
-    user-select: none;
+.nav-account-trigger:hover,
+.nav-account-trigger:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
-.navbar-profile { font-weight: 600; color: var(--text) !important; }
-.navbar-alerts { color: var(--text-dim, var(--muted)) !important; }
-.navbar-alerts.has-unread { color: var(--yellow) !important; font-weight: 600; }
-.navbar-signout {
-    color: var(--text-dim, var(--muted)) !important;
+.nav-account-badge {
+    position: absolute;
+    top: -0.2rem;
+    right: -0.3rem;
+    min-width: 1rem;
+    height: 1rem;
+    padding: 0 0.22rem;
+    border-radius: 999px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1rem;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--nav-bg);
+}
+.nav-account-menu {
+    left: auto;
+    right: 0;
+}
+.nav-account-menu a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+.nav-account-menu-count {
+    min-width: 1.1rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.15rem;
+    text-align: center;
 }
 
 .alert-list {
