@@ -1,7 +1,7 @@
 /**
  * Teammate travel preview modal (table / cards / map).
  * Data: window.NEXWAYPOINT_TEAM_PROFILES
- * Trip itinerary items: {type: leg|layover|hotel, label: string}
+ * Trip stays: {city, dates, open_ended} — not the flight-by-flight itinerary.
  */
 (function () {
     function ready(fn) {
@@ -20,15 +20,9 @@
             .replace(/"/g, '&quot;');
     }
 
-    function itineraryItems(trip) {
-        if (trip.itinerary && trip.itinerary.length) {
-            return trip.itinerary;
-        }
-        // Older payload shape: flat flights list.
-        if (trip.flights && trip.flights.length) {
-            return trip.flights.map(function (f) {
-                return { type: 'leg', label: f.label };
-            });
+    function stayItems(trip) {
+        if (trip.stays && trip.stays.length) {
+            return trip.stays;
         }
         return [];
     }
@@ -86,28 +80,33 @@
                     html += '<ul class="teammate-trip-list">';
                     trips.forEach(function (t) {
                         html += '<li class="teammate-trip-item">';
-                        var heading = t.destination
-                            ? escapeHtml(t.destination)
-                            : (t.redacted ? 'Travel' : 'Trip');
-                        html += '<strong>' + heading + '</strong>';
-                        if (t.dates) {
-                            html += '<div>' + escapeHtml(t.dates) + '</div>';
+                        var stays = stayItems(t);
+                        if (stays.length) {
+                            html += '<ul class="teammate-stay-list">';
+                            stays.forEach(function (s) {
+                                var city = s.city || (t.redacted ? 'Travel' : 'Stay');
+                                html += '<li class="teammate-stay-item">';
+                                html += '<strong>' + escapeHtml(city) + '</strong>';
+                                if (s.dates) {
+                                    html += '<div>' + escapeHtml(s.dates) + '</div>';
+                                }
+                                html += '</li>';
+                            });
+                            html += '</ul>';
+                        } else {
+                            var heading = t.destination
+                                ? escapeHtml(t.destination)
+                                : (t.redacted ? 'Travel' : 'Trip');
+                            html += '<strong>' + heading + '</strong>';
+                            if (t.dates) {
+                                html += '<div>' + escapeHtml(t.dates) + '</div>';
+                            }
                         }
                         if (t.purpose) {
                             html += '<div class="hint">' + escapeHtml(t.purpose) + '</div>';
                         }
                         if (t.notes) {
                             html += '<div class="hint">' + escapeHtml(t.notes) + '</div>';
-                        }
-                        var items = itineraryItems(t);
-                        if (items.length) {
-                            html += '<ul class="teammate-itinerary">';
-                            items.forEach(function (item) {
-                                var cls = 'teammate-itinerary-item teammate-itinerary-'
-                                    + escapeHtml(item.type || 'leg');
-                                html += '<li class="' + cls + '">' + escapeHtml(item.label) + '</li>';
-                            });
-                            html += '</ul>';
                         }
                         html += '</li>';
                     });

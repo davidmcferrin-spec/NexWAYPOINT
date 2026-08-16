@@ -15,8 +15,9 @@ use NexWaypoint\Visibility\VisibilityBlockRepository;
 use NexWaypoint\Visibility\VisibilityEngine;
 
 /**
- * Builds a visibility-filtered 21-day travel preview for the team board modal,
- * including multi-leg itineraries with layover gaps.
+ * Builds a visibility-filtered 21-day travel preview for the team board modal.
+ * Stay cities (airport → city, weekday from/to, open-ended) are the primary
+ * payload; itinerary legs stay for tests / richer clients.
  */
 final class TeamTravelPreviewBuilder
 {
@@ -38,6 +39,7 @@ final class TeamTravelPreviewBuilder
      *   dates: string|null,
      *   purpose: string|null,
      *   notes: string|null,
+     *   stays: list<array{city: string|null, start: string|null, end: string|null, start_label: string|null, end_label: string|null, open_ended: bool, dates: string|null}>,
      *   itinerary: list<array{type: string, label: string}>,
      *   flights: list<array{label: string}>,
      *   redacted: bool
@@ -137,6 +139,7 @@ final class TeamTravelPreviewBuilder
                 'dates' => $dates,
                 'purpose' => $canPurpose ? $trip->tripPurpose : null,
                 'notes' => $canNotes ? $trip->notes : null,
+                'stays' => $this->visibleStays($trip, $segments, $canCity, $canDates),
                 'itinerary' => $itinerary,
                 'flights' => $flights,
                 'redacted' => !$canCity,
@@ -169,6 +172,28 @@ final class TeamTravelPreviewBuilder
         }
 
         return trim($trip->destinationCity);
+    }
+
+    /**
+     * @param TripSegment[] $segments
+     * @return list<array{city: string|null, start: string|null, end: string|null, start_label: string|null, end_label: string|null, open_ended: bool, dates: string|null}>
+     */
+    private function visibleStays(Trip $trip, array $segments, bool $canCity, bool $canDates): array
+    {
+        $rows = (new TeamStaySummarizer($this->airports))->staysForTrip($trip, $segments);
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = [
+                'city' => $canCity ? $row['city'] : 'Travel',
+                'start' => $canDates ? $row['start'] : null,
+                'end' => $canDates ? $row['end'] : null,
+                'start_label' => $canDates ? $row['start_label'] : null,
+                'end_label' => $canDates ? $row['end_label'] : null,
+                'open_ended' => $canDates && $row['open_ended'],
+                'dates' => $canDates ? $row['dates'] : null,
+            ];
+        }
+        return $out;
     }
 
     /**

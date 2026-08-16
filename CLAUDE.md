@@ -34,13 +34,16 @@ colors, default theme) is under Settings → Appearance. Install auto-seeds
 Existing DBs need `php scripts/migrate.php` after pull (includes
 global-properties migration).
 
-**Team board UX (2026-07-20):** profile photo upload with face-center crop
+**Team board UX (2026-08-16):** profile photo upload with face-center crop
 (Settings → My profile), home city for map pins, nav-centered
 `You are: <Status>` override (remote requires city/state), dashboard
-Table / Cards / Map views (`localStorage` preference) with Leaflet city
-clusters → face markers. Map pins = current location only. Table/cards show
-Current + Next (next overnight stay city + that city’s date/time, or Home
-on a return). Avatar/row/card click opens a 21-day travel look-ahead modal.
+Table / Cards / Calendar / Map views (`localStorage` preference) with Leaflet
+city clusters → face markers. Map pins = current location only. Table/cards
+show Status, **This week** (stay cities overlapping the next 7 days, joined
+with →), and **Next** (next travel action + date + Early/Afternoon/Evening/Late).
+Calendar is a 21-day Gantt (columns = dates, rows = people; travel city vs
+home). Avatar/row/card/Gantt click opens a stay-summary modal (city + weekday
+from/to; last dest ≠ first origin is open-ended) — not the flight list.
 
 **Complex itinerary (2026-07-20):** `TripStatusEngine` phases are pre-flight /
 en_route / post-flight (45m windows), layover (gap ≤3h), itinerary remote

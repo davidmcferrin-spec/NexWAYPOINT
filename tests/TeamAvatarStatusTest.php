@@ -999,6 +999,14 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         $types = array_column($preview[0]['itinerary'], 'type');
         self::assertSame(['leg', 'stay', 'leg'], $types);
         self::assertStringContainsString('In Dallas/Fort Worth, TX', $preview[0]['itinerary'][1]['label']);
+        $stays = $preview[0]['stays'];
+        self::assertCount(2, $stays);
+        self::assertSame('Dallas/Fort Worth, TX', $stays[0]['city']);
+        self::assertSame('Mon Aug 24 – Wed Aug 26', $stays[0]['dates']);
+        self::assertFalse($stays[0]['open_ended']);
+        self::assertSame('New York, NY', $stays[1]['city']);
+        self::assertSame('Wed Aug 26 – open-ended', $stays[1]['dates']);
+        self::assertTrue($stays[1]['open_ended']);
     }
 
     public function testTravelPreviewRedactsCityOnItineraryWhenDenied(): void

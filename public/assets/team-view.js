@@ -1,9 +1,9 @@
 /**
- * Dashboard team view toggle (table / cards / map). Preference in localStorage.
+ * Dashboard team view toggle (table / cards / calendar / map). Preference in localStorage.
  */
 (function () {
     var KEY = 'nexwaypoint-team-view';
-    var allowed = { table: true, cards: true, map: true };
+    var allowed = { table: true, cards: true, calendar: true, map: true };
 
     function ready(fn) {
         if (document.readyState !== 'loading') {

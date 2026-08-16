@@ -13,6 +13,7 @@ use NexWaypoint\Trips\NotificationRepository;
 use NexWaypoint\Trips\TripRepository;
 use NexWaypoint\Trips\TripStatusEngine;
 use NexWaypoint\Users\TeamLocationResolver;
+use NexWaypoint\Users\TeamStaySummarizer;
 use NexWaypoint\Users\TeamTravelPreviewBuilder;
 use NexWaypoint\Users\TeamUpcomingTripFinder;
 use NexWaypoint\Users\User;
@@ -97,6 +98,7 @@ if (!function_exists('nexwaypoint_initials')) {
  *   location: array{lat: float, lon: float, city_label: string, city_key: string}|null,
  *   upcoming: string|null,
  *   next: array{city_label: string, dates: string, time_of_day: string|null}|null,
+ *   week: string|null,
  *   avatar_url: string|null,
  *   photo_focus_x: float,
  *   photo_focus_y: float,
@@ -200,6 +202,7 @@ if (!function_exists('nexwaypoint_build_board_entry')) {
             'location' => $resolved['location'],
             'upcoming' => $resolved['upcoming'],
             'next' => $resolved['next'],
+            'week' => null,
             'avatar_url' => $subject->hasPhoto() ? '/media/avatar.php?id=' . $subject->id : null,
             'photo_focus_x' => $subject->photoFocusX,
             'photo_focus_y' => $subject->photoFocusY,
@@ -289,13 +292,52 @@ foreach ($mapCandidates as $entry) {
 
 $mapLonelyNote = $selfOnMap && $othersOnMap === 0;
 
+$staySummarizer = new TeamStaySummarizer($airports);
+$ganttDays = $upcomingMapDays;
+$ganttFrom = new DateTimeImmutable('today');
+$ganttHeaders = [];
+for ($g = 0; $g < $ganttDays; $g++) {
+    $gDay = $ganttFrom->modify('+' . $g . ' days');
+    $dow = (int) $gDay->format('N');
+    $ganttHeaders[] = [
+        'key' => $gDay->format('Y-m-d'),
+        'dow' => $gDay->format('D'),
+        'day' => $gDay->format('j'),
+        'month' => $gDay->format('M'),
+        'show_month' => $g === 0 || $gDay->format('j') === '1',
+        'weekend' => $dow >= 6,
+        'today' => $g === 0,
+    ];
+}
+
 $teamProfiles = [];
-foreach ($team as $entry) {
+foreach ($team as $idx => $entry) {
     $uid = (string) $entry['user']->id;
     $profileViewerId = $entry['is_self'] && $previewViewerId !== null
         ? $previewViewerId
         : $user->id;
     $profileAsDirection = $entry['is_self'] ? $selfForceDirection : null;
+    $trips = $travelPreview->build(
+        $profileViewerId,
+        $entry['user']->id,
+        $upcomingMapDays,
+        $profileAsDirection,
+    );
+    $flatStays = [];
+    foreach ($trips as $tripRow) {
+        foreach ($tripRow['stays'] ?? [] as $stayRow) {
+            $flatStays[] = $stayRow;
+        }
+    }
+    $weekLabel = $staySummarizer->weekCities($flatStays);
+    $homeLabel = $entry['user']->homeLabel() ?? 'Home';
+    $ganttCells = [];
+    foreach ($staySummarizer->ganttCells($flatStays, $ganttFrom, $ganttDays) as $cellCity) {
+        $ganttCells[] = $cellCity ?? $homeLabel;
+    }
+    $team[$idx]['week'] = $weekLabel;
+    $team[$idx]['gantt'] = $ganttCells;
+
     $teamProfiles[$uid] = [
         'id' => $entry['user']->id,
         'name' => $entry['is_self']
@@ -304,13 +346,9 @@ foreach ($team as $entry) {
         'status_label' => $entry['label'],
         'location' => $entry['location']['city_label'] ?? null,
         'next' => $entry['next'],
+        'week' => $weekLabel,
         'window_days' => $upcomingMapDays,
-        'trips' => $travelPreview->build(
-            $profileViewerId,
-            $entry['user']->id,
-            $upcomingMapDays,
-            $profileAsDirection,
-        ),
+        'trips' => $trips,
     ];
 }
 
@@ -352,6 +390,7 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
         <div class="view-toggle" role="tablist" aria-label="Team view">
             <button type="button" class="view-toggle-btn is-active" data-team-view="table" role="tab" aria-selected="true">Table</button>
             <button type="button" class="view-toggle-btn" data-team-view="cards" role="tab" aria-selected="false">Cards</button>
+            <button type="button" class="view-toggle-btn" data-team-view="calendar" role="tab" aria-selected="false">Calendar</button>
             <button type="button" class="view-toggle-btn" data-team-view="map" role="tab" aria-selected="false">Map</button>
         </div>
 
@@ -360,7 +399,7 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                 <p class="empty-state">No other active teammates yet.</p>
             <?php else: ?>
                 <table>
-                    <thead><tr><th>Teammate</th><th>Status</th><th>Current</th><th>Next</th></tr></thead>
+                    <thead><tr><th>Teammate</th><th>Status</th><th>This week</th><th>Next</th></tr></thead>
                     <tbody>
                         <?php foreach ($team as $entry): ?>
                             <tr class="team-row-clickable"
@@ -390,8 +429,8 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                                     <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
                                 </td>
                                 <td>
-                                    <?php if ($entry['location'] !== null): ?>
-                                        <?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?>
+                                    <?php if (!empty($entry['week'])): ?>
+                                        <?= htmlspecialchars((string) $entry['week'], ENT_QUOTES) ?>
                                     <?php else: ?>
                                         <span class="hint">—</span>
                                     <?php endif; ?>
@@ -442,9 +481,9 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                             <span class="badge <?= statusBadgeClass($entry['status']) ?>"><?= htmlspecialchars($entry['label'], ENT_QUOTES) ?></span>
                             <div class="team-card-places">
                                 <p class="team-place">
-                                    <span class="team-place-label">Current</span>
-                                    <?php if ($entry['location'] !== null): ?>
-                                        <?= htmlspecialchars($entry['location']['city_label'], ENT_QUOTES) ?>
+                                    <span class="team-place-label">This week</span>
+                                    <?php if (!empty($entry['week'])): ?>
+                                        <?= htmlspecialchars((string) $entry['week'], ENT_QUOTES) ?>
                                     <?php else: ?>
                                         <span class="hint">—</span>
                                     <?php endif; ?>
@@ -462,6 +501,72 @@ $showTeamBoard = $team !== [] || $mapPeople !== [];
                             </div>
                         </article>
                     <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <div class="team-view" data-team-panel="calendar" hidden>
+            <?php if ($team === []): ?>
+                <p class="empty-state">No other active teammates yet.</p>
+            <?php else: ?>
+                <p class="hint">Next <?= (int) $ganttDays ?> days. Travel cities fill the bar; other days are home. Click a name for stay dates.</p>
+                <div class="team-gantt-wrap">
+                    <table class="team-gantt">
+                        <thead>
+                            <tr>
+                                <th class="team-gantt-name">Teammate</th>
+                                <?php foreach ($ganttHeaders as $header): ?>
+                                    <th class="team-gantt-day<?= $header['weekend'] ? ' is-weekend' : '' ?><?= $header['today'] ? ' is-today' : '' ?>"
+                                        title="<?= htmlspecialchars($header['key'], ENT_QUOTES) ?>">
+                                        <span class="team-gantt-dow"><?= htmlspecialchars($header['dow'], ENT_QUOTES) ?></span>
+                                        <span class="team-gantt-num"><?= htmlspecialchars($header['day'], ENT_QUOTES) ?></span>
+                                        <?php if ($header['show_month']): ?>
+                                            <span class="team-gantt-mon"><?= htmlspecialchars($header['month'], ENT_QUOTES) ?></span>
+                                        <?php endif; ?>
+                                    </th>
+                                <?php endforeach; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($team as $entry): ?>
+                                <tr class="team-row-clickable"
+                                    data-open-teammate="<?= (int) $entry['user']->id ?>"
+                                    tabindex="0"
+                                    role="button">
+                                    <th class="team-gantt-name" scope="row">
+                                        <?= htmlspecialchars(
+                                            $entry['is_self']
+                                                ? $entry['user']->displayName . ' (you)'
+                                                : $entry['user']->displayName,
+                                            ENT_QUOTES
+                                        ) ?>
+                                    </th>
+                                    <?php
+                                    $prevGantt = null;
+                                    foreach ($entry['gantt'] ?? [] as $gIdx => $gCity):
+                                        $gCity = (string) $gCity;
+                                        $homeLabel = $entry['user']->homeLabel() ?? 'Home';
+                                        $isTravel = $gCity !== $homeLabel && $gCity !== 'Home';
+                                        $short = $gCity;
+                                        if (preg_match('/^(.+?),\s*/', $short, $gm) === 1) {
+                                            $short = $gm[1];
+                                        }
+                                        if (str_contains($short, '/')) {
+                                            $short = explode('/', $short, 2)[0];
+                                        }
+                                        $sameAsPrev = $prevGantt === $gCity;
+                                        $prevGantt = $gCity;
+                                        $header = $ganttHeaders[$gIdx] ?? null;
+                                        ?>
+                                        <td class="team-gantt-cell<?= $isTravel ? ' is-travel' : ' is-home' ?><?= ($header['weekend'] ?? false) ? ' is-weekend' : '' ?><?= ($header['today'] ?? false) ? ' is-today' : '' ?>"
+                                            title="<?= htmlspecialchars($gCity, ENT_QUOTES) ?>">
+                                            <?= $sameAsPrev ? '' : htmlspecialchars($short, ENT_QUOTES) ?>
+                                        </td>
+                                    <?php endforeach; ?>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
             <?php endif; ?>
         </div>

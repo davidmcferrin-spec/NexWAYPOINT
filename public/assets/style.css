@@ -969,6 +969,17 @@ button.linkish {
     border-top: none;
     padding-top: 0.35rem;
 }
+.teammate-stay-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.teammate-stay-item {
+    padding: 0.35rem 0;
+}
+.teammate-stay-item + .teammate-stay-item {
+    border-top: 1px dashed var(--border);
+}
 .teammate-itinerary {
     list-style: none;
     margin: 0.5rem 0 0;
@@ -1004,6 +1015,80 @@ button.linkish {
     border-top: none;
     padding-top: 0.15rem;
     padding-bottom: 0.15rem;
+}
+
+.team-gantt-wrap {
+    overflow-x: auto;
+    margin: 0.5rem 0 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+}
+.team-gantt {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: max-content;
+    min-width: 100%;
+    font-size: 0.75rem;
+}
+.team-gantt th,
+.team-gantt td {
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    padding: 0.35rem 0.2rem;
+    text-align: center;
+    white-space: nowrap;
+}
+.team-gantt-name {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--panel);
+    text-align: left;
+    min-width: 8.5rem;
+    max-width: 11rem;
+    padding: 0.45rem 0.7rem;
+    font-weight: 600;
+    box-shadow: 1px 0 0 var(--border);
+}
+.team-gantt thead .team-gantt-name {
+    z-index: 3;
+}
+.team-gantt-day {
+    min-width: 2.35rem;
+    font-weight: 500;
+}
+.team-gantt-dow {
+    display: block;
+    font-size: 0.62rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+.team-gantt-num {
+    display: block;
+    font-weight: 600;
+}
+.team-gantt-mon {
+    display: block;
+    font-size: 0.58rem;
+    color: var(--text-dim);
+}
+.team-gantt-day.is-weekend,
+.team-gantt-cell.is-weekend.is-home {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.team-gantt-day.is-today,
+.team-gantt-cell.is-today {
+    box-shadow: inset 0 -2px 0 var(--accent);
+}
+.team-gantt-cell.is-travel {
+    background: var(--badge-travel-bg);
+    color: var(--accent);
+    font-weight: 600;
+}
+.team-gantt-cell.is-home {
+    color: var(--text-dim);
 }
 
 .team-map {
