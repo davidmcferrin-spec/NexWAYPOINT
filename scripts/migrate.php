@@ -1542,6 +1542,39 @@ try {
         fwrite(STDOUT, "Created expense_receipts\n");
     }
 
+    if ($tableExists('trips') && !$tableExists('trip_stay_purposes')) {
+        if ($driver === 'sqlite') {
+            $pdo->exec(
+                "CREATE TABLE trip_stay_purposes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trip_id INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+                    dest_code TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    purpose TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )"
+            );
+            $pdo->exec('CREATE INDEX idx_stay_purposes_trip ON trip_stay_purposes(trip_id)');
+        } else {
+            $pdo->exec(
+                "CREATE TABLE trip_stay_purposes (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    trip_id INT UNSIGNED NOT NULL,
+                    dest_code VARCHAR(8) NOT NULL,
+                    sort_order INT UNSIGNED NOT NULL DEFAULT 0,
+                    purpose VARCHAR(255) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_stay_purposes_trip FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+                    INDEX idx_stay_purposes_trip (trip_id)
+                ) ENGINE=InnoDB"
+            );
+        }
+        $changes++;
+        fwrite(STDOUT, "Created trip_stay_purposes\n");
+    }
+
     if ($changes === 0) {
         fwrite(STDOUT, "Schema is up to date.\n");
     } else {

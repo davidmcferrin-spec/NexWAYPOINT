@@ -32,6 +32,22 @@ final class OfficeVenueRepository
         return $row === null ? null : OfficeVenue::fromRow($row);
     }
 
+    public function findByName(string $name): ?OfficeVenue
+    {
+        if (!$this->tableReady()) {
+            return null;
+        }
+        $name = trim($name);
+        if ($name === '') {
+            return null;
+        }
+        $row = $this->db->fetchOne(
+            'SELECT * FROM office_venues WHERE LOWER(name) = LOWER(:n) LIMIT 1',
+            ['n' => $name]
+        );
+        return $row === null ? null : OfficeVenue::fromRow($row);
+    }
+
     /**
      * @return OfficeVenue[]
      */

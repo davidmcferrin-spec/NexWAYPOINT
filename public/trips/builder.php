@@ -162,6 +162,7 @@ function nx_builder_hotel_rows(array $stays, HotelPropertyRepository $properties
 
 $postedLegs = null;
 $postedHotelStayIds = null;
+$postedStayPurposes = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($schemaWarning !== null) {
@@ -257,6 +258,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $postedLegs = $legs;
 
+        $stayPurposeRows = [];
+        $rawStayPurposes = $_POST['stay_purposes'] ?? [];
+        if (is_array($rawStayPurposes)) {
+            foreach ($rawStayPurposes as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $dest = nx_builder_trim($row['dest_code'] ?? null);
+                $stayPurpose = nx_builder_trim($row['purpose'] ?? null);
+                if ($dest === null || $stayPurpose === null) {
+                    continue;
+                }
+                $stayPurposeRows[] = [
+                    'dest_code' => strtoupper($dest),
+                    'purpose' => $stayPurpose,
+                ];
+            }
+        }
+        $postedStayPurposes = $stayPurposeRows;
+        if ($purpose === null && $stayPurposeRows !== []) {
+            $purpose = $stayPurposeRows[0]['purpose'];
+        }
+
         // Hotel attachments: existing stay ids + newly created stays.
         $hotelStayIds = [];
         $rawHotels = $_POST['hotels'] ?? [];
@@ -345,6 +369,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $tripRepo->replaceTripLegs((int) $trip->id, $legs, $user->id);
+                $tripRepo->replaceStayPurposes((int) $trip->id, $stayPurposeRows, $user->id);
 
                 foreach ($rawNewHotels as $row) {
                     if (!is_array($row)) {
@@ -471,6 +496,14 @@ foreach ($userStays as $stay) {
     ];
 }
 
+if ($postedStayPurposes !== null) {
+    $initialStayPurposes = $postedStayPurposes;
+} elseif ($isEdit) {
+    $initialStayPurposes = $tripRepo->stayPurposesForTrip((int) $trip->id);
+} else {
+    $initialStayPurposes = [];
+}
+
 $destinationValue = (string) ($_POST['destination_city'] ?? ($isEdit ? $trip->destinationCity : ''));
 $purposeValue = (string) ($_POST['trip_purpose'] ?? ($isEdit ? (string) $trip->tripPurpose : ''));
 $notesValue = (string) ($_POST['notes'] ?? ($isEdit ? (string) $trip->notes : ''));
@@ -532,8 +565,9 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
                            placeholder="Auto from legs if blank" <?= $schemaWarning !== null ? 'disabled' : '' ?>>
                 </label>
                 <label>Purpose
-                    <input type="text" name="trip_purpose" value="<?= htmlspecialchars($purposeValue, ENT_QUOTES) ?>"
+                    <input type="text" name="trip_purpose" id="trip-purpose" value="<?= htmlspecialchars($purposeValue, ENT_QUOTES) ?>"
                            <?= $schemaWarning !== null ? 'disabled' : '' ?>>
+                    <span class="hint" id="trip-purpose-hint">One label for the trip list. Multi-city stays can differ below.</span>
                 </label>
                 <?php if ($isEdit): ?>
                     <label>Status
@@ -572,6 +606,12 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
             </div>
             <div class="trip-builder-actions">
                 <button type="button" class="secondary" id="trip-leg-add" <?= $schemaWarning !== null ? 'disabled' : '' ?>>Add leg</button>
+            </div>
+
+            <div id="trip-stay-purposes" hidden>
+                <h2 class="trip-builder-section-title">Stay purposes</h2>
+                <p class="hint">Why you are in each overnight city. Home / return-to-origin is omitted.</p>
+                <div id="trip-stay-purposes-list" class="trip-stay-purposes-list"></div>
             </div>
 
             <h2 class="trip-builder-section-title">Hotels on this trip</h2>
@@ -663,6 +703,7 @@ $pageTitle = $isEdit ? 'Edit trip itinerary' : 'Build trip itinerary';
     'rail' => $carrierJson($railOperators),
     'hotels' => $attachedHotels,
     'attachable' => $attachableStays,
+    'stay_purposes' => $initialStayPurposes,
 ], JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
 
 <div id="carrier-modal" class="modal-backdrop" hidden>

@@ -103,6 +103,7 @@
             });
             nextIndex = rows.length;
             updateGapHints();
+            updateStayPurposes();
             var heading = document.querySelector('.leg-num-heading');
             if (heading) {
                 var anyTrain = false;
@@ -148,10 +149,99 @@
             });
         }
 
+        var savedStayPurposes = (initial.stay_purposes || []).slice();
+        var lastStayDestKey = '';
+
+        function collectStayDests() {
+            var rows = Array.prototype.slice.call(body.querySelectorAll('.trip-leg-row'));
+            var legs = [];
+            rows.forEach(function (row) {
+                var origin = (row.querySelector('.leg-origin').value || '').trim().toUpperCase();
+                var dest = (row.querySelector('.leg-dest').value || '').trim().toUpperCase();
+                var depart = parseLocal(row.querySelector('.leg-depart').value);
+                var arrive = parseLocal(row.querySelector('.leg-arrive').value);
+                if (!origin || !dest || !depart) {
+                    return;
+                }
+                legs.push({ origin: origin, dest: dest, depart: depart, arrive: arrive });
+            });
+            legs.sort(function (a, b) { return a.depart - b.depart; });
+            if (!legs.length) {
+                return [];
+            }
+            var firstOrigin = legs[0].origin;
+            var stays = [];
+            var gapMs = layoverHours * 3600000;
+            legs.forEach(function (leg, i) {
+                var next = legs[i + 1] || null;
+                if (!next) {
+                    if (leg.dest !== firstOrigin) {
+                        stays.push(leg.dest);
+                    }
+                    return;
+                }
+                if (!leg.arrive || next.depart <= leg.arrive) {
+                    return;
+                }
+                if ((next.depart.getTime() - leg.arrive.getTime()) > gapMs) {
+                    stays.push(leg.dest);
+                }
+            });
+            return stays;
+        }
+
+        function updateStayPurposes() {
+            var wrap = document.getElementById('trip-stay-purposes');
+            var list = document.getElementById('trip-stay-purposes-list');
+            if (!wrap || !list) {
+                return;
+            }
+            var current = {};
+            list.querySelectorAll('[data-stay-dest]').forEach(function (input) {
+                current[input.getAttribute('data-stay-dest')] = input.value;
+            });
+            savedStayPurposes.forEach(function (row) {
+                var dest = String(row.dest_code || '').toUpperCase();
+                if (dest && current[dest] === undefined) {
+                    current[dest] = row.purpose || '';
+                }
+            });
+
+            var dests = collectStayDests();
+            var destKey = dests.join('|');
+            wrap.hidden = dests.length < 2;
+            if (dests.length < 2) {
+                lastStayDestKey = '';
+                list.innerHTML = '';
+                return;
+            }
+            if (destKey === lastStayDestKey && list.children.length === dests.length) {
+                return;
+            }
+            lastStayDestKey = destKey;
+
+            var html = '';
+            dests.forEach(function (dest, idx) {
+                var value = current[dest] || '';
+                html += '<label>Stay in ' + escapeHtml(dest)
+                    + '<input type="hidden" name="stay_purposes[' + idx + '][dest_code]" value="' + escapeHtml(dest) + '">'
+                    + '<input type="text" name="stay_purposes[' + idx + '][purpose]" data-stay-dest="'
+                    + escapeHtml(dest) + '" value="' + escapeHtml(value) + '" maxlength="255"></label>';
+            });
+            list.innerHTML = html;
+        }
+
         function bindRow(row) {
             row.querySelectorAll('.leg-arrive, .leg-depart').forEach(function (input) {
-                input.addEventListener('change', updateGapHints);
+                input.addEventListener('change', function () {
+                    updateGapHints();
+                    updateStayPurposes();
+                });
                 input.addEventListener('input', updateGapHints);
+            });
+            row.querySelectorAll('.leg-origin, .leg-dest').forEach(function (input) {
+                input.addEventListener('change', updateStayPurposes);
+                input.addEventListener('input', updateStayPurposes);
             });
 
             var mode = row.querySelector('.leg-mode');

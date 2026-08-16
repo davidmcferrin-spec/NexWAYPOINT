@@ -32,7 +32,9 @@ bootstrapped by an idempotent `setup.sh`. Additional users via
 colors, default theme) is under Settings → Appearance. Install auto-seeds
 `admin` with a random password; `setup.sh reset-password` regenerates.
 Existing DBs need `php scripts/migrate.php` after pull (includes
-global-properties migration).
+global-properties migration). Nexstar station offices: `php scripts/seed_nexstar_venues.php`
+loads `data/nexstar_stations.csv` into `office_venues` (hotel map squares +
+walk-to combobox). Insert-only — matching names are never overwritten.
 
 **Team board UX (2026-08-16):** profile photo upload with face-center crop
 (Settings → My profile), home city for map pins, nav-centered
@@ -73,6 +75,9 @@ LGA). Dashboard Next is the next stay city with that inbound’s date/time
 airport. After the last landing, status stays itinerary-remote in that city
 through `end_date` instead of snapping to Home at +45m. Round-trips and
 same-day connections are unchanged. Confirmation parsers were not widened.
+Multi-city stay purposes (`trip_stay_purposes`) are per overnight city, not
+home / re-base. Trip-level `trip_purpose` remains the list headline and the
+fallback for a single stay (or the first stay until per-city values exist).
 Trips list defaults to Upcoming (current + future). After a re-base home
 (last dest = first origin), `TripAutoCompleter` marks the trip completed
 once Home has lasted 2 hours past the 45m post-flight window (list,

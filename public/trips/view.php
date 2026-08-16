@@ -45,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $segments = $tripRepo->segmentsForTrip((int) $trip->id);
+$stayPurposes = $tripRepo->stayPurposesForTrip((int) $trip->id);
 $today = (new DateTimeImmutable('today'))->format('Y-m-d');
 ?>
 <!DOCTYPE html>
@@ -83,11 +84,15 @@ $today = (new DateTimeImmutable('today'))->format('Y-m-d');
         <p class="alert alert-success"><?= htmlspecialchars($message, ENT_QUOTES) ?></p>
     <?php endif; ?>
 
-    <?php if ($trip->tripPurpose !== null || $trip->notes !== null): ?>
+    <?php if ($trip->tripPurpose !== null || $trip->notes !== null || $stayPurposes !== []): ?>
         <div class="card">
             <?php if ($trip->tripPurpose !== null): ?>
                 <p><strong>Purpose:</strong> <?= htmlspecialchars($trip->tripPurpose, ENT_QUOTES) ?></p>
             <?php endif; ?>
+            <?php foreach ($stayPurposes as $stayPurpose): ?>
+                <p><strong><?= htmlspecialchars($airports->labelFor($stayPurpose['dest_code']), ENT_QUOTES) ?>:</strong>
+                    <?= htmlspecialchars($stayPurpose['purpose'], ENT_QUOTES) ?></p>
+            <?php endforeach; ?>
             <?php if ($trip->notes !== null): ?>
                 <p><?= nl2br(htmlspecialchars($trip->notes, ENT_QUOTES)) ?></p>
             <?php endif; ?>

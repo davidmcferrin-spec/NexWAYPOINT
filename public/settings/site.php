@@ -300,6 +300,7 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
         <p class="hint">
             Work locations for the walk-to field and
             <a href="/hotels/map.php">hotel map</a> pins. Saving re-geocodes the address for the map.
+            Bulk-load Nexstar stations with <code>php scripts/seed_nexstar_venues.php</code>.
         </p>
 
         <?php if ($venueWarning !== null): ?>

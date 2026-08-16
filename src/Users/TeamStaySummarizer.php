@@ -40,7 +40,8 @@ final class TeamStaySummarizer
      *   start_label: string,
      *   end_label: string|null,
      *   open_ended: bool,
-     *   dates: string
+     *   dates: string,
+     *   dest_code: string|null
      * }>
      */
     public function staysForTrip(Trip $trip, array $segments): array
@@ -75,7 +76,9 @@ final class TeamStaySummarizer
                 continue;
             }
 
-            $out[] = $this->row($city, $startDt, $endDt, $openEnded);
+            $out[] = array_merge($this->row($city, $startDt, $endDt, $openEnded), [
+                'dest_code' => strtoupper(trim((string) $stay['destination'])),
+            ]);
         }
 
         return $out;
@@ -191,7 +194,7 @@ final class TeamStaySummarizer
         if ($start === null) {
             return [];
         }
-        return [$this->row($city, $start, $end, false)];
+        return [array_merge($this->row($city, $start, $end, false), ['dest_code' => null])];
     }
 
     /**

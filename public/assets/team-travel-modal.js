@@ -90,6 +90,9 @@
                                 if (s.dates) {
                                     html += '<div>' + escapeHtml(s.dates) + '</div>';
                                 }
+                                if (s.purpose) {
+                                    html += '<div class="hint">' + escapeHtml(s.purpose) + '</div>';
+                                }
                                 html += '</li>';
                             });
                             html += '</ul>';
@@ -101,9 +104,9 @@
                             if (t.dates) {
                                 html += '<div>' + escapeHtml(t.dates) + '</div>';
                             }
-                        }
-                        if (t.purpose) {
-                            html += '<div class="hint">' + escapeHtml(t.purpose) + '</div>';
+                            if (t.purpose) {
+                                html += '<div class="hint">' + escapeHtml(t.purpose) + '</div>';
+                            }
                         }
                         html += '</li>';
                     });

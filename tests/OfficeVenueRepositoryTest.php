@@ -62,4 +62,15 @@ final class OfficeVenueRepositoryTest extends NexWaypointTestCase
         $this->expectException(\InvalidArgumentException::class);
         $repo->create('bureau', null, 'NYC', 'NY', null, 'USA', null, null, null);
     }
+
+    public function testFindByNameIsCaseInsensitive(): void
+    {
+        $repo = new OfficeVenueRepository($this->db, $this->logger);
+        $repo->create('WHNT', '200 Holmes Ave', 'Huntsville', 'AL', null, 'USA', null, null, null);
+
+        $found = $repo->findByName('whnt');
+        self::assertNotNull($found);
+        self::assertSame('WHNT', $found->name);
+        self::assertNull($repo->findByName('missing'));
+    }
 }

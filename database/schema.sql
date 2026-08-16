@@ -322,6 +322,18 @@ CREATE TABLE trip_segments (
     INDEX idx_segments_carrier (carrier_id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE trip_stay_purposes (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    trip_id     INT UNSIGNED NOT NULL,
+    dest_code   VARCHAR(8) NOT NULL,
+    sort_order  INT UNSIGNED NOT NULL DEFAULT 0,
+    purpose     VARCHAR(255) NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_stay_purposes_trip FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE CASCADE,
+    INDEX idx_stay_purposes_trip (trip_id)
+) ENGINE=InnoDB;
+
 CREATE TABLE flight_status (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     segment_id          INT UNSIGNED NOT NULL UNIQUE,

@@ -255,6 +255,17 @@ CREATE INDEX idx_segments_carrier ON trip_segments(carrier_id);
 CREATE INDEX idx_segments_depart ON trip_segments(depart_dt);
 CREATE INDEX idx_segments_type ON trip_segments(segment_type);
 
+CREATE TABLE trip_stay_purposes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id     INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    dest_code   TEXT NOT NULL,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    purpose     TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_stay_purposes_trip ON trip_stay_purposes(trip_id);
+
 CREATE TABLE flight_status (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     segment_id          INTEGER NOT NULL UNIQUE REFERENCES trip_segments(id) ON DELETE CASCADE,

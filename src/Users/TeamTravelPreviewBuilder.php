@@ -39,7 +39,7 @@ final class TeamTravelPreviewBuilder
      *   dates: string|null,
      *   purpose: string|null,
      *   notes: string|null,
-     *   stays: list<array{city: string|null, start: string|null, end: string|null, start_label: string|null, end_label: string|null, open_ended: bool, dates: string|null}>,
+     *   stays: list<array{city: string|null, start: string|null, end: string|null, start_label: string|null, end_label: string|null, open_ended: bool, dates: string|null, purpose: string|null}>,
      *   itinerary: list<array{type: string, label: string}>,
      *   flights: list<array{label: string}>,
      *   redacted: bool
@@ -139,7 +139,7 @@ final class TeamTravelPreviewBuilder
                 'dates' => $dates,
                 'purpose' => $canPurpose ? $trip->tripPurpose : null,
                 'notes' => $canNotes ? $this->publicNotes($trip->notes) : null,
-                'stays' => $this->visibleStays($trip, $segments, $canCity, $canDates),
+                'stays' => $this->visibleStays($trip, $segments, $canCity, $canDates, $canPurpose),
                 'itinerary' => $itinerary,
                 'flights' => $flights,
                 'redacted' => !$canCity,
@@ -188,13 +188,20 @@ final class TeamTravelPreviewBuilder
 
     /**
      * @param TripSegment[] $segments
-     * @return list<array{city: string|null, start: string|null, end: string|null, start_label: string|null, end_label: string|null, open_ended: bool, dates: string|null}>
+     * @return list<array{city: string|null, start: string|null, end: string|null, start_label: string|null, end_label: string|null, open_ended: bool, dates: string|null, purpose: string|null}>
      */
-    private function visibleStays(Trip $trip, array $segments, bool $canCity, bool $canDates): array
-    {
+    private function visibleStays(
+        Trip $trip,
+        array $segments,
+        bool $canCity,
+        bool $canDates,
+        bool $canPurpose,
+    ): array {
         $rows = (new TeamStaySummarizer($this->airports))->staysForTrip($trip, $segments);
+        $listed = $trip->id !== null ? $this->trips->stayPurposesForTrip((int) $trip->id) : [];
+        $count = count($rows);
         $out = [];
-        foreach ($rows as $row) {
+        foreach ($rows as $index => $row) {
             $out[] = [
                 'city' => $canCity ? $row['city'] : 'Travel',
                 'start' => $canDates ? $row['start'] : null,
@@ -203,9 +210,53 @@ final class TeamTravelPreviewBuilder
                 'end_label' => $canDates ? $row['end_label'] : null,
                 'open_ended' => $canDates && $row['open_ended'],
                 'dates' => $canDates ? $row['dates'] : null,
+                'purpose' => $this->purposeForStay(
+                    $trip,
+                    $canPurpose,
+                    $index,
+                    $count,
+                    $listed,
+                    isset($row['dest_code']) && is_string($row['dest_code']) ? $row['dest_code'] : null,
+                ),
             ];
         }
         return $out;
+    }
+
+    /**
+     * @param list<array{dest_code: string, purpose: string, sort_order: int}> $listed
+     */
+    private function purposeForStay(
+        Trip $trip,
+        bool $canPurpose,
+        int $index,
+        int $stayCount,
+        array $listed,
+        ?string $destCode,
+    ): ?string {
+        if (!$canPurpose) {
+            return null;
+        }
+        foreach ($listed as $row) {
+            if ((int) $row['sort_order'] === $index) {
+                return $row['purpose'];
+            }
+        }
+        if ($destCode !== null && $destCode !== '') {
+            foreach ($listed as $row) {
+                if ($row['dest_code'] === $destCode) {
+                    return $row['purpose'];
+                }
+            }
+        }
+        $fallback = $trip->tripPurpose !== null ? trim($trip->tripPurpose) : '';
+        if ($fallback === '') {
+            return null;
+        }
+        if ($stayCount <= 1 || $listed === [] && $index === 0) {
+            return $fallback;
+        }
+        return null;
     }
 
     /**

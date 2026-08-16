@@ -82,6 +82,70 @@ final class TripRepository
     }
 
     /**
+     * Overnight stay purposes (not home / re-base), in itinerary order.
+     *
+     * @return list<array{dest_code: string, purpose: string, sort_order: int}>
+     */
+    public function stayPurposesForTrip(int $tripId): array
+    {
+        if (!$this->db->tableExists('trip_stay_purposes')) {
+            return [];
+        }
+        $rows = $this->db->fetchAll(
+            'SELECT dest_code, purpose, sort_order FROM trip_stay_purposes
+             WHERE trip_id = :id ORDER BY sort_order ASC, id ASC',
+            ['id' => $tripId]
+        );
+        $out = [];
+        foreach ($rows as $row) {
+            $purpose = trim((string) ($row['purpose'] ?? ''));
+            $dest = strtoupper(trim((string) ($row['dest_code'] ?? '')));
+            if ($purpose === '' || $dest === '') {
+                continue;
+            }
+            $out[] = [
+                'dest_code' => $dest,
+                'purpose' => $purpose,
+                'sort_order' => (int) ($row['sort_order'] ?? 0),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<array{dest_code?: string, purpose?: string}> $rows
+     */
+    public function replaceStayPurposes(int $tripId, array $rows, ?int $actorUserId = null): void
+    {
+        if (!$this->db->tableExists('trip_stay_purposes')) {
+            return;
+        }
+        $this->db->execute('DELETE FROM trip_stay_purposes WHERE trip_id = :id', ['id' => $tripId]);
+        $order = 0;
+        foreach ($rows as $row) {
+            $purpose = trim((string) ($row['purpose'] ?? ''));
+            $dest = strtoupper(trim((string) ($row['dest_code'] ?? '')));
+            if ($purpose === '' || $dest === '') {
+                continue;
+            }
+            $this->db->execute(
+                'INSERT INTO trip_stay_purposes (trip_id, dest_code, sort_order, purpose)
+                 VALUES (:trip_id, :dest_code, :sort_order, :purpose)',
+                [
+                    'trip_id' => $tripId,
+                    'dest_code' => $dest,
+                    'sort_order' => $order,
+                    'purpose' => $purpose,
+                ]
+            );
+            $order++;
+        }
+        $this->db->audit($actorUserId, 'replace_stay_purposes', 'trips', $tripId, [
+            'count' => $order,
+        ]);
+    }
+
+    /**
      * Filter the owner's trips for the history UI.
      *
      * @param 'all'|'upcoming'|'past'|'cancelled' $scope
