@@ -813,6 +813,53 @@ final class TeamAvatarStatusTest extends NexWaypointTestCase
         self::assertCount(2, $forOwner);
     }
 
+    public function testTravelPreviewOmitsAutoImportNotes(): void
+    {
+        $ownerId = $this->insertUser('owner_notes');
+        $viewerId = $this->insertUser('viewer_notes');
+        $tripRepo = new TripRepository($this->db, $this->logger);
+        $start = (new \DateTimeImmutable('today'))->modify('+2 days')->format('Y-m-d');
+        $end = (new \DateTimeImmutable('today'))->modify('+4 days')->format('Y-m-d');
+
+        $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Dallas, TX',
+            startDate: $start,
+            endDate: $end,
+            status: 'planned',
+            tripPurpose: null,
+            notes: 'Auto-imported from email confirmation NTSHWH',
+            isPrivate: false,
+        ));
+        $tripRepo->create(new \NexWaypoint\Trips\Trip(
+            id: null,
+            ownerId: $ownerId,
+            destinationCity: 'Chicago, IL',
+            startDate: $start,
+            endDate: $end,
+            status: 'planned',
+            tripPurpose: null,
+            notes: 'Crew call at 0600',
+            isPrivate: false,
+        ));
+
+        $builder = new TeamTravelPreviewBuilder(
+            $tripRepo,
+            new VisibilityEngine(new UserRepository($this->db, $this->logger), new VisibilityRuleRepository($this->db)),
+            new VisibilityBlockRepository($this->db),
+        );
+        $forOwner = $builder->build($ownerId, $ownerId, 21);
+        self::assertCount(2, $forOwner);
+        self::assertNull($forOwner[0]['notes']);
+        self::assertSame('Crew call at 0600', $forOwner[1]['notes']);
+
+        $forViewer = $builder->build($viewerId, $ownerId, 21);
+        self::assertCount(2, $forViewer);
+        self::assertNull($forViewer[0]['notes']);
+        self::assertNull($forViewer[1]['notes']);
+    }
+
     public function testTravelPreviewIncludesMultiLegAndLayover(): void
     {
         $ownerId = $this->insertUser('flyer');

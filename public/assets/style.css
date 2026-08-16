@@ -1046,10 +1046,22 @@ button.linkish {
     background: var(--panel);
     text-align: left;
     min-width: 8.5rem;
-    max-width: 11rem;
+    max-width: 12rem;
     padding: 0.45rem 0.7rem;
     font-weight: 600;
     box-shadow: 1px 0 0 var(--border);
+}
+.team-gantt tbody .team-gantt-name {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+.team-gantt-swatch {
+    flex: 0 0 0.55rem;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 2px;
+    background: hsl(var(--gantt-h) var(--gantt-s) 46%);
 }
 .team-gantt thead .team-gantt-name {
     z-index: 3;
@@ -1083,8 +1095,8 @@ button.linkish {
     box-shadow: inset 0 -2px 0 var(--accent);
 }
 .team-gantt-cell.is-travel {
-    background: var(--badge-travel-bg);
-    color: var(--accent);
+    background: hsl(var(--gantt-h) var(--gantt-s) var(--gantt-l, 46%));
+    color: var(--gantt-fg, #f8fafc);
     font-weight: 600;
 }
 .team-gantt-cell.is-home {

@@ -43,6 +43,21 @@ final class UserRepositoryTest extends NexWaypointTestCase
         self::assertFalse($repo->hasDottedReport($boss, $worker));
     }
 
+    public function testFindAllActiveInOrgOrderFollowsSolidLineTree(): void
+    {
+        $zara = $this->insertUser('zara');
+        $this->insertUser('bob', $zara);
+        $anna = $this->insertUser('anna', $zara);
+        $this->insertUser('carl', $anna);
+        $repo = new UserRepository($this->db, $this->logger);
+
+        $names = array_map(
+            static fn ($u) => $u->displayName,
+            $repo->findAllActiveInOrgOrder(),
+        );
+        self::assertSame(['Zara', 'Anna', 'Carl', 'Bob'], $names);
+    }
+
     public function testReportingCycleIsRejected(): void
     {
         $a = $this->insertUser('a');

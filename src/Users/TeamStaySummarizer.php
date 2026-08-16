@@ -18,6 +18,14 @@ final class TeamStaySummarizer
 {
     public const WEEK_DAYS = 7;
 
+    /** Sunday of the calendar week containing $day (US week). */
+    public static function sundayOfWeek(\DateTimeImmutable $day): \DateTimeImmutable
+    {
+        $day = $day->setTime(0, 0, 0);
+        $dow = (int) $day->format('w');
+        return $dow === 0 ? $day : $day->modify('-' . $dow . ' days');
+    }
+
     public function __construct(
         private readonly ?AirportRepository $airports = null,
     ) {

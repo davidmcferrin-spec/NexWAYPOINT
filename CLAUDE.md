@@ -39,11 +39,14 @@ global-properties migration).
 `You are: <Status>` override (remote requires city/state), dashboard
 Table / Cards / Calendar / Map views (`localStorage` preference) with Leaflet
 city clusters → face markers. Map pins = current location only. Table/cards
-show Status, **This week** (stay cities overlapping the next 7 days, joined
-with →), and **Next** (next travel action + date + Early/Afternoon/Evening/Late).
-Calendar is a 21-day Gantt (columns = dates, rows = people; travel city vs
-home). Avatar/row/card/Gantt click opens a stay-summary modal (city + weekday
-from/to; last dest ≠ first origin is open-ended) — not the flight list.
+show Status, **The Week** / **Next Week** (stay cities overlapping those
+Sun–Sat calendar weeks, joined with →), and **Next** (next travel action +
+date + Early/Afternoon/Evening/Late). Rows follow the solid-line org tree
+(manager, then reports A–Z). Calendar is a 21-day Gantt (columns = dates,
+rows = people; travel city vs home) with a stable per-user hue and a
+different shade per stay city. Avatar/row/card/Gantt click opens a
+stay-summary modal (city + weekday from/to; last dest ≠ first origin is
+open-ended) — not the flight list or mail-import notes.
 
 **Complex itinerary (2026-07-20):** `TripStatusEngine` phases are pre-flight /
 en_route / post-flight (45m windows), layover (gap ≤3h), itinerary remote

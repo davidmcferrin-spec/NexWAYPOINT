@@ -289,6 +289,73 @@ final class UserRepository
     }
 
     /**
+     * Active users in solid-line org order (manager, then reports A–Z).
+     *
+     * @return User[]
+     */
+    public function findAllActiveInOrgOrder(bool $includeSystem = false): array
+    {
+        return self::sortByOrgTree($this->findAllActive($includeSystem));
+    }
+
+    /**
+     * Preorder walk of the solid-line tree. Roots (no manager, or manager
+     * missing / system) come first, A–Z; each node’s reports follow A–Z.
+     *
+     * @param User[] $users
+     * @return User[]
+     */
+    public static function sortByOrgTree(array $users): array
+    {
+        $byId = [];
+        foreach ($users as $user) {
+            $byId[$user->id] = $user;
+        }
+
+        $children = [];
+        $roots = [];
+        foreach ($users as $user) {
+            $parentId = $user->managerId;
+            $parent = $parentId !== null && $parentId > 0 ? ($byId[$parentId] ?? null) : null;
+            if ($parent === null || $parent->isSystem) {
+                $roots[] = $user;
+                continue;
+            }
+            $children[$parentId][] = $user;
+        }
+
+        $byName = static fn (User $a, User $b): int => strcasecmp($a->displayName, $b->displayName);
+        usort($roots, $byName);
+        foreach ($children as &$list) {
+            usort($list, $byName);
+        }
+        unset($list);
+
+        $out = [];
+        $seen = [];
+        $walk = static function (User $node) use (&$walk, &$out, &$seen, $children): void {
+            if (isset($seen[$node->id])) {
+                return;
+            }
+            $seen[$node->id] = true;
+            $out[] = $node;
+            foreach ($children[$node->id] ?? [] as $kid) {
+                $walk($kid);
+            }
+        };
+        foreach ($roots as $root) {
+            $walk($root);
+        }
+        foreach ($users as $user) {
+            if (!isset($seen[$user->id])) {
+                $walk($user);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * @return User[]
      */
     public function findAll(): array

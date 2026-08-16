@@ -138,7 +138,7 @@ final class TeamTravelPreviewBuilder
                 'destination' => $destination,
                 'dates' => $dates,
                 'purpose' => $canPurpose ? $trip->tripPurpose : null,
-                'notes' => $canNotes ? $trip->notes : null,
+                'notes' => $canNotes ? $this->publicNotes($trip->notes) : null,
                 'stays' => $this->visibleStays($trip, $segments, $canCity, $canDates),
                 'itinerary' => $itinerary,
                 'flights' => $flights,
@@ -147,6 +147,18 @@ final class TeamTravelPreviewBuilder
         }
 
         return $out;
+    }
+
+    private function publicNotes(?string $notes): ?string
+    {
+        if ($notes === null) {
+            return null;
+        }
+        $trim = trim($notes);
+        if ($trim === '' || str_starts_with($trim, 'Auto-imported from email confirmation')) {
+            return null;
+        }
+        return $notes;
     }
 
     /**

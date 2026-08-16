@@ -105,9 +105,6 @@
                         if (t.purpose) {
                             html += '<div class="hint">' + escapeHtml(t.purpose) + '</div>';
                         }
-                        if (t.notes) {
-                            html += '<div class="hint">' + escapeHtml(t.notes) + '</div>';
-                        }
                         html += '</li>';
                     });
                     html += '</ul>';

@@ -81,6 +81,35 @@ final class TeamStaySummarizerTest extends TestCase
         self::assertSame('Dallas/Fort Worth, TX → New York, NY', $during);
     }
 
+    public function testSundayOfWeekAndCalendarWindows(): void
+    {
+        $sum = new TeamStaySummarizer();
+        $wed = new \DateTimeImmutable('2026-08-19');
+        $sunday = TeamStaySummarizer::sundayOfWeek($wed);
+        self::assertSame('2026-08-16', $sunday->format('Y-m-d'));
+        self::assertSame('2026-08-16', TeamStaySummarizer::sundayOfWeek($sunday)->format('Y-m-d'));
+
+        $stays = [
+            [
+                'city' => 'Dallas/Fort Worth, TX',
+                'start' => '2026-08-24',
+                'end' => '2026-08-26',
+                'open_ended' => false,
+            ],
+            [
+                'city' => 'New York, NY',
+                'start' => '2026-08-26',
+                'end' => null,
+                'open_ended' => true,
+            ],
+        ];
+        self::assertNull($sum->weekCities($stays, $sunday, 7));
+        self::assertSame(
+            'Dallas/Fort Worth, TX → New York, NY',
+            $sum->weekCities($stays, $sunday->modify('+7 days'), 7),
+        );
+    }
+
     public function testGanttCellsPaintTravelThenHome(): void
     {
         $sum = new TeamStaySummarizer();
