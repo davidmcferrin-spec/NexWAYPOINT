@@ -107,6 +107,13 @@ a:hover {
     border-bottom: 1px solid var(--border);
     box-shadow: var(--shadow);
 }
+.navbar-start {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    flex: 0 1 auto;
+}
 .navbar-brand {
     flex: 0 0 auto;
 }
@@ -116,10 +123,10 @@ a:hover {
     margin-right: 0;
 }
 .navbar-status {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 0.35rem;
     min-width: 0;
 }
@@ -158,6 +165,7 @@ a:hover {
     justify-content: flex-end;
     gap: 0.15rem 0.65rem;
     flex: 0 1 auto;
+    margin-left: auto;
 }
 .navbar-sep {
     display: inline-block;
@@ -205,6 +213,8 @@ a:hover {
 .nav-account-menu {
     left: auto;
     right: 0;
+    max-height: min(70vh, 28rem);
+    overflow-y: auto;
 }
 .nav-account-menu a {
     display: flex;
@@ -362,6 +372,12 @@ label.check {
 .nav-dropdown-menu a:hover {
     background: var(--bg);
     color: var(--accent);
+}
+.nav-dropdown.nav-account .nav-dropdown-menu {
+    left: auto;
+    right: 0;
+    max-height: min(70vh, 28rem);
+    overflow-y: auto;
 }
 .nav-dropdown-sep {
     display: block;
@@ -1193,11 +1209,8 @@ button.linkish {
     .navbar {
         flex-wrap: wrap;
     }
-    .navbar-status {
-        order: 3;
-        flex: 1 1 100%;
-        justify-content: flex-start;
-        padding-top: 0.25rem;
+    .navbar-start {
+        flex: 1 1 auto;
     }
 }
 

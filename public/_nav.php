@@ -84,6 +84,7 @@ $navAlertLabel = $unreadCount > 0
     : 'Account menu';
 ?>
 <nav class="navbar">
+    <div class="navbar-start">
     <div class="navbar-brand"><a href="/dashboard/index.php">NexWAYPOINT</a></div>
     <div class="navbar-status">
         <span class="navbar-status-prefix">You are:</span>
@@ -93,6 +94,7 @@ $navAlertLabel = $unreadCount > 0
             title="Set a temporary status override">
             <?= htmlspecialchars($navStatusLabel, ENT_QUOTES) ?>
         </button>
+    </div>
     </div>
     <div class="navbar-links">
         <a href="/dashboard/index.php">Dashboard</a>
