@@ -308,6 +308,7 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
             Work locations for the walk-to field and
             <a href="/hotels/map.php">hotel map</a> pins. Saving re-geocodes the address for the map.
             Bulk-load Nexstar stations with <code>php scripts/seed_nexstar_venues.php</code>.
+            Retry missing map pins with <code>php scripts/geocode_missing_venues.php</code>.
         </p>
 
         <?php if ($venueWarning !== null): ?>
@@ -315,24 +316,26 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
         <?php elseif ($venues === []): ?>
             <p class="empty-state">No offices/venues yet.</p>
         <?php else: ?>
-            <table>
+            <div class="table-scroll">
+            <table class="venues-table">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Address</th>
-                        <th>Map</th>
-                        <th>Active</th>
-                        <th></th>
+                        <th class="col-name">Name</th>
+                        <th class="col-address">Address</th>
+                        <th class="col-flag">Map</th>
+                        <th class="col-flag">Active</th>
+                        <th class="col-actions"></th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php foreach ($venues as $venue): ?>
                     <tr>
-                        <td><?= htmlspecialchars($venue->name, ENT_QUOTES) ?></td>
-                        <td><?= htmlspecialchars($venue->placeLabel() !== '' ? $venue->placeLabel() : '—', ENT_QUOTES) ?></td>
-                        <td><?= ($venue->latitude !== null && $venue->longitude !== null) ? 'yes' : 'no' ?></td>
-                        <td><?= $venue->isActive ? 'yes' : 'no' ?></td>
-                        <td>
+                        <td class="col-name"><?= htmlspecialchars($venue->name, ENT_QUOTES) ?></td>
+                        <td class="col-address"><?= htmlspecialchars($venue->placeLabel() !== '' ? $venue->placeLabel() : '—', ENT_QUOTES) ?></td>
+                        <td class="col-flag"><?= ($venue->latitude !== null && $venue->longitude !== null) ? 'yes' : 'no' ?></td>
+                        <td class="col-flag"><?= $venue->isActive ? 'yes' : 'no' ?></td>
+                        <td class="col-actions">
+                            <div class="row-actions">
                             <button type="button" class="linkish" data-open-modal="venue-modal"
                                 data-title="Edit office / venue"
                                 data-id="<?= (int) $venue->id ?>"
@@ -346,25 +349,27 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
                                 data-active="<?= $venue->isActive ? '1' : '0' ?>">Edit</button>
                             <?php if ($venue->id !== null): ?>
                                 <?php if ($venue->isActive): ?>
-                                    <form method="post" style="display:inline">
+                                    <form method="post" class="inline-form">
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
                                         <input type="hidden" name="action" value="remove_venue">
                                         <input type="hidden" name="venue_id" value="<?= (int) $venue->id ?>">
                                         <button type="submit" class="danger">Deactivate</button>
                                     </form>
                                 <?php endif; ?>
-                                <form method="post" style="display:inline" onsubmit="return confirm('Delete this office / venue permanently?');">
+                                <form method="post" class="inline-form" onsubmit="return confirm('Delete this office / venue permanently?');">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
                                     <input type="hidden" name="action" value="delete_venue">
                                     <input type="hidden" name="venue_id" value="<?= (int) $venue->id ?>">
                                     <button type="submit" class="danger">Delete</button>
                                 </form>
                             <?php endif; ?>
+                            </div>
                         </td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         <?php endif; ?>
     </div>
 

@@ -70,8 +70,8 @@ final class GeocoderTest extends NexWaypointTestCase
         mkdir($dir);
         $geocoder = new Geocoder($this->logger, $dir);
 
-        // Mirror Geocoder cache key: v3|address|city|state|postal|normalizedCountry
-        $cacheKey = strtolower('v3||Chicago|IL||United States');
+        // Mirror Geocoder cache key: v4|address|city|state|postal|normalizedCountry
+        $cacheKey = strtolower('v4||Chicago|IL||United States');
         $path = $dir . '/' . hash('sha256', $cacheKey) . '.json';
         file_put_contents($path, json_encode(['lat' => 41.8781, 'lon' => -87.6298]));
 
@@ -97,9 +97,30 @@ final class GeocoderTest extends NexWaypointTestCase
     {
         $geocoder = new Geocoder($this->logger, sys_get_temp_dir());
         self::assertSame(
-            '400 North Capitol Street NE',
+            '400 North Capitol Street Northeast',
             $geocoder->normalizeStreetAddress('400 N. Capital St NE')
         );
+    }
+
+    public function testStreetLookupVariantsStripSuiteAndBuildingNoise(): void
+    {
+        $geocoder = new Geocoder($this->logger, sys_get_temp_dir());
+
+        $koin = $geocoder->streetLookupVariants('222 SW Columbia Street Suite 102');
+        self::assertContains('222 Southwest Columbia Street', $koin);
+        self::assertSame('222 SW Columbia Street', $geocoder->stripSecondaryUnit('222 SW Columbia Street Suite 102'));
+
+        $ktla = $geocoder->streetLookupVariants('Sunset Bronson Studios, 5800 W Sunset Blvd');
+        self::assertContains('5800 West Sunset Boulevard', $ktla);
+
+        $ktsm = $geocoder->streetLookupVariants('3801 Constitution Ave (Building D)');
+        self::assertContains('3801 Constitution Avenue', $ktsm);
+
+        $hwy = $geocoder->streetLookupVariants('10849 N. US Hwy 41');
+        self::assertContains('10849 North US Highway 41', $hwy);
+
+        $neil = $geocoder->streetLookupVariants('509 South Neil');
+        self::assertContains('509 South Neil Street', $neil);
     }
 
     public function testRequiresCity(): void

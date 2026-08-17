@@ -35,6 +35,7 @@ Existing DBs need `php scripts/migrate.php` after pull (includes
 global-properties migration). Nexstar station offices: `php scripts/seed_nexstar_venues.php`
 loads `data/nexstar_stations.csv` into `office_venues` (hotel map squares +
 walk-to combobox). Insert-only — matching names are never overwritten.
+`php scripts/geocode_missing_venues.php` fills lat/lon only when a pin is missing.
 
 **Team board UX (2026-08-16):** profile photo upload with face-center crop
 (Settings → My profile), home city for map pins, nav-centered

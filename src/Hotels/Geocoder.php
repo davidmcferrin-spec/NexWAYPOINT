@@ -14,7 +14,8 @@ final class Geocoder
 {
     private const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
     private const USER_AGENT = 'NexWAYPOINT/1.0 (self-hosted hotel map; https://nexwaypoint.area51consulting.com)';
-    private const CACHE_VERSION = 'v3';
+    private const CACHE_VERSION = 'v4';
+    private const MAX_LOOKUP_ATTEMPTS = 6;
     private const MISS_TTL_SECONDS = 3600;
 
     private string $cacheDir;
@@ -61,24 +62,32 @@ final class Geocoder
             }
         }
 
-        $candidates = [];
-        if ($streetForLookup !== null) {
-            $candidates[] = $streetForLookup;
-        }
-        if ($addressLine1 !== null && strcasecmp($addressLine1, (string) $streetForLookup) !== 0) {
-            $candidates[] = $addressLine1;
-        }
-
         $result = null;
-        foreach ($candidates as $street) {
+        $attempts = 0;
+        foreach ($this->streetLookupVariants($addressLine1) as $street) {
+            if ($attempts >= self::MAX_LOOKUP_ATTEMPTS) {
+                break;
+            }
             $result = $this->fetchNominatimStructured($street, $city, $stateRegion, $postalCode, $country);
+            $attempts++;
             if ($result !== null) {
                 break;
             }
-            $parts = array_values(array_filter([$street, $city, $stateRegion, $postalCode, $country]));
+            if ($attempts >= self::MAX_LOOKUP_ATTEMPTS) {
+                break;
+            }
+            $parts = array_values(array_filter([$street, $city, $stateRegion, $country]));
             $result = $this->fetchNominatimFreeform(implode(', ', $parts));
+            $attempts++;
             if ($result !== null) {
                 break;
+            }
+            if ($postalCode !== null && $attempts < self::MAX_LOOKUP_ATTEMPTS) {
+                $result = $this->fetchNominatimStructured($street, $city, $stateRegion, null, $country);
+                $attempts++;
+                if ($result !== null) {
+                    break;
+                }
             }
         }
 
@@ -314,11 +323,21 @@ final class Geocoder
         // Extremely common DC / government-area typo.
         $address = preg_replace('/\bCapital\b/i', 'Capitol', $address) ?? $address;
 
+        // Two-letter compass before single-letter (SW ≠ South West as two tokens).
+        $address = preg_replace('/\bS\.?\s*W\.?\b/i', 'Southwest', $address) ?? $address;
+        $address = preg_replace('/\bS\.?\s*E\.?\b/i', 'Southeast', $address) ?? $address;
+        $address = preg_replace('/\bN\.?\s*W\.?\b/i', 'Northwest', $address) ?? $address;
+        $address = preg_replace('/\bN\.?\s*E\.?\b/i', 'Northeast', $address) ?? $address;
+
         // Directional abbreviations: "N." / "N " → North (not mid-word).
         $address = preg_replace('/\bN\.?\s+(?=[A-Za-z])/i', 'North ', $address) ?? $address;
         $address = preg_replace('/\bS\.?\s+(?=[A-Za-z])/i', 'South ', $address) ?? $address;
         $address = preg_replace('/\bE\.?\s+(?=[A-Za-z])/i', 'East ', $address) ?? $address;
         $address = preg_replace('/\bW\.?\s+(?=[A-Za-z])/i', 'West ', $address) ?? $address;
+
+        $address = preg_replace('/\bInterstate\s+H\s+(\d+)/i', 'Interstate $1', $address) ?? $address;
+        $address = preg_replace('/\bUS\s+Hwy\.?\b/i', 'US Highway', $address) ?? $address;
+        $address = preg_replace('/\bState\s+Hwy\.?\b/i', 'State Highway', $address) ?? $address;
 
         // Street type abbreviations (avoid matching inside "Street").
         $address = preg_replace('/\bSt\.?(?=\s|,|$)/i', 'Street', $address) ?? $address;
@@ -326,9 +345,78 @@ final class Geocoder
         $address = preg_replace('/\bBlvd\.?(?=\s|,|$)/i', 'Boulevard', $address) ?? $address;
         $address = preg_replace('/\bRd\.?(?=\s|,|$)/i', 'Road', $address) ?? $address;
         $address = preg_replace('/\bDr\.?(?=\s|,|$)/i', 'Drive', $address) ?? $address;
+        $address = preg_replace('/\bHwy\.?(?=\s|,|$)/i', 'Highway', $address) ?? $address;
+        $address = preg_replace('/\bPkwy\.?(?=\s|,|$)/i', 'Parkway', $address) ?? $address;
+        $address = preg_replace('/\bPl\.?(?=\s|,|$)/i', 'Place', $address) ?? $address;
+        $address = preg_replace('/\bCt\.?(?=\s|,|$)/i', 'Court', $address) ?? $address;
+        $address = preg_replace('/\bLn\.?(?=\s|,|$)/i', 'Lane', $address) ?? $address;
 
         $address = preg_replace('/\s+/', ' ', $address) ?? $address;
         return trim($address);
+    }
+
+    /**
+     * Street strings to try against Nominatim (suite/building noise stripped).
+     *
+     * @return list<string>
+     */
+    public function streetLookupVariants(?string $address): array
+    {
+        $raw = $this->trimOrNull($address);
+        if ($raw === null) {
+            return [];
+        }
+
+        $out = [];
+        $add = function (?string $value) use (&$out): void {
+            $value = $this->trimOrNull($value);
+            if ($value === null) {
+                return;
+            }
+            $value = trim((string) preg_replace('/\s+/', ' ', $value));
+            foreach ($out as $existing) {
+                if (strcasecmp($existing, $value) === 0) {
+                    return;
+                }
+            }
+            $out[] = $value;
+        };
+
+        $cleaned = $this->stripSecondaryUnit($raw);
+        $cleaned = trim((string) preg_replace('/\s*\([^)]*\)/', '', $cleaned));
+        $add($this->normalizeStreetAddress($cleaned));
+        $add($this->normalizeStreetAddress($raw));
+        $add($cleaned);
+        $add($raw);
+
+        if (str_contains($raw, ',')) {
+            foreach (array_map('trim', explode(',', $raw)) as $part) {
+                if (preg_match('/^\d/', $part) === 1) {
+                    $add($this->normalizeStreetAddress($this->stripSecondaryUnit($part)));
+                }
+            }
+        }
+
+        $primary = $out[0] ?? $cleaned;
+        if ($primary !== '' && preg_match(
+            '/\b(Street|Avenue|Road|Drive|Boulevard|Lane|Way|Place|Court|Circle|Parkway|Freeway|Highway|Pike|Trail|Plaza|Manor)\b/i',
+            $primary
+        ) !== 1) {
+            $add($this->normalizeStreetAddress($primary . ' Street'));
+        }
+
+        return $out;
+    }
+
+    public function stripSecondaryUnit(string $address): string
+    {
+        $address = preg_replace(
+            '/,?\s+(?:suite|ste\.?|unit|apt\.?|apartment|floor|fl\.?|#)\s*[A-Za-z0-9-]+\b/i',
+            '',
+            $address
+        ) ?? $address;
+        $address = preg_replace('/,?\s+\d+(?:st|nd|rd|th)\s+floor\b/i', '', $address) ?? $address;
+        return trim($address, " \t,");
     }
 
     /**

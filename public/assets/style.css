@@ -612,6 +612,26 @@ table.properties-table .col-desk { white-space: nowrap; }
 table.properties-table .col-blacklist { min-width: 8rem; }
 table.properties-table .col-rating { white-space: nowrap; }
 table.properties-table .col-actions { white-space: nowrap; }
+
+table.venues-table {
+    width: 100%;
+    min-width: 760px;
+    margin-top: 0;
+}
+table.venues-table th,
+table.venues-table td {
+    vertical-align: middle;
+}
+table.venues-table .col-name { min-width: 8rem; font-weight: 600; }
+table.venues-table .col-address { color: var(--text-dim); font-size: 0.9rem; }
+table.venues-table .col-flag { width: 4.5rem; white-space: nowrap; }
+table.venues-table .col-actions { width: 1%; white-space: nowrap; }
+table.venues-table .row-actions {
+    margin-top: 0;
+    flex-wrap: nowrap;
+    gap: 0.45rem;
+    justify-content: flex-end;
+}
 .star-rating {
     color: var(--yellow);
     letter-spacing: 0.05em;

@@ -24,7 +24,7 @@ $blacklistRepo = new \NexWaypoint\Hotels\UserHotelBlacklistRepository($app['db']
 $myBlacklistIds = $blacklistRepo->propertyIdsForUser($user->id);
 
 /** Cap live Nominatim lookups per page load (cache hits are free). */
-$maxLiveLookups = 12;
+$maxLiveLookups = 24;
 $liveLookups = 0;
 
 $mapped = [];

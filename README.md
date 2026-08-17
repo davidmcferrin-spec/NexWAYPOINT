@@ -156,6 +156,12 @@ php scripts/seed_nexstar_venues.php
 
 Insert-only: existing venue names are left untouched.
 
+Fill lat/lon for venues that have an address but no pin (does not change addresses):
+
+```bash
+php scripts/geocode_missing_venues.php
+```
+
 Settings hub is `/settings/index.php` (emails, sharing; admins also get
 site catalogs and users/org chart at `/settings/users.php`).
 Everyone manages their own forward addresses at `/settings/emails.php`.
