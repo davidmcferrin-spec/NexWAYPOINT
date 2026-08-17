@@ -254,6 +254,20 @@ final class OfficeVenueRepository
         $this->db->audit($actorUserId, 'deactivate', 'office_venues', $id, ['name' => $existing->name]);
     }
 
+    public function delete(int $id, ?int $actorUserId = null): void
+    {
+        if (!$this->tableReady()) {
+            throw new \RuntimeException('office_venues table missing; run php scripts/migrate.php');
+        }
+        $existing = $this->find($id);
+        if ($existing === null) {
+            throw new \InvalidArgumentException('Office / venue not found.');
+        }
+        $this->db->execute('DELETE FROM office_venues WHERE id = :id', ['id' => $id]);
+        $this->db->audit($actorUserId, 'delete', 'office_venues', $id, ['name' => $existing->name]);
+        $this->logger->info('Office venue deleted', ['id' => $id, 'name' => $existing->name]);
+    }
+
     private function nullable(?string $value): ?string
     {
         if ($value === null) {

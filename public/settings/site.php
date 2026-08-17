@@ -148,6 +148,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $venueRepo->deactivate((int) ($_POST['venue_id'] ?? 0), $user->id);
                 $message = 'Office / venue deactivated.';
                 $editingVenue = null;
+            } elseif ($action === 'delete_venue') {
+                if ($venueWarning !== null) {
+                    throw new RuntimeException($venueWarning);
+                }
+                $venueRepo->delete((int) ($_POST['venue_id'] ?? 0), $user->id);
+                $message = 'Office / venue deleted.';
+                $editingVenue = null;
             } elseif ($action === 'save_carrier') {
                 if ($carrierWarning !== null) {
                     throw new RuntimeException($carrierWarning);
@@ -337,12 +344,20 @@ $rails = $carrierWarning === null ? $carrierRepo->findByType(Carrier::TYPE_RAIL)
                                 data-country="<?= htmlspecialchars($venue->country, ENT_QUOTES) ?>"
                                 data-notes="<?= htmlspecialchars($venue->notes ?? '', ENT_QUOTES) ?>"
                                 data-active="<?= $venue->isActive ? '1' : '0' ?>">Edit</button>
-                            <?php if ($venue->isActive && $venue->id !== null): ?>
-                                <form method="post" style="display:inline">
+                            <?php if ($venue->id !== null): ?>
+                                <?php if ($venue->isActive): ?>
+                                    <form method="post" style="display:inline">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
+                                        <input type="hidden" name="action" value="remove_venue">
+                                        <input type="hidden" name="venue_id" value="<?= (int) $venue->id ?>">
+                                        <button type="submit" class="danger">Deactivate</button>
+                                    </form>
+                                <?php endif; ?>
+                                <form method="post" style="display:inline" onsubmit="return confirm('Delete this office / venue permanently?');">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(Csrf::token(), ENT_QUOTES) ?>">
-                                    <input type="hidden" name="action" value="remove_venue">
+                                    <input type="hidden" name="action" value="delete_venue">
                                     <input type="hidden" name="venue_id" value="<?= (int) $venue->id ?>">
-                                    <button type="submit" class="danger">Deactivate</button>
+                                    <button type="submit" class="danger">Delete</button>
                                 </form>
                             <?php endif; ?>
                         </td>

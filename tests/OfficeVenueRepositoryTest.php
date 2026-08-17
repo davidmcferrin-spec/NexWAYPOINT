@@ -73,4 +73,16 @@ final class OfficeVenueRepositoryTest extends NexWaypointTestCase
         self::assertSame('WHNT', $found->name);
         self::assertNull($repo->findByName('missing'));
     }
+
+    public function testDeleteRemovesRow(): void
+    {
+        $repo = new OfficeVenueRepository($this->db, $this->logger);
+        $created = $repo->create('KDAF', '8001 John W. Carpenter Freeway', 'Dallas', 'TX', null, 'USA', null, null, null);
+        self::assertNotNull($created->id);
+
+        $repo->delete((int) $created->id);
+        self::assertNull($repo->find((int) $created->id));
+        self::assertNull($repo->findByName('KDAF'));
+        self::assertSame([], $repo->findAll());
+    }
 }
